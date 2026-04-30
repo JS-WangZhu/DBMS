@@ -16,11 +16,11 @@
 
           <el-sub-menu v-if="hasAnyMenu(['mysql_instances','mysql_clusters','mysql_connections'])" index="db-mysql">
             <template #title>
-              <el-icon><Coin /></el-icon>
+              <el-icon class="db-brand-icon"><MysqlIcon /></el-icon>
               <span>MySQL</span>
             </template>
             <el-menu-item v-if="hasMenu('mysql_instances')" index="/databases/mysql/instances">
-              <el-icon><Coin /></el-icon>
+              <el-icon class="db-brand-icon"><MysqlIcon /></el-icon>
               <span>实例管理</span>
             </el-menu-item>
             <el-menu-item v-if="hasMenu('mysql_clusters')" index="/databases/mysql/clusters">
@@ -35,11 +35,11 @@
 
           <el-sub-menu v-if="hasAnyMenu(['mongodb_instances','mongodb_clusters'])" index="db-mongodb">
             <template #title>
-              <el-icon><Files /></el-icon>
+              <el-icon class="db-brand-icon"><MongoIcon /></el-icon>
               <span>MongoDB</span>
             </template>
             <el-menu-item v-if="hasMenu('mongodb_instances')" index="/databases/mongodb/instances">
-              <el-icon><Files /></el-icon>
+              <el-icon class="db-brand-icon"><MongoIcon /></el-icon>
               <span>实例管理</span>
             </el-menu-item>
             <el-menu-item v-if="hasMenu('mongodb_clusters')" index="/databases/mongodb/clusters">
@@ -50,11 +50,11 @@
 
           <el-sub-menu v-if="hasAnyMenu(['redis_instances','redis_clusters'])" index="db-redis">
             <template #title>
-              <el-icon><Lightning /></el-icon>
+              <el-icon class="db-brand-icon"><RedisIcon /></el-icon>
               <span>Redis</span>
             </template>
             <el-menu-item v-if="hasMenu('redis_instances')" index="/databases/redis/instances">
-              <el-icon><Lightning /></el-icon>
+              <el-icon class="db-brand-icon"><RedisIcon /></el-icon>
               <span>实例管理</span>
             </el-menu-item>
             <el-menu-item v-if="hasMenu('redis_clusters')" index="/databases/redis/clusters">
@@ -65,11 +65,11 @@
 
           <el-sub-menu v-if="hasAnyMenu(['doris_instances','doris_clusters'])" index="db-doris">
             <template #title>
-              <el-icon><DataAnalysis /></el-icon>
+              <el-icon class="db-brand-icon"><DorisIcon /></el-icon>
               <span>Doris</span>
             </template>
             <el-menu-item v-if="hasMenu('doris_instances')" index="/databases/doris/instances">
-              <el-icon><DataAnalysis /></el-icon>
+              <el-icon class="db-brand-icon"><DorisIcon /></el-icon>
               <span>实例管理</span>
             </el-menu-item>
             <el-menu-item v-if="hasMenu('doris_clusters')" index="/databases/doris/clusters">
@@ -116,11 +116,11 @@
               <span>策略管理</span>
             </template>
             <el-menu-item v-if="hasMenu('backup_mysql_policies')" index="/backups/mysql-policies">
-              <el-icon><Coin /></el-icon>
+              <el-icon class="db-brand-icon"><MysqlIcon /></el-icon>
               <span>MySQL策略</span>
             </el-menu-item>
             <el-menu-item v-if="hasMenu('backup_mongo_policies')" index="/backups/mongo-policies">
-              <el-icon><Files /></el-icon>
+              <el-icon class="db-brand-icon"><MongoIcon /></el-icon>
               <span>MongoDB策略</span>
             </el-menu-item>
           </el-sub-menu>
@@ -269,6 +269,10 @@ import {
   User,
   UserFilled,
 } from "@element-plus/icons-vue";
+import MysqlIcon from "../components/icons/MysqlIcon.vue";
+import MongoIcon from "../components/icons/MongoIcon.vue";
+import RedisIcon from "../components/icons/RedisIcon.vue";
+import DorisIcon from "../components/icons/DorisIcon.vue";
 import { listMyUserPermissions } from "../api/modules/backups";
 
 const router = useRouter();
