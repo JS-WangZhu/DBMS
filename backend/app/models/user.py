@@ -14,6 +14,12 @@ class User(db.Model, TimestampMixin):
     status = db.Column(db.String(16), nullable=False, default="active")
     auth_source = db.Column(db.String(16), nullable=False, default="local")
     ldap_dn = db.Column(db.String(255), nullable=True)
+    # SSO 绑定信息
+    sso_subject = db.Column(db.String(128), nullable=True, unique=True, index=True)
+    sso_provider = db.Column(db.String(64), nullable=True)
+    email = db.Column(db.String(128), nullable=True)
+    display_name = db.Column(db.String(128), nullable=True)
+    last_login_at = db.Column(db.DateTime, nullable=True)
 
     def set_password(self, raw_password: str) -> None:
         self.password_hash = generate_password_hash(raw_password)
@@ -31,6 +37,11 @@ class User(db.Model, TimestampMixin):
             "status": self.status,
             "auth_source": self.auth_source,
             "ldap_dn": self.ldap_dn,
+            "sso_subject": self.sso_subject,
+            "sso_provider": self.sso_provider,
+            "email": self.email,
+            "display_name": self.display_name,
+            "last_login_at": self.last_login_at.isoformat() if self.last_login_at else None,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }

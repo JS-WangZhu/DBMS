@@ -50,6 +50,7 @@ MENU_CATALOG = [
     {"key": "ai_model_config", "label": "AI模型管理"},
     {"key": "ha_config", "label": "高可用配置管理"},
     {"key": "inspection_param_config", "label": "巡检参数管理"},
+    {"key": "sso_config", "label": "SSO登录管理"},
 ]
 MENU_KEY_SET = {item["key"] for item in MENU_CATALOG}
 

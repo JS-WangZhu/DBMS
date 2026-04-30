@@ -23,6 +23,7 @@ import LoginView from "../views/LoginView.vue";
 import MysqlConnectionManageView from "../views/MysqlConnectionManageView.vue";
 import S3StorageConfigView from "../views/S3StorageConfigView.vue";
 import SsoCallbackView from "../views/SsoCallbackView.vue";
+import SsoConfigView from "../views/SsoConfigView.vue";
 import UserRoleGroupView from "../views/UserRoleGroupView.vue";
 import UserPermissionView from "../views/UserPermissionView.vue";
 import UsersView from "../views/UsersView.vue";
@@ -81,6 +82,7 @@ const routes = [
       { path: "/config/ai-models", component: AIModelConfigView, meta: { title: "AI模型管理" } },
       { path: "/config/ha", component: HAConfigView, meta: { title: "高可用配置管理" } },
       { path: "/config/inspection", component: InspectionParamConfigView, meta: { title: "巡检参数管理" } },
+      { path: "/config/sso", component: SsoConfigView, meta: { title: "SSO登录管理" } },
     ],
   },
 ];

@@ -234,7 +234,7 @@ function buildMenuTree(catalog, disabled) {
       "backup_records",
       { key: "backup_config", label: "配置管理", children: ["backup_tool_configs", "backup_agents", "backup_notify_targets", "backup_s3_storage", "backup_keys"] },
     ] },
-    { key: "config", label: "配置管理", children: ["ai_model_config", "ha_config"] },
+    { key: "config", label: "配置管理", children: ["ai_model_config", "ha_config", "inspection_param_config", "sso_config"] },
     { key: "users", label: "用户管理", children: ["users_info", "users_permissions", "users_role_groups"] },
   ];
 

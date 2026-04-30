@@ -72,3 +72,31 @@ CREATE TABLE user_role_groups (
         role_group_id INTEGER NOT NULL,
         PRIMARY KEY (id)
 );
+
+CREATE TABLE IF NOT EXISTS sso_configs (
+        created_at DATETIME NOT NULL DEFAULT now(),
+        updated_at DATETIME NOT NULL DEFAULT now(),
+        id INTEGER NOT NULL AUTO_INCREMENT,
+        enabled TINYINT(1) NOT NULL DEFAULT 0,
+        provider_name VARCHAR(64) NOT NULL DEFAULT 'SSO',
+        client_id VARCHAR(255) NOT NULL DEFAULT '',
+        client_secret VARCHAR(255) NOT NULL DEFAULT '',
+        authorize_url VARCHAR(512) NOT NULL DEFAULT '',
+        token_url VARCHAR(512) NOT NULL DEFAULT '',
+        userinfo_url VARCHAR(512) NOT NULL DEFAULT '',
+        scope VARCHAR(255) NOT NULL DEFAULT 'openid profile email',
+        redirect_uri VARCHAR(512) NOT NULL DEFAULT '',
+        username_field VARCHAR(64) NOT NULL DEFAULT 'preferred_username',
+        email_field VARCHAR(64) NOT NULL DEFAULT 'email',
+        PRIMARY KEY (id)
+);
+
+-- SSO 用户绑定字段 (users 表扩展)
+-- MySQL 8.0 支持多次运行: 若字段已存在会报错，请按需跳过
+ALTER TABLE users ADD COLUMN sso_subject  VARCHAR(128) NULL;
+ALTER TABLE users ADD COLUMN sso_provider VARCHAR(64)  NULL;
+ALTER TABLE users ADD COLUMN email        VARCHAR(128) NULL;
+ALTER TABLE users ADD COLUMN display_name VARCHAR(128) NULL;
+ALTER TABLE users ADD COLUMN last_login_at DATETIME    NULL;
+ALTER TABLE users ADD UNIQUE KEY uk_users_sso_subject (sso_subject);
+

@@ -95,24 +95,131 @@ onMounted(loadSsoMeta);
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, #d2e8ff 0%, #f2f9ff 40%, #dff3ef 100%);
+  position: relative;
+  overflow: hidden;
+  background:
+    radial-gradient(600px 500px at 20% 20%, rgba(45, 127, 249, 0.35), transparent 60%),
+    radial-gradient(700px 500px at 80% 80%, rgba(56, 189, 248, 0.30), transparent 60%),
+    linear-gradient(135deg, #e8f1ff 0%, #eaf6ff 50%, #edf9ff 100%);
+}
+
+.login-wrap::before,
+.login-wrap::after {
+  content: "";
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(70px);
+  pointer-events: none;
+  animation: float 10s ease-in-out infinite;
+}
+
+.login-wrap::before {
+  width: 340px;
+  height: 340px;
+  background: rgba(45, 127, 249, 0.35);
+  top: -80px;
+  left: -80px;
+}
+
+.login-wrap::after {
+  width: 380px;
+  height: 380px;
+  background: rgba(56, 189, 248, 0.32);
+  bottom: -100px;
+  right: -100px;
+  animation-delay: -4s;
+}
+
+@keyframes float {
+  0%, 100% {
+    transform: translate(0, 0);
+  }
+  50% {
+    transform: translate(30px, -20px);
+  }
 }
 
 .panel {
-  width: 360px;
-  padding: 28px;
-  border-radius: 16px;
-  background: rgba(255, 255, 255, 0.95);
-  box-shadow: 0 16px 36px rgba(8, 40, 71, 0.15);
+  width: 380px;
+  padding: 32px 30px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.82);
+  backdrop-filter: saturate(180%) blur(18px);
+  -webkit-backdrop-filter: saturate(180%) blur(18px);
+  box-shadow: 0 20px 50px rgba(30, 48, 80, 0.18);
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  position: relative;
+  z-index: 1;
+  animation: panelIn 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes panelIn {
+  0% {
+    opacity: 0;
+    transform: translateY(20px) scale(0.96);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
 h2 {
   margin-top: 0;
-  margin-bottom: 20px;
-  color: #0a3964;
+  margin-bottom: 22px;
+  text-align: center;
+  font-size: 22px;
+  letter-spacing: 0.5px;
+  background: linear-gradient(135deg, #1e6fff 0%, #38bdf8 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.panel :deep(.el-input__wrapper) {
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.7);
+  transition: box-shadow 0.2s ease, transform 0.15s ease;
+}
+
+.panel :deep(.el-input__wrapper.is-focus) {
+  box-shadow: 0 0 0 3px rgba(45, 127, 249, 0.22) !important;
+  transform: translateY(-1px);
+}
+
+.panel :deep(.el-button--primary) {
+  height: 40px;
+  font-weight: 600;
+  letter-spacing: 2px;
+  background: linear-gradient(135deg, #1e6fff 0%, #38bdf8 100%);
+  border: none;
+  border-radius: 10px;
+  box-shadow: 0 6px 18px rgba(45, 127, 249, 0.32);
+  transition: transform 0.15s ease, box-shadow 0.2s ease, filter 0.2s ease;
+}
+
+.panel :deep(.el-button--primary:hover) {
+  transform: translateY(-2px);
+  filter: brightness(1.05);
+  box-shadow: 0 10px 24px rgba(45, 127, 249, 0.42);
+}
+
+.panel :deep(.el-button--primary:active) {
+  transform: translateY(0) scale(0.98);
+  box-shadow: 0 4px 10px rgba(45, 127, 249, 0.28);
 }
 
 .sso-link-wrap {
   text-align: center;
+  margin-top: 4px;
+}
+
+.sso-link-wrap :deep(.el-link) {
+  transition: transform 0.15s ease, color 0.2s ease;
+}
+
+.sso-link-wrap :deep(.el-link:hover) {
+  transform: translateY(-1px);
+  color: #38bdf8;
 }
 </style>

@@ -20,6 +20,7 @@ from app.api.routes.monitoring import bp as monitoring_bp
 from app.api.routes.mysql import bp as mysql_bp
 from app.api.routes.redis import bp as redis_bp
 from app.api.routes.s3_storage import bp as s3_storage_bp
+from app.api.routes.sso_config import bp as sso_config_bp
 from app.api.routes.users import bp as users_bp
 from app.api.routes.user_permissions import bp as user_permissions_bp
 from app.api.routes.doc import bp as doc_bp
@@ -49,6 +50,7 @@ def register_blueprints(app):
     api_v1.register_blueprint(dns_bp)
     api_v1.register_blueprint(data_access_bp)
     api_v1.register_blueprint(s3_storage_bp)
+    api_v1.register_blueprint(sso_config_bp)
     api_v1.register_blueprint(ai_bp)
     api_v1.register_blueprint(doc_bp)
     api_v1.register_blueprint(external_bp)
