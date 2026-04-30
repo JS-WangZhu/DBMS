@@ -1,0 +1,39 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c \"import reportlab; import pypdf; print\\('OK'\\)\")",
+      "Bash(python -m pip install reportlab pypdf --quiet)",
+      "Bash(python -m pip install reportlab pypdf --user --quiet)",
+      "Bash(python -c \"import reportlab; import pypdf; print\\('reportlab and pypdf OK'\\)\")",
+      "Bash(python -m pip install \"pypdf<3.0\" --user --quiet)",
+      "Bash(python -m pip show pypdf)",
+      "Bash(python -m pip install PyPDF2 --user --quiet)",
+      "Bash(python -c \"import PyPDF2; print\\('PyPDF2 OK'\\)\")",
+      "Bash(npm --version)",
+      "Bash(python -c ':*)",
+      "Bash(python C:/Users/WZ/.claude/plugins/cache/minimax-skills/minimax-skills/1.0.0/skills/minimax-pdf/scripts/cover.py --tokens /tmp/tokens.json --out /tmp/cover.html)",
+      "Bash(python C:/Users/WZ/.claude/plugins/cache/minimax-skills/minimax-skills/1.0.0/skills/minimax-pdf/scripts/cover.py --tokens C:/Users/WZ/AppData/Local/Temp/tokens.json --out C:/Users/WZ/AppData/Local/Temp/cover.html)",
+      "Read(//c/ProgramData/Anaconda3/envs/**)",
+      "Bash(conda info:*)",
+      "Bash(/c/Users/WZ/AppData/Local/conda/conda/envs/py312/python --version)",
+      "Bash(/c/Users/WZ/AppData/Local/conda/conda/envs/py312/python -c 'import reportlab; import pypdf; print\\('\\\\''OK'\\\\''\\)')",
+      "Bash(/c/Users/WZ/AppData/Local/conda/conda/envs/py312/python -m pip install reportlab pypdf matplotlib -q)",
+      "Bash(/c/Users/WZ/AppData/Local/conda/conda/envs/py312/python -c 'import reportlab; import pypdf; print\\('\\\\''reportlab and pypdf OK'\\\\''\\)')",
+      "Bash(node -e \"require\\('playwright'\\)\")",
+      "Bash(npx playwright:*)",
+      "Bash(/c/Users/WZ/AppData/Local/conda/conda/envs/py312/python C:/Users/WZ/.claude/plugins/cache/minimax-skills/minimax-skills/1.0.0/skills/minimax-pdf/scripts/reformat_parse.py --input d:/个人项目空间/DBMS/docs/外部调用API.md --out C:/Users/WZ/AppData/Local/Temp/content.json)",
+      "Bash(/c/Users/WZ/AppData/Local/conda/conda/envs/py312/python C:/Users/WZ/.claude/plugins/cache/minimax-skills/minimax-skills/1.0.0/skills/minimax-pdf/scripts/palette.py --title 外部调用API --type terminal --author '' --date '' --out C:/Users/WZ/AppData/Local/Temp/tokens.json)",
+      "Bash(/c/Users/WZ/AppData/Local/conda/conda/envs/py312/python C:/Users/WZ/.claude/plugins/cache/minimax-skills/minimax-skills/1.0.0/skills/minimax-pdf/scripts/cover.py --tokens C:/Users/WZ/AppData/Local/Temp/tokens.json --out C:/Users/WZ/AppData/Local/Temp/cover.html)",
+      "Bash(node C:/Users/WZ/.claude/plugins/cache/minimax-skills/minimax-skills/1.0.0/skills/minimax-pdf/scripts/render_cover.js --input C:/Users/WZ/AppData/Local/Temp/cover.html --out C:/Users/WZ/AppData/Local/Temp/cover.pdf)",
+      "Bash(/c/Users/WZ/AppData/Local/conda/conda/envs/py312/python C:/Users/WZ/.claude/plugins/cache/minimax-skills/minimax-skills/1.0.0/skills/minimax-pdf/scripts/render_body.py --tokens C:/Users/WZ/AppData/Local/Temp/tokens.json --content C:/Users/WZ/AppData/Local/Temp/content.json --out C:/Users/WZ/AppData/Local/Temp/body.pdf)",
+      "Bash(/c/Users/WZ/AppData/Local/conda/conda/envs/py312/python C:/Users/WZ/.claude/plugins/cache/minimax-skills/minimax-skills/1.0.0/skills/minimax-pdf/scripts/merge.py --cover C:/Users/WZ/AppData/Local/Temp/cover.pdf --body C:/Users/WZ/AppData/Local/Temp/body.pdf --out d:/个人项目空间/DBMS/docs/外部调用API.pdf --title 外部调用API)",
+      "Bash(dir \"d:\\\\个人项目空间\\\\DBMS\\\\docs\\\\外部调用API.pdf\")",
+      "Read(//c/Windows/Fonts/**)",
+      "Bash(/c/Users/WZ/AppData/Local/conda/conda/envs/py312/python \"C:/Users/WZ/AppData/Local/Temp/gen_pdf.py\")"
+    ],
+    "additionalDirectories": [
+      "\\tmp",
+      "C:\\Users\\WZ\\AppData\\Local\\Temp"
+    ]
+  }
+}
