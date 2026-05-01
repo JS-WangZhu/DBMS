@@ -17,7 +17,7 @@
             集群检活
           </el-button>
           <el-input v-model="keyword" clearable placeholder="关键字搜索" class="keyword-input" size="small" />
-          <el-button type="primary" size="small" @click="openCreateDialog">新增{{ dbLabel }}实例</el-button>
+          <el-button v-if="isAdmin" type="primary" size="small" @click="openCreateDialog">新增{{ dbLabel }}实例</el-button>
           <el-button size="small" @click="reloadAll(true)">刷新</el-button>
         </div>
       </div>
@@ -37,11 +37,11 @@
         @row-mouse-leave="onRowMouseLeave"
       >
         <el-table-column prop="id" label="ID" min-width="50" />
-        <el-table-column prop="name" label="实例名" min-width="96" class-name="name-col" show-overflow-tooltip />
+        <el-table-column prop="name" label="实例名" min-width="120" class-name="name-col" />
         <el-table-column
           label="所属集群"
           class-name="cluster-col"
-          min-width="108"
+          min-width="100"
           show-overflow-tooltip
           :filters="clusterFilters"
           :filter-method="filterByCluster"
@@ -58,7 +58,7 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="地址" min-width="148" class-name="address-col" show-overflow-tooltip>
+        <el-table-column label="地址" min-width="120" class-name="address-col" show-overflow-tooltip>
           <template #default="scope">
             <div class="address-cell">
               <div class="address-domain">{{ rowDomain(scope.row) }}</div>
@@ -142,7 +142,7 @@
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column label="CPU使用率" min-width="86">
+        <el-table-column label="CPU" min-width="50">
           <template #default="scope">
             <el-tag v-if="hostCpuText(scope.row) !== '-'" size="small" :class="usageTagClass(hostCpuValue(scope.row))">
               {{ hostCpuText(scope.row) }}
@@ -150,7 +150,7 @@
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column label="内存使用率" min-width="86">
+        <el-table-column label="内存" min-width="50">
           <template #default="scope">
             <el-tag v-if="hostMemoryText(scope.row) !== '-'" size="small" :class="usageTagClass(hostMemoryValue(scope.row))">
               {{ hostMemoryText(scope.row) }}
@@ -158,7 +158,7 @@
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column label="数据盘使用率" min-width="110" show-overflow-tooltip>
+        <el-table-column label="数据盘" min-width="50">
           <template #default="scope">
             <el-tag v-if="hostDiskText(scope.row) !== '-'" size="small" :class="usageTagClass(hostDiskValue(scope.row))">
               {{ hostDiskText(scope.row) }}
@@ -168,7 +168,7 @@
         </el-table-column>
         <el-table-column
           label="物理机地址"
-          width="136"
+          width="100"
           class-name="physical-col"
           show-overflow-tooltip
           :filters="physicalAddressFilters"
@@ -182,7 +182,7 @@
         <template v-if="dbType === 'mysql'">
           <el-table-column
             label="版本"
-            min-width="70"
+            min-width="50"
             :filters="mysqlVersionFilters"
             :filter-method="filterByMysqlVersion"
             :filter-multiple="false"
@@ -217,12 +217,12 @@
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="复制延迟(s)" min-width="86">
+          <el-table-column label="复制延迟" min-width="86">
             <template #default="scope">
               {{ shouldHideReplicationDetails(scope.row) ? "-" : (mysqlStatus(scope.row).seconds_behind_master ?? "-") }}
             </template>
           </el-table-column>
-          <el-table-column label="IO/SQL线程" min-width="110">
+          <el-table-column label="复制线程" min-width="110">
             <template #default="scope">
               <div v-if="!shouldHideReplicationDetails(scope.row)" class="io-sql-tags">
                 <el-tag size="small" :type="threadTagType(mysqlStatus(scope.row).replica_io_running)">
@@ -263,12 +263,13 @@
         <el-table-column label="操作" min-width="90" class-name="op-col">
           <template #default="scope">
             <div class="op-actions">
-              <button type="button" class="table-link table-link--primary" @click.stop="openEditDialog(scope.row)">编辑</button>
-              <button type="button" class="table-link table-link--danger" @click.stop="removeInstance(scope.row)">删除</button>
+              <button v-if="isAdmin" type="button" class="table-link table-link--primary" @click.stop="openEditDialog(scope.row)">编辑</button>
+              <button v-if="isAdmin" type="button" class="table-link table-link--danger" @click.stop="removeInstance(scope.row)">删除</button>
+              <span v-if="!isAdmin" class="no-perm-hint">无权限</span>
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="心跳时间" min-width="96" show-overflow-tooltip>
+        <el-table-column label="心跳时间" min-width="50" show-overflow-tooltip>
           <template #default="scope">
             {{ lastCheckText(scope.row) }}
           </template>
@@ -406,6 +407,15 @@ const pageCfg = computed(() => CONFIG[dbType.value] || CONFIG.mysql);
 const dbIcon = computed(() => pageCfg.value.icon);
 const actionLabel = computed(() => pageCfg.value.actionLabel);
 const showUsername = computed(() => pageCfg.value.showUsername);
+
+const isAdmin = computed(() => {
+  try {
+    const user = JSON.parse(localStorage.getItem("dbms_user") || "{}");
+    return user.role === "admin";
+  } catch {
+    return false;
+  }
+});
 
 const loading = ref(false);
 const saving = ref(false);
@@ -2374,6 +2384,11 @@ watch(
   min-width: 40px;
 }
 
+.op-actions .no-perm-hint {
+  color: #94a3b8;
+  font-size: 12px;
+}
+
 .table-link {
   padding: 0;
   margin: 0;
@@ -2488,12 +2503,18 @@ watch(
   overflow: hidden;
 }
 
+:deep(.instance-table .name-col .cell) {
+  white-space: normal;
+  word-break: break-all;
+  line-height: 1.4;
+}
+
 :deep(.instance-table .name-col .cell > span) {
   display: block;
   width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  word-break: break-all;
+  line-height: 1.4;
 }
 
 :deep(.instance-table .address-col .cell) {

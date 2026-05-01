@@ -12,7 +12,7 @@
           </el-select>
           <el-input v-model="filters.keyword" placeholder="关键字" clearable style="width: 180px" />
           <el-button @click="loadClusters">筛选</el-button>
-          <el-button type="primary" @click="openCreateDialog">新建集群</el-button>
+          <el-button v-if="isAdmin" type="primary" @click="openCreateDialog">新建集群</el-button>
           <el-button @click="loadClusters">刷新</el-button>
         </div>
       </div>
@@ -53,8 +53,9 @@
       </el-table-column>
       <el-table-column label="操作" width="160">
         <template #default="scope">
-          <el-button link type="primary" @click="openEditDialog(scope.row)">编辑</el-button>
-          <el-button link type="danger" @click="removeCluster(scope.row)">删除</el-button>
+          <el-button v-if="isAdmin" link type="primary" @click="openEditDialog(scope.row)">编辑</el-button>
+          <el-button v-if="isAdmin" link type="danger" @click="removeCluster(scope.row)">删除</el-button>
+          <span v-if="!isAdmin" class="no-perm-hint">无权限</span>
         </template>
       </el-table-column>
     </el-table>
@@ -103,6 +104,15 @@ const route = useRoute();
 
 const dbType = computed(() => route.meta.dbType || "mysql");
 const dbLabel = computed(() => route.meta.dbLabel || "DB");
+
+const isAdmin = computed(() => {
+  try {
+    const user = JSON.parse(localStorage.getItem("dbms_user") || "{}");
+    return user.role === "admin";
+  } catch {
+    return false;
+  }
+});
 
 const loading = ref(false);
 const saving = ref(false);
@@ -383,5 +393,10 @@ watch(
   margin-top: 12px;
   display: flex;
   justify-content: flex-end;
+}
+
+.no-perm-hint {
+  color: #94a3b8;
+  font-size: 12px;
 }
 </style>

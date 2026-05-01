@@ -18,14 +18,18 @@ from app.models.user import User
 from app.services.audit import log_audit
 from app.services.data_access import (
     cancel_execution,
+    describe_mongo_collection,
     execute_mongo,
     execute_mongo_query_raw,
     execute_mongo_raw,
     execute_mysql,
     execute_redis,
     finish_execution,
-    list_mysql_databases,
+    list_mongo_collections,
     list_mongo_databases,
+    list_mysql_databases,
+    list_mysql_objects,
+    list_mysql_table_columns,
     normalize_payload,
     pick_instance,
     register_execution,
@@ -348,6 +352,61 @@ def list_databases_for_mongodb():
     return ok_response(data={"cluster_id": cluster.id, "instance_id": chosen.id, "databases": names})
 
 
+@bp.get("/mongodb/collections")
+@require_menu_permission("data_query")
+def list_collections_for_mongodb():
+    cluster_id = _safe_int(request.args.get("cluster_id"), 0)
+    database = (request.args.get("database") or "").strip()
+    if cluster_id <= 0:
+        return error_response("cluster_id is required", code=400)
+    if not database:
+        return error_response("database is required", code=400)
+    cluster = DatabaseCluster.query.get(cluster_id)
+    if not cluster:
+        return error_response("cluster not found", code=400)
+    if not require_cluster_permission(cluster.id, "query"):
+        return error_response("permission denied", code=403)
+    chosen = pick_instance("mongodb", cluster.id, None, for_change=False)
+    if not chosen:
+        return error_response("no available instance", code=400)
+    seed_nodes = _cluster_seed_nodes("mongodb", chosen.cluster_id)
+    try:
+        result = list_mongo_collections(chosen, database, seed_nodes=seed_nodes)
+    except Exception as exc:
+        return error_response(str(exc), code=400)
+    result["cluster_id"] = cluster.id
+    result["instance_id"] = chosen.id
+    return ok_response(data=result)
+
+
+@bp.get("/mongodb/collection-info")
+@require_menu_permission("data_query")
+def describe_collection_for_mongodb():
+    cluster_id = _safe_int(request.args.get("cluster_id"), 0)
+    database = (request.args.get("database") or "").strip()
+    collection = (request.args.get("collection") or "").strip()
+    if cluster_id <= 0:
+        return error_response("cluster_id is required", code=400)
+    if not database or not collection:
+        return error_response("database and collection are required", code=400)
+    cluster = DatabaseCluster.query.get(cluster_id)
+    if not cluster:
+        return error_response("cluster not found", code=400)
+    if not require_cluster_permission(cluster.id, "query"):
+        return error_response("permission denied", code=403)
+    chosen = pick_instance("mongodb", cluster.id, None, for_change=False)
+    if not chosen:
+        return error_response("no available instance", code=400)
+    seed_nodes = _cluster_seed_nodes("mongodb", chosen.cluster_id)
+    try:
+        info = describe_mongo_collection(chosen, database, collection, seed_nodes=seed_nodes)
+    except Exception as exc:
+        return error_response(str(exc), code=400)
+    info["cluster_id"] = cluster.id
+    info["instance_id"] = chosen.id
+    return ok_response(data=info)
+
+
 @bp.get("/mysql/databases")
 @require_menu_permission("data_query")
 def list_databases_for_mysql():
@@ -367,6 +426,65 @@ def list_databases_for_mysql():
     except Exception as exc:
         return error_response(str(exc), code=400)
     return ok_response(data={"cluster_id": cluster.id, "instance_id": chosen.id, "databases": names})
+
+
+@bp.get("/mysql/objects")
+@require_menu_permission("data_query")
+def list_objects_for_mysql():
+    cluster_id = _safe_int(request.args.get("cluster_id"), 0)
+    database = (request.args.get("database") or "").strip()
+    if cluster_id <= 0:
+        return error_response("cluster_id is required", code=400)
+    if not database:
+        return error_response("database is required", code=400)
+    cluster = DatabaseCluster.query.get(cluster_id)
+    if not cluster:
+        return error_response("cluster not found", code=400)
+    if not require_cluster_permission(cluster.id, "query"):
+        return error_response("permission denied", code=403)
+    chosen = pick_instance("mysql", cluster.id, None, for_change=False)
+    if not chosen:
+        return error_response("no available instance", code=400)
+    try:
+        result = list_mysql_objects(chosen, database)
+    except Exception as exc:
+        return error_response(str(exc), code=400)
+    result["cluster_id"] = cluster.id
+    result["instance_id"] = chosen.id
+    return ok_response(data=result)
+
+
+@bp.get("/mysql/columns")
+@require_menu_permission("data_query")
+def list_columns_for_mysql():
+    cluster_id = _safe_int(request.args.get("cluster_id"), 0)
+    database = (request.args.get("database") or "").strip()
+    table = (request.args.get("table") or "").strip()
+    if cluster_id <= 0:
+        return error_response("cluster_id is required", code=400)
+    if not database or not table:
+        return error_response("database and table are required", code=400)
+    cluster = DatabaseCluster.query.get(cluster_id)
+    if not cluster:
+        return error_response("cluster not found", code=400)
+    if not require_cluster_permission(cluster.id, "query"):
+        return error_response("permission denied", code=403)
+    chosen = pick_instance("mysql", cluster.id, None, for_change=False)
+    if not chosen:
+        return error_response("no available instance", code=400)
+    try:
+        columns = list_mysql_table_columns(chosen, database, table)
+    except Exception as exc:
+        return error_response(str(exc), code=400)
+    return ok_response(
+        data={
+            "cluster_id": cluster.id,
+            "instance_id": chosen.id,
+            "database": database,
+            "table": table,
+            "columns": columns,
+        }
+    )
 
 
 @bp.post("/query")

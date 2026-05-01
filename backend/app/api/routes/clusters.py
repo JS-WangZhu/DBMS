@@ -7,7 +7,7 @@ from types import SimpleNamespace
 from flask import Blueprint, Response, current_app, request, stream_with_context
 from sqlalchemy import Text, cast
 
-from app.api.routes.common import active_user_required, get_current_user, list_allowed_cluster_ids, require_cluster_permission
+from app.api.routes.common import active_user_required, admin_required, get_current_user, list_allowed_cluster_ids, require_cluster_permission
 from app.extensions import db
 from app.models.audit_log import AuditLog
 from app.models.db_asset import DatabaseCluster, DatabaseInstance
@@ -253,7 +253,7 @@ def list_clusters():
 
 
 @bp.post("")
-@active_user_required
+@admin_required
 def create_cluster():
     payload = request.get_json(silent=True) or {}
     name = (payload.get("name") or "").strip()
@@ -290,7 +290,7 @@ def create_cluster():
 
 
 @bp.patch("/<int:cluster_id>")
-@active_user_required
+@admin_required
 def update_cluster(cluster_id):
     payload = request.get_json(silent=True) or {}
 
@@ -320,7 +320,7 @@ def update_cluster(cluster_id):
 
 
 @bp.delete("/<int:cluster_id>")
-@active_user_required
+@admin_required
 def delete_cluster(cluster_id):
     cluster = DatabaseCluster.query.get_or_404(cluster_id)
     bound_instances = DatabaseInstance.query.filter_by(cluster_id=cluster.id).count()

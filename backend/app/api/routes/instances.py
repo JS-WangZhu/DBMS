@@ -1,6 +1,6 @@
 ﻿from flask import Blueprint, request
 
-from app.api.routes.common import active_user_required
+from app.api.routes.common import active_user_required, admin_required
 from app.extensions import db
 from app.models.db_asset import DatabaseInstance
 from app.models.monitor_snapshot import snapshot_model_for_instance
@@ -28,7 +28,7 @@ def list_instances():
 
 
 @bp.post("")
-@active_user_required
+@admin_required
 def create_instance():
     payload = request.get_json(silent=True) or {}
 
@@ -47,7 +47,7 @@ def create_instance():
 
 
 @bp.patch("/<int:instance_id>")
-@active_user_required
+@admin_required
 def update_instance(instance_id):
     payload = request.get_json(silent=True) or {}
     instance = DatabaseInstance.query.get_or_404(instance_id)
@@ -62,7 +62,7 @@ def update_instance(instance_id):
 
 
 @bp.delete("/<int:instance_id>")
-@active_user_required
+@admin_required
 def delete_instance(instance_id):
     instance = DatabaseInstance.query.get_or_404(instance_id)
     detail = {"name": instance.name, "db_type": instance.db_type, "host_input": instance.host_input, "port": instance.port}

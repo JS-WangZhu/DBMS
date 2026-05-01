@@ -42,6 +42,30 @@
                 style="width: 260px"
                 @input="onClusterSearchInput"
               />
+              <div class="cluster-access-bulk">
+                <div class="bulk-item">
+                  <span class="bulk-label">所有查询</span>
+                  <el-switch
+                    v-model="allCanQuery"
+                    :disabled="isAdminUser || !clusterPermissions.length"
+                    active-color="#10b981"
+                    inline-prompt
+                    active-text="开"
+                    inactive-text="关"
+                  />
+                </div>
+                <div class="bulk-item">
+                  <span class="bulk-label">所有变更</span>
+                  <el-switch
+                    v-model="allCanChange"
+                    :disabled="isAdminUser || !clusterPermissions.length"
+                    active-color="#ef4444"
+                    inline-prompt
+                    active-text="开"
+                    inactive-text="关"
+                  />
+                </div>
+              </div>
             </div>
             <el-table :data="pagedClusterPermissions" size="small" stripe>
               <el-table-column prop="label" label="集群" min-width="220" />
@@ -135,6 +159,20 @@ const filteredClusterPermissions = computed(() => {
 const pagedClusterPermissions = computed(() => {
   const start = (clusterPager.page - 1) * clusterPager.pageSize;
   return filteredClusterPermissions.value.slice(start, start + clusterPager.pageSize);
+});
+
+// 批量开关：所有查询 / 所有变更
+const allCanQuery = computed({
+  get: () => clusterPermissions.value.length > 0 && clusterPermissions.value.every((item) => item.can_query),
+  set: (val) => {
+    clusterPermissions.value.forEach((item) => { item.can_query = !!val; });
+  },
+});
+const allCanChange = computed({
+  get: () => clusterPermissions.value.length > 0 && clusterPermissions.value.every((item) => item.can_change),
+  set: (val) => {
+    clusterPermissions.value.forEach((item) => { item.can_change = !!val; });
+  },
 });
 
 async function loadUsers() {
@@ -320,6 +358,33 @@ onMounted(async () => {
 
 .cluster-access-toolbar {
   margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.cluster-access-bulk {
+  display: inline-flex;
+  align-items: center;
+  gap: 18px;
+  padding: 6px 14px;
+  background: linear-gradient(90deg, #f0fdf4 0%, #fef2f2 100%);
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+}
+
+.bulk-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.bulk-label {
+  font-size: 13px;
+  color: #475569;
+  font-weight: 500;
 }
 
 .cluster-access-pager {

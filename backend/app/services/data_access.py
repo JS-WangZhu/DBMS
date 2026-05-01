@@ -361,6 +361,131 @@ def list_mysql_databases(instance: DatabaseInstance, timeout_seconds: Optional[i
         connection.close()
 
 
+def _open_mysql_connection(instance: DatabaseInstance, database: Optional[str], timeout_seconds: Optional[int] = 10):
+    import pymysql
+
+    password = decrypt_secret(instance.password_encrypted) if instance.password_encrypted else None
+    host = instance.resolved_ip or instance.host_input
+    return pymysql.connect(
+        host=host,
+        port=instance.port,
+        user=instance.username,
+        password=password,
+        database=(database or None),
+        charset="utf8mb4",
+        connect_timeout=5,
+        read_timeout=timeout_seconds,
+        write_timeout=timeout_seconds,
+        cursorclass=pymysql.cursors.DictCursor,
+        autocommit=True,
+    )
+
+
+def list_mysql_objects(instance: DatabaseInstance, database: str, timeout_seconds: Optional[int] = 15):
+    """列出指定数据库下的 tables / views / procedures / functions / triggers / events。"""
+    if not database:
+        raise ValueError("database is required")
+    connection = _open_mysql_connection(instance, database, timeout_seconds=timeout_seconds)
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT TABLE_NAME AS name, IFNULL(TABLE_ROWS,0) AS row_count, "
+                "IFNULL(DATA_LENGTH,0)+IFNULL(INDEX_LENGTH,0) AS size_bytes "
+                "FROM information_schema.TABLES "
+                "WHERE TABLE_SCHEMA=%s AND TABLE_TYPE='BASE TABLE' "
+                "ORDER BY TABLE_NAME",
+                (database,),
+            )
+            tables = [
+                {
+                    "name": r.get("name"),
+                    "row_count": int(r.get("row_count") or 0),
+                    "size_bytes": int(r.get("size_bytes") or 0),
+                }
+                for r in cursor.fetchall() or []
+                if r.get("name")
+            ]
+            cursor.execute(
+                "SELECT TABLE_NAME AS name FROM information_schema.VIEWS "
+                "WHERE TABLE_SCHEMA=%s ORDER BY TABLE_NAME",
+                (database,),
+            )
+            views = [{"name": r.get("name")} for r in cursor.fetchall() or [] if r.get("name")]
+            cursor.execute(
+                "SELECT ROUTINE_NAME AS name FROM information_schema.ROUTINES "
+                "WHERE ROUTINE_SCHEMA=%s AND ROUTINE_TYPE='PROCEDURE' ORDER BY ROUTINE_NAME",
+                (database,),
+            )
+            procedures = [{"name": r.get("name")} for r in cursor.fetchall() or [] if r.get("name")]
+            cursor.execute(
+                "SELECT ROUTINE_NAME AS name FROM information_schema.ROUTINES "
+                "WHERE ROUTINE_SCHEMA=%s AND ROUTINE_TYPE='FUNCTION' ORDER BY ROUTINE_NAME",
+                (database,),
+            )
+            functions = [{"name": r.get("name")} for r in cursor.fetchall() or [] if r.get("name")]
+            cursor.execute(
+                "SELECT TRIGGER_NAME AS name FROM information_schema.TRIGGERS "
+                "WHERE TRIGGER_SCHEMA=%s ORDER BY TRIGGER_NAME",
+                (database,),
+            )
+            triggers = [{"name": r.get("name")} for r in cursor.fetchall() or [] if r.get("name")]
+            try:
+                cursor.execute(
+                    "SELECT EVENT_NAME AS name FROM information_schema.EVENTS "
+                    "WHERE EVENT_SCHEMA=%s ORDER BY EVENT_NAME",
+                    (database,),
+                )
+                events = [{"name": r.get("name")} for r in cursor.fetchall() or [] if r.get("name")]
+            except Exception:
+                events = []
+        return {
+            "database": database,
+            "tables": tables,
+            "views": views,
+            "procedures": procedures,
+            "functions": functions,
+            "triggers": triggers,
+            "events": events,
+        }
+    finally:
+        connection.close()
+
+
+def list_mysql_table_columns(instance: DatabaseInstance, database: str, table: str, timeout_seconds: Optional[int] = 10):
+    """返回指定表的字段元信息。"""
+    if not database or not table:
+        raise ValueError("database and table are required")
+    connection = _open_mysql_connection(instance, database, timeout_seconds=timeout_seconds)
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT COLUMN_NAME AS name, DATA_TYPE AS data_type, COLUMN_TYPE AS column_type, "
+                "IS_NULLABLE AS nullable, COLUMN_KEY AS column_key, COLUMN_DEFAULT AS column_default, "
+                "IFNULL(COLUMN_COMMENT,'') AS comment, ORDINAL_POSITION AS position "
+                "FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=%s AND TABLE_NAME=%s "
+                "ORDER BY ORDINAL_POSITION",
+                (database, table),
+            )
+            rows = cursor.fetchall() or []
+            columns = []
+            for r in rows:
+                columns.append(
+                    {
+                        "name": r.get("name"),
+                        "data_type": r.get("data_type"),
+                        "column_type": r.get("column_type"),
+                        "nullable": (str(r.get("nullable") or "").upper() == "YES"),
+                        "column_key": r.get("column_key") or "",
+                        "default": r.get("column_default"),
+                        "comment": r.get("comment") or "",
+                        "position": int(r.get("position") or 0),
+                    }
+                )
+            return columns
+    finally:
+        connection.close()
+
+
 def validate_mongo_query(payload):
     op = str(payload.get("op") or "").lower()
     if not op and isinstance(payload.get("command"), dict):
@@ -539,6 +664,139 @@ def list_mongo_databases(instance: DatabaseInstance, timeout_seconds: Optional[i
     try:
         names = client.list_database_names()
         return sorted(names)
+    finally:
+        client.close()
+
+
+def list_mongo_collections(
+    instance: DatabaseInstance,
+    database: str,
+    timeout_seconds: Optional[int] = 15,
+    seed_nodes: Optional[list] = None,
+):
+    """列出指定 MongoDB 数据库下的 collections / views。
+
+    返回结构：{ database, collections: [{name, type, doc_count, size_bytes}], views: [{name}] }
+    """
+    from pymongo import MongoClient
+
+    if not database:
+        raise ValueError("database is required")
+    password = decrypt_secret(instance.password_encrypted) if instance.password_encrypted else None
+    host = instance.resolved_ip or instance.host_input
+    connection_target = seed_nodes if seed_nodes else host
+    connection_port = None if seed_nodes else instance.port
+    client = MongoClient(
+        connection_target,
+        connection_port,
+        username=instance.username,
+        password=password,
+        authSource="admin",
+        directConnection=False,
+        tls=False,
+        serverSelectionTimeoutMS=5000,
+        connectTimeoutMS=5000,
+        socketTimeoutMS=timeout_seconds * 1000 if timeout_seconds else None,
+        appname="dbms-data-access",
+    )
+    try:
+        db = client.get_database(database)
+        # 使用 listCollections 获取 name + type（轻量）
+        infos = list(db.list_collections(filter=None, nameOnly=False))
+        collections = []
+        views = []
+        for info in infos:
+            name = info.get("name")
+            if not name:
+                continue
+            coll_type = str(info.get("type") or "collection").lower()
+            if coll_type == "view":
+                views.append({"name": name})
+                continue
+            collections.append({
+                "name": name,
+                "type": coll_type or "collection",
+                "doc_count": None,
+                "size_bytes": None,
+            })
+        collections.sort(key=lambda x: x.get("name") or "")
+        views.sort(key=lambda x: x.get("name") or "")
+        return {
+            "database": database,
+            "collections": collections,
+            "views": views,
+        }
+    finally:
+        client.close()
+
+
+def describe_mongo_collection(
+    instance: DatabaseInstance,
+    database: str,
+    collection: str,
+    timeout_seconds: Optional[int] = 10,
+    seed_nodes: Optional[list] = None,
+):
+    """返回 MongoDB 集合的概要信息（文档数、大小、索引、示例字段）。"""
+    from pymongo import MongoClient
+
+    if not database or not collection:
+        raise ValueError("database and collection are required")
+    password = decrypt_secret(instance.password_encrypted) if instance.password_encrypted else None
+    host = instance.resolved_ip or instance.host_input
+    connection_target = seed_nodes if seed_nodes else host
+    connection_port = None if seed_nodes else instance.port
+    client = MongoClient(
+        connection_target,
+        connection_port,
+        username=instance.username,
+        password=password,
+        authSource="admin",
+        directConnection=False,
+        tls=False,
+        serverSelectionTimeoutMS=5000,
+        connectTimeoutMS=5000,
+        socketTimeoutMS=timeout_seconds * 1000 if timeout_seconds else None,
+        appname="dbms-data-access",
+    )
+    try:
+        db = client.get_database(database)
+        stats = {}
+        try:
+            stats = db.command({"collStats": collection})
+        except Exception:
+            stats = {}
+        doc_count = stats.get("count")
+        size_bytes = stats.get("size") or stats.get("storageSize")
+        indexes = []
+        try:
+            for idx in db.get_collection(collection).list_indexes():
+                indexes.append({
+                    "name": idx.get("name"),
+                    "key": [list(item) for item in (idx.get("key") or {}).items()],
+                    "unique": bool(idx.get("unique") or False),
+                })
+        except Exception:
+            indexes = []
+        sample_fields = []
+        try:
+            sample_doc = db.get_collection(collection).find_one()
+            if isinstance(sample_doc, dict):
+                for key, value in sample_doc.items():
+                    sample_fields.append({
+                        "name": key,
+                        "type": type(value).__name__,
+                    })
+        except Exception:
+            sample_fields = []
+        return {
+            "database": database,
+            "collection": collection,
+            "doc_count": int(doc_count) if isinstance(doc_count, (int, float)) else None,
+            "size_bytes": int(size_bytes) if isinstance(size_bytes, (int, float)) else None,
+            "indexes": indexes,
+            "sample_fields": sample_fields,
+        }
     finally:
         client.close()
 

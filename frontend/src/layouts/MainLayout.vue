@@ -95,10 +95,10 @@
             <el-icon><Edit /></el-icon>
             <span>数据变更</span>
           </el-menu-item>
-          <el-menu-item v-if="hasMenu('ai_analysis')" index="/data-access/ai-analysis">
+          <!-- <el-menu-item v-if="hasMenu('ai_analysis')" index="/data-access/ai-analysis">
             <el-icon><Cpu /></el-icon>
             <span>智能分析</span>
-          </el-menu-item>
+          </el-menu-item> -->
           <el-menu-item v-if="hasMenu('data_history')" index="/data-access/history">
             <el-icon><Timer /></el-icon>
             <span>历史记录</span>

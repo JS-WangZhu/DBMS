@@ -12,10 +12,48 @@ export function listMongoDatabases(clusterId) {
   });
 }
 
+export function listMongoCollections(clusterId, database) {
+  return client.get("/data-access/mongodb/collections", {
+    params: {
+      cluster_id: clusterId,
+      database,
+    },
+  });
+}
+
+export function describeMongoCollection(clusterId, database, collection) {
+  return client.get("/data-access/mongodb/collection-info", {
+    params: {
+      cluster_id: clusterId,
+      database,
+      collection,
+    },
+  });
+}
+
 export function listMysqlDatabases(clusterId) {
   return client.get("/data-access/mysql/databases", {
     params: {
       cluster_id: clusterId,
+    },
+  });
+}
+
+export function listMysqlObjects(clusterId, database) {
+  return client.get("/data-access/mysql/objects", {
+    params: {
+      cluster_id: clusterId,
+      database,
+    },
+  });
+}
+
+export function listMysqlTableColumns(clusterId, database, table) {
+  return client.get("/data-access/mysql/columns", {
+    params: {
+      cluster_id: clusterId,
+      database,
+      table,
     },
   });
 }
