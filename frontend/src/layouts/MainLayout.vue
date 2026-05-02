@@ -105,7 +105,7 @@
           </el-menu-item>
         </el-sub-menu>
 
-        <el-sub-menu v-if="hasAnyMenu(['backup_mysql_policies','backup_mongo_policies','backup_records','backup_tool_configs','backup_agents','backup_notify_targets','backup_s3_storage','backup_keys'])" index="backup">
+        <el-sub-menu v-if="hasAnyMenu(['backup_mysql_policies','backup_mongo_policies','backup_records','backup_tool_configs','backup_agents','backup_s3_storage','backup_keys'])" index="backup">
           <template #title>
             <el-icon><Collection /></el-icon>
             <span>备份管理</span>
@@ -128,10 +128,10 @@
             <el-icon><DocumentCopy /></el-icon>
             <span>备份记录</span>
           </el-menu-item>
-          <el-sub-menu v-if="hasAnyMenu(['backup_tool_configs','backup_agents','backup_notify_targets','backup_s3_storage','backup_keys'])" index="backup-config">
+          <el-sub-menu v-if="hasAnyMenu(['backup_tool_configs','backup_agents','backup_s3_storage','backup_keys'])" index="backup-config">
             <template #title>
               <el-icon><Operation /></el-icon>
-              <span>配置管理</span>
+              <span>备份配置</span>
             </template>
             <el-menu-item v-if="hasMenu('backup_tool_configs')" index="/backups/tool-configs">
               <el-icon><Tools /></el-icon>
@@ -139,11 +139,7 @@
             </el-menu-item>
             <el-menu-item v-if="hasMenu('backup_agents')" index="/backups/agents">
               <el-icon><Monitor /></el-icon>
-              <span>Agent管理</span>
-            </el-menu-item>
-            <el-menu-item v-if="hasMenu('backup_notify_targets')" index="/backups/notify-targets">
-              <el-icon><Bell /></el-icon>
-              <span>通知地址管理</span>
+              <span>备份Agent管理</span>
             </el-menu-item>
             <el-menu-item v-if="hasMenu('backup_s3_storage')" index="/backups/s3-storage">
               <el-icon><Box /></el-icon>
@@ -175,14 +171,14 @@
           </el-menu-item>
         </el-sub-menu>
 
-        <el-sub-menu v-if="hasAnyMenu(['ai_model_config', 'ha_config', 'inspection_param_config', 'sso_config'])" index="config">
+        <el-sub-menu v-if="hasAnyMenu(['ai_model_config', 'ha_config', 'inspection_param_config', 'data_query_op_config', 'backup_notify_targets', 'sso_config'])" index="config">
           <template #title>
             <el-icon><Management /></el-icon>
             <span>配置管理</span>
           </template>
           <el-menu-item v-if="hasMenu('ai_model_config')" index="/config/ai-models">
             <el-icon><Monitor /></el-icon>
-            <span>AI模型管理</span>
+            <span>AI大模型管理</span>
           </el-menu-item>
           <el-menu-item v-if="hasMenu('ha_config')" index="/config/ha">
             <el-icon><Setting /></el-icon>
@@ -191,6 +187,14 @@
           <el-menu-item v-if="hasMenu('inspection_param_config')" index="/config/inspection">
             <el-icon><Operation /></el-icon>
             <span>巡检参数管理</span>
+          </el-menu-item>
+          <el-menu-item v-if="hasMenu('data_query_op_config')" index="/config/data-query-ops">
+            <el-icon><Operation /></el-icon>
+            <span>数据查询操作配置</span>
+          </el-menu-item>
+          <el-menu-item v-if="hasMenu('backup_notify_targets')" index="/backups/notify-targets">
+            <el-icon><Bell /></el-icon>
+            <span>通知地址管理</span>
           </el-menu-item>
           <el-menu-item v-if="hasMenu('sso_config')" index="/config/sso">
             <el-icon><Key /></el-icon>
@@ -339,6 +343,7 @@ const routePermissionMap = {
   "/config/ai-models": "ai_model_config",
   "/config/ha": "ha_config",
   "/config/inspection": "inspection_param_config",
+  "/config/data-query-ops": "data_query_op_config",
   "/config/sso": "sso_config",
 };
 

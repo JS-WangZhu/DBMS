@@ -4,6 +4,7 @@ from app.models.backup import BackupLog, BackupPolicy
 from app.models.backup_agent import BackupAgent
 from app.models.backup_tool_config import BackupToolConfig
 from app.models.backup_key import BackupKey
+from app.models.data_query_op import DataQueryOperationConfig
 from app.models.db_asset import DatabaseCluster, DatabaseInstance
 from app.models.ha_config import HAConfig
 from app.models.inspection import InspectionAlert, InspectionConfig
@@ -36,6 +37,7 @@ __all__ = [
     "BackupToolConfig",
     "BackupKey",
     "BackupNotifyTarget",
+    "DataQueryOperationConfig",
     "DatabaseCluster",
     "DatabaseInstance",
     "HAConfig",

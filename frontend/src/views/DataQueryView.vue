@@ -334,6 +334,7 @@
                     :label="col"
                     min-width="140"
                     show-overflow-tooltip
+                    :formatter="formatResultCell"
                   />
                 </el-table>
                 <el-tree
@@ -349,7 +350,7 @@
                   <el-pagination
                     v-model:current-page="currentPage"
                     v-model:page-size="pageSize"
-                    :page-sizes="[20, 50, 100, 200]"
+                    :page-sizes="[15, 30, 50, 100, 200]"
                     :total="tableRows.length"
                     layout="total, sizes, prev, pager, next, jumper"
                     background
@@ -437,7 +438,7 @@ const tableColumns = ref([]);
 const tableRows = ref([]);
 const rawResult = ref("");
 const currentPage = ref(1);
-const pageSize = ref(50);
+const pageSize = ref(15);
 const mongoDatabases = ref([]);
 const mongoDatabasesLoading = ref(false);
 const mysqlDatabases = ref([]);
@@ -787,6 +788,30 @@ function formatSize(bytes) {
   return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`;
 }
 
+// 结果集单元格格式化：自动将 datetime 类型值渲染为 yyyy-MM-dd HH:mm:ss
+const DATETIME_PATTERNS = [
+  // ISO: 2024-01-01T10:00:00(.xxx)(Z|+08:00)
+  /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?$/,
+];
+function formatDatetimeValue(value) {
+  if (value == null) return value;
+  if (typeof value !== "string") return value;
+  const str = value.trim();
+  if (!str) return value;
+  for (const re of DATETIME_PATTERNS) {
+    const m = re.exec(str);
+    if (m) {
+      return `${m[1]}-${m[2]}-${m[3]} ${m[4]}:${m[5]}:${m[6]}`;
+    }
+  }
+  return value;
+}
+function formatResultCell(row, column, cellValue) {
+  if (cellValue == null) return cellValue;
+  if (typeof cellValue === "string") return formatDatetimeValue(cellValue);
+  return cellValue;
+}
+
 function filterSchemaNode(keyword, data) {
   if (!keyword) return true;
   if (data.kind === "group") return true;
@@ -870,17 +895,6 @@ function buildMongoCollectionChildren(collectionName, info) {
         tooltip: (idx.key || []).map((it) => `${it[0]}:${it[1]}`).join(", "),
         leaf: true,
       })),
-    });
-  }
-  if (typeof info.doc_count === "number" || typeof info.size_bytes === "number") {
-    const stat = [];
-    if (typeof info.doc_count === "number") stat.push(`文档 ${info.doc_count}`);
-    if (typeof info.size_bytes === "number") stat.push(formatSize(info.size_bytes));
-    nodes.push({
-      key: `mongo-stat:${collectionName}`,
-      label: stat.join(" · ") || "统计",
-      kind: "info",
-      leaf: true,
     });
   }
   if (!nodes.length) {

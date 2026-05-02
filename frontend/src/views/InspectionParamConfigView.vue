@@ -1,78 +1,200 @@
 <template>
   <div class="page">
-    <el-card>
+    <div class="page-header">
+      <div class="page-header-left">
+        <div class="page-title">巡检参数管理</div>
+        <div class="page-subtitle">配置巡检周期、告警阈值与通知策略</div>
+      </div>
+      <div class="page-header-actions">
+        <el-button :icon="Refresh" @click="loadData">刷新</el-button>
+        <el-button type="primary" :loading="saving" :icon="Check" @click="saveConfig">保存</el-button>
+      </div>
+    </div>
+
+    <!-- 基础设置 -->
+    <el-card class="section-card" shadow="never">
       <template #header>
-        <div class="header-row">
-          <span>巡检参数管理</span>
-          <div class="header-actions">
-            <el-button @click="loadData">刷新</el-button>
-            <el-button type="primary" :loading="saving" @click="saveConfig">保存</el-button>
-          </div>
+        <div class="section-header section-header--blue">
+          <el-icon><Setting /></el-icon>
+          <span class="section-title">基础设置</span>
+          <span class="section-desc">控制巡检任务的调度与采集行为</span>
         </div>
       </template>
+      <el-form :model="form" label-width="140px" label-position="right">
+        <el-row :gutter="24">
+          <el-col :xs="24" :sm="12">
+            <el-form-item label="启用周期巡检">
+              <el-switch v-model="form.enabled" active-text="开" inactive-text="关" inline-prompt />
+              <span class="hint-text">关闭后定时巡检任务停止</span>
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :sm="12">
+            <el-form-item label="巡检周期（秒）">
+              <el-input-number v-model="form.interval_seconds" :min="10" :step="10" controls-position="right" style="width: 180px" />
+              <span class="hint-text">最小 10 秒，建议 30~120 秒</span>
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :sm="12">
+            <el-form-item label="采集超时（秒）">
+              <el-input-number v-model="form.collect_timeout_seconds" :min="3" :step="1" controls-position="right" style="width: 180px" />
+              <span class="hint-text">单实例采集最长等待时间</span>
+            </el-form-item>
+          </el-col>
+        </el-row>
+      </el-form>
+    </el-card>
 
-      <el-form :model="form" label-width="180px">
-        <el-form-item label="启用周期巡检">
-          <el-switch v-model="form.enabled" />
-        </el-form-item>
-        <el-form-item label="巡检周期（秒）">
-          <el-input-number v-model="form.interval_seconds" :min="10" :step="10" />
-        </el-form-item>
-        <el-form-item label="采集超时（秒）">
-          <el-input-number v-model="form.collect_timeout_seconds" :min="3" :step="1" />
-        </el-form-item>
-        <el-form-item label="启用异常通知">
-          <el-switch v-model="form.notify_enabled" />
-        </el-form-item>
-        <el-form-item label="启用恢复通知">
-          <el-switch v-model="form.notify_recovery" />
-        </el-form-item>
-        <el-form-item label="通知地址">
-          <el-select v-model="form.notify_target_ids" multiple filterable clearable style="width: 100%">
-            <el-option
-              v-for="item in notifyTargets"
-              :key="item.id"
-              :label="`${item.name} (${item.channel})`"
-              :value="item.id"
-            />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="通知静默集群">
-          <el-select v-model="form.muted_cluster_ids" multiple filterable clearable style="width: 100%">
-            <el-option
-              v-for="item in clusters"
-              :key="item.id"
-              :label="`${item.business_line || '-'} / ${item.environment || '-'} / ${item.name}`"
-              :value="item.id"
-            />
-          </el-select>
-        </el-form-item>
+    <!-- 通知设置 -->
+    <el-card class="section-card" shadow="never">
+      <template #header>
+        <div class="section-header section-header--amber">
+          <el-icon><Bell /></el-icon>
+          <span class="section-title">通知设置</span>
+          <span class="section-desc">告警触发及恢复后的通知推送</span>
+        </div>
+      </template>
+      <el-form :model="form" label-width="140px" label-position="right">
+        <el-row :gutter="24">
+          <el-col :xs="24" :sm="12">
+            <el-form-item label="启用异常通知">
+              <el-switch v-model="form.notify_enabled" active-text="开" inactive-text="关" inline-prompt />
+              <span class="hint-text">异常产生时推送到通知地址</span>
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :sm="12">
+            <el-form-item label="启用恢复通知">
+              <el-switch v-model="form.notify_recovery" active-text="开" inactive-text="关" inline-prompt />
+              <span class="hint-text">告警恢复后推送提示</span>
+            </el-form-item>
+          </el-col>
+          <el-col :span="24">
+            <el-form-item label="通知地址">
+              <el-select
+                v-model="form.notify_target_ids"
+                multiple
+                filterable
+                clearable
+                placeholder="选择通知地址（企业微信/钉钉/邮件等）"
+                style="width: 100%"
+              >
+                <el-option
+                  v-for="item in notifyTargets"
+                  :key="item.id"
+                  :label="`${item.name} (${item.channel})`"
+                  :value="item.id"
+                />
+              </el-select>
+            </el-form-item>
+          </el-col>
+          <el-col :span="24">
+            <el-form-item label="通知静默集群">
+              <el-select
+                v-model="form.muted_cluster_ids"
+                multiple
+                filterable
+                clearable
+                placeholder="选择免告警集群（不触发通知）"
+                style="width: 100%"
+              >
+                <el-option
+                  v-for="item in clusters"
+                  :key="item.id"
+                  :label="`${item.business_line || '-'} / ${item.environment || '-'} / ${item.name}`"
+                  :value="item.id"
+                />
+              </el-select>
+            </el-form-item>
+          </el-col>
+        </el-row>
+      </el-form>
+    </el-card>
 
-        <el-divider>异常阈值</el-divider>
-        <el-form-item label="MySQL复制延迟阈值（秒）">
-          <el-input-number v-model="form.thresholds.mysql_replication_lag_seconds" :min="1" />
-        </el-form-item>
-        <el-form-item label="MySQL连接使用率阈值（%）">
-          <el-input-number v-model="form.thresholds.mysql_connection_usage_pct" :min="1" :max="100" />
-        </el-form-item>
-        <el-form-item label="MongoDB复制延迟阈值（秒）">
-          <el-input-number v-model="form.thresholds.mongodb_repl_lag_seconds" :min="1" />
-        </el-form-item>
-        <el-form-item label="MongoDB缓存使用率阈值（%）">
-          <el-input-number v-model="form.thresholds.mongodb_cache_used_pct" :min="1" :max="100" />
-        </el-form-item>
-        <el-form-item label="Redis内存使用率阈值（%）">
-          <el-input-number v-model="form.thresholds.redis_memory_usage_pct" :min="1" :max="100" />
-        </el-form-item>
-        <el-form-item label="主机CPU使用率阈值（%）">
-          <el-input-number v-model="form.thresholds.host_cpu_usage_pct" :min="1" :max="100" />
-        </el-form-item>
-        <el-form-item label="主机内存使用率阈值（%）">
-          <el-input-number v-model="form.thresholds.host_memory_usage_pct" :min="1" :max="100" />
-        </el-form-item>
-        <el-form-item label="主机磁盘使用率阈值（%）">
-          <el-input-number v-model="form.thresholds.host_data_disk_usage_pct" :min="1" :max="100" />
-        </el-form-item>
+    <!-- 异常阈值 -->
+    <el-card class="section-card" shadow="never">
+      <template #header>
+        <div class="section-header section-header--rose">
+          <el-icon><Warning /></el-icon>
+          <span class="section-title">异常阈值</span>
+          <span class="section-desc">超过阈值后触发告警</span>
+        </div>
+      </template>
+      <el-form :model="form" label-width="160px" label-position="right">
+        <!-- MySQL -->
+        <div class="threshold-group">
+          <div class="threshold-group-title">
+            <span class="group-badge group-badge--mysql">MySQL</span>
+          </div>
+          <el-row :gutter="24">
+            <el-col :xs="24" :sm="12">
+              <el-form-item label="复制延迟阈值（秒）">
+                <el-input-number v-model="form.thresholds.mysql_replication_lag_seconds" :min="1" controls-position="right" style="width: 180px" />
+              </el-form-item>
+            </el-col>
+            <el-col :xs="24" :sm="12">
+              <el-form-item label="连接使用率（%）">
+                <el-input-number v-model="form.thresholds.mysql_connection_usage_pct" :min="1" :max="100" controls-position="right" style="width: 180px" />
+              </el-form-item>
+            </el-col>
+          </el-row>
+        </div>
+
+        <!-- MongoDB -->
+        <div class="threshold-group">
+          <div class="threshold-group-title">
+            <span class="group-badge group-badge--mongodb">MongoDB</span>
+          </div>
+          <el-row :gutter="24">
+            <el-col :xs="24" :sm="12">
+              <el-form-item label="复制延迟阈值（秒）">
+                <el-input-number v-model="form.thresholds.mongodb_repl_lag_seconds" :min="1" controls-position="right" style="width: 180px" />
+              </el-form-item>
+            </el-col>
+            <el-col :xs="24" :sm="12">
+              <el-form-item label="缓存使用率（%）">
+                <el-input-number v-model="form.thresholds.mongodb_cache_used_pct" :min="1" :max="100" controls-position="right" style="width: 180px" />
+              </el-form-item>
+            </el-col>
+          </el-row>
+        </div>
+
+        <!-- Redis -->
+        <div class="threshold-group">
+          <div class="threshold-group-title">
+            <span class="group-badge group-badge--redis">Redis</span>
+          </div>
+          <el-row :gutter="24">
+            <el-col :xs="24" :sm="12">
+              <el-form-item label="内存使用率（%）">
+                <el-input-number v-model="form.thresholds.redis_memory_usage_pct" :min="1" :max="100" controls-position="right" style="width: 180px" />
+              </el-form-item>
+            </el-col>
+          </el-row>
+        </div>
+
+        <!-- 主机 -->
+        <div class="threshold-group">
+          <div class="threshold-group-title">
+            <span class="group-badge group-badge--host">主机</span>
+          </div>
+          <el-row :gutter="24">
+            <el-col :xs="24" :sm="12">
+              <el-form-item label="CPU 使用率（%）">
+                <el-input-number v-model="form.thresholds.host_cpu_usage_pct" :min="1" :max="100" controls-position="right" style="width: 180px" />
+                <el-tag size="small" type="info" effect="plain" class="hint-tag">按近 10 分钟均值告警</el-tag>
+              </el-form-item>
+            </el-col>
+            <el-col :xs="24" :sm="12">
+              <el-form-item label="内存使用率（%）">
+                <el-input-number v-model="form.thresholds.host_memory_usage_pct" :min="1" :max="100" controls-position="right" style="width: 180px" />
+              </el-form-item>
+            </el-col>
+            <el-col :xs="24" :sm="12">
+              <el-form-item label="磁盘使用率（%）">
+                <el-input-number v-model="form.thresholds.host_data_disk_usage_pct" :min="1" :max="100" controls-position="right" style="width: 180px" />
+              </el-form-item>
+            </el-col>
+          </el-row>
+        </div>
       </el-form>
     </el-card>
   </div>
@@ -81,6 +203,7 @@
 <script setup>
 import { onMounted, reactive, ref } from "vue";
 import { ElMessage } from "element-plus";
+import { Bell, Check, Refresh, Setting, Warning } from "@element-plus/icons-vue";
 import { getInspectionConfig, getInspectionConfigOptions, updateInspectionConfig } from "../api/modules/inspection";
 
 const saving = ref(false);
@@ -160,7 +283,125 @@ onMounted(loadData);
 </script>
 
 <style scoped>
-.page { padding: 20px; }
-.header-row { display: flex; justify-content: space-between; align-items: center; }
-.header-actions { display: flex; gap: 10px; }
+.page {
+  padding: 16px 20px 24px;
+}
+
+/* ---------- 页头 ---------- */
+.page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  margin-bottom: 14px;
+  padding: 12px 16px;
+  background: linear-gradient(135deg, #eef4ff 0%, #f0f9ff 100%);
+  border: 1px solid #dbeafe;
+  border-radius: 10px;
+}
+.page-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: #0f172a;
+}
+.page-subtitle {
+  margin-top: 4px;
+  font-size: 12.5px;
+  color: #64748b;
+}
+.page-header-actions {
+  display: flex;
+  gap: 10px;
+}
+
+/* ---------- 分组卡片 ---------- */
+.section-card {
+  margin-bottom: 14px;
+  border-radius: 10px;
+  border: 1px solid #e5e7eb;
+}
+.section-card :deep(.el-card__header) {
+  padding: 12px 16px;
+  background: #fafbfc;
+  border-bottom: 1px solid #eef0f3;
+}
+.section-card :deep(.el-card__body) {
+  padding: 20px 16px 4px;
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.section-header .el-icon {
+  font-size: 16px;
+}
+.section-title {
+  font-size: 14.5px;
+  font-weight: 600;
+  color: #0f172a;
+}
+.section-desc {
+  margin-left: 6px;
+  color: #94a3b8;
+  font-size: 12.5px;
+}
+.section-header--blue .el-icon { color: #2563eb; }
+.section-header--amber .el-icon { color: #f59e0b; }
+.section-header--rose .el-icon { color: #e11d48; }
+
+/* ---------- 阈值分组 ---------- */
+.threshold-group {
+  padding: 6px 0 0;
+  margin-bottom: 4px;
+  border-top: 1px dashed #eef0f3;
+}
+.threshold-group:first-child {
+  border-top: none;
+}
+.threshold-group-title {
+  margin: 0 0 6px 4px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.group-badge {
+  display: inline-block;
+  padding: 2px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 4px;
+  letter-spacing: 0.3px;
+}
+.group-badge--mysql {
+  color: #1565c0;
+  background: #e3f2fd;
+  border: 1px solid #bbdefb;
+}
+.group-badge--mongodb {
+  color: #2e7d32;
+  background: #e8f5e9;
+  border: 1px solid #c8e6c9;
+}
+.group-badge--redis {
+  color: #c62828;
+  background: #ffebee;
+  border: 1px solid #ffcdd2;
+}
+.group-badge--host {
+  color: #6d28d9;
+  background: #f5f3ff;
+  border: 1px solid #ddd6fe;
+}
+
+/* ---------- 提示 ---------- */
+.hint-text {
+  margin-left: 10px;
+  color: #94a3b8;
+  font-size: 12px;
+}
+.hint-tag {
+  margin-left: 10px;
+}
 </style>

@@ -25,10 +25,11 @@ def create_app(config_object=None):
 
     with app.app_context():
         from app import models  # noqa: F401
-        from app.services.bootstrap import ensure_admin_user, ensure_backup_extra_columns
+        from app.services.bootstrap import ensure_admin_user, ensure_backup_extra_columns, seed_data_query_operations
 
         db.create_all()
         ensure_backup_extra_columns()
+        seed_data_query_operations()
         if app.config.get("AUTH_MODE") == "local" and app.config.get("AUTO_BOOTSTRAP_ADMIN"):
             ensure_admin_user(
                 username=app.config.get("BOOTSTRAP_ADMIN_USERNAME", "admin"),

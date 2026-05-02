@@ -1,6 +1,7 @@
 import json
 import re
 import threading
+import time
 from typing import Optional
 
 from app.models.db_asset import DatabaseCluster, DatabaseInstance
@@ -31,6 +32,67 @@ MONGO_WRITE_COMMANDS = {
 }
 ACTIVE_EXECUTIONS = {}
 ACTIVE_EXECUTIONS_LOCK = threading.Lock()
+
+# ---------------- 数据查询允许操作配置缓存 ----------------
+# TTL 内复用数据库读取的白名单，避免每次查询都走 DB；配置更新后通过
+# invalidate_query_ops_cache() 立即失效。数据表未导入或查询异常时，fallback 到
+# 硬编码的 MySQL_FALLBACK / MONGO_READONLY_COMMANDS / REDIS_FALLBACK 保证服务可用。
+_QUERY_OPS_CACHE = {"data": None, "ts": 0.0}
+_QUERY_OPS_CACHE_TTL = 60.0
+_QUERY_OPS_LOCK = threading.Lock()
+
+_MYSQL_QUERY_FALLBACK = {"select"}
+_REDIS_QUERY_FALLBACK = {
+    "get", "mget", "hget", "hgetall", "hexists",
+    "exists", "scard", "smembers", "lrange", "zrange", "zrangebyscore",
+}
+
+
+def _load_query_ops_from_db():
+    """从数据库读取启用的允许操作，返回按 db_type 分组的小写关键字 set。"""
+    try:
+        from app.models.data_query_op import DataQueryOperationConfig
+
+        rows = DataQueryOperationConfig.query.filter_by(enabled=True).all()
+    except Exception:
+        return None
+    groups = {"mysql": set(), "mongodb": set(), "redis": set()}
+    for row in rows:
+        if not row.op_key:
+            continue
+        groups.setdefault(row.db_type, set()).add(row.op_key.strip().lower())
+    return groups
+
+
+def _get_query_ops(db_type: str):
+    """获取指定数据库类型的允许操作小写 set，自动缓存并 fallback。"""
+    now = time.monotonic()
+    with _QUERY_OPS_LOCK:
+        data = _QUERY_OPS_CACHE.get("data")
+        ts = _QUERY_OPS_CACHE.get("ts") or 0.0
+        if data is None or (now - ts) > _QUERY_OPS_CACHE_TTL:
+            refreshed = _load_query_ops_from_db()
+            if refreshed is not None:
+                _QUERY_OPS_CACHE["data"] = refreshed
+                _QUERY_OPS_CACHE["ts"] = now
+                data = refreshed
+    if not data or not data.get(db_type):
+        # fallback
+        if db_type == "mysql":
+            return set(_MYSQL_QUERY_FALLBACK)
+        if db_type == "mongodb":
+            return set(MONGO_READONLY_COMMANDS)
+        if db_type == "redis":
+            return set(_REDIS_QUERY_FALLBACK)
+        return set()
+    return set(data.get(db_type) or set())
+
+
+def invalidate_query_ops_cache():
+    """立即失效查询允许操作缓存，供 API 增删改后调用。"""
+    with _QUERY_OPS_LOCK:
+        _QUERY_OPS_CACHE["data"] = None
+        _QUERY_OPS_CACHE["ts"] = 0.0
 
 
 def register_execution(execution_id: str, user_id: Optional[int], db_type: str):
@@ -198,8 +260,12 @@ def _safe_positive_int(value, default_value: int):
 
 def validate_mysql_query(sql: str):
     keyword = _first_keyword(sql)
-    if keyword != "select":
-        return False, "only SELECT statements are allowed"
+    if not keyword:
+        return False, "sql is required"
+    allowed = _get_query_ops("mysql")
+    if keyword not in allowed:
+        allowed_display = ", ".join(sorted(k.upper() for k in allowed)) or "SELECT"
+        return False, f"only allowed operations: {allowed_display}"
     if ";" in sql.strip().rstrip(";"):
         return False, "multiple statements are not allowed"
     return True, None
@@ -328,6 +394,8 @@ def execute_mysql(
                 if truncated:
                     rows = rows[:QUERY_ROW_LIMIT]
                 columns = [col[0] for col in cursor.description]
+                # 将 datetime/date/Decimal 等类型转换为 JSON 可序列化的字符串，datetime 输出为 ISO 格式
+                rows = [_json_safe(row) for row in rows]
                 return {"columns": columns, "rows": rows, "truncated": truncated, "limit": QUERY_ROW_LIMIT}
             return {"columns": [], "rows": [], "affected_rows": cursor.rowcount}
     finally:
@@ -490,16 +558,19 @@ def validate_mongo_query(payload):
     op = str(payload.get("op") or "").lower()
     if not op and isinstance(payload.get("command"), dict):
         op = "run_command"
-    if op not in {"find", "find_one", "aggregate", "count_documents"}:
-        if op != "run_command":
-            return False, "unsupported mongodb query op"
+    allowed = _get_query_ops("mongodb")
+    # 基本 op 必须在启用列表中（find/find_one/aggregate/count_documents/run_command 等）
+    if op not in allowed:
+        allowed_display = ", ".join(sorted(allowed)) or "find"
+        return False, f"only allowed mongodb operations: {allowed_display}"
     if op == "run_command":
         command = payload.get("command")
         if not isinstance(command, dict) or not command:
             return False, "mongodb run_command requires non-empty command object"
         command_name = str(next(iter(command.keys()))).lower()
-        if command_name not in MONGO_READONLY_COMMANDS:
-            return False, "mongodb run_command only allows read-only commands"
+        if command_name not in allowed:
+            allowed_display = ", ".join(sorted(allowed)) or "find"
+            return False, f"mongodb run_command only allows: {allowed_display}"
     return True, None
 
 
@@ -802,10 +873,13 @@ def describe_mongo_collection(
 
 
 def validate_redis_query(payload):
-    cmd = str(payload.get("command") or "").upper()
-    allowed = {"GET", "MGET", "HGET", "HGETALL", "HEXISTS", "EXISTS", "SCARD", "SMEMBERS", "LRANGE", "ZRANGE", "ZRANGEBYSCORE"}
-    if cmd not in allowed:
-        return False, "unsupported redis query command"
+    cmd = str(payload.get("command") or "").strip()
+    if not cmd:
+        return False, "redis command is required"
+    allowed = _get_query_ops("redis")
+    if cmd.lower() not in allowed:
+        allowed_display = ", ".join(sorted(k.upper() for k in allowed)) or "GET"
+        return False, f"only allowed redis commands: {allowed_display}"
     return True, None
 
 

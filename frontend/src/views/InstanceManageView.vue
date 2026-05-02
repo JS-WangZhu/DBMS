@@ -226,7 +226,7 @@
             <template #default="scope">
               <div v-if="!shouldHideReplicationDetails(scope.row)" class="io-sql-tags">
                 <el-tag size="small" :type="threadTagType(mysqlStatus(scope.row).replica_io_running)">
-                  {{ threadLabel(mysqlStatus(scope.row).replica_io_running, "IO") }}
+                  {{ threadLabel(mysqlStatus(scope.row).replica_io_running, "I/O") }}
                 </el-tag>
                 <el-tag size="small" :type="threadTagType(mysqlStatus(scope.row).replica_sql_running)">
                   {{ threadLabel(mysqlStatus(scope.row).replica_sql_running, "SQL") }}

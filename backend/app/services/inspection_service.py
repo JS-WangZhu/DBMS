@@ -1,5 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeoutError
-from datetime import datetime
+from datetime import datetime, timedelta
 import threading
 from types import SimpleNamespace
 
@@ -139,6 +139,48 @@ def _collect_instance(instance_id: int, instance_data: dict, password: str):
         return instance_id, payload, "error"
 
 
+# 最近 N 分钟的指标均值窗口，用于减少 CPU 瞬时峰值误报
+CPU_AVERAGE_WINDOW_MINUTES = 10
+
+
+def _metric_average_window(instance: DatabaseInstance, metric_key: str, current_value, minutes: int = CPU_AVERAGE_WINDOW_MINUTES):
+    """结合当前采集值 + 近 N 分钟已写入的 inspection 快照均值，返回平均值。
+
+    用于判定主机 CPU 均值是否超阈，避免单次瞬时峰值引起误报。
+    """
+    values = []
+    try:
+        model = snapshot_model_for_instance(instance)
+        if model is not None:
+            since = datetime.now() - timedelta(minutes=minutes)
+            rows = (
+                model.query
+                .filter(
+                    model.instance_id == instance.id,
+                    model.metric_type == "inspection",
+                    model.collected_at >= since,
+                )
+                .all()
+            )
+            for row in rows:
+                snapshot_payload = row.payload_json if isinstance(row.payload_json, dict) else {}
+                val = snapshot_payload.get(metric_key)
+                fval = _safe_float(val)
+                if fval is not None:
+                    values.append(fval)
+    except Exception:
+        # 查询失败时降级为仅用当前值，不影响巡检主流程
+        values = []
+
+    current_fval = _safe_float(current_value)
+    if current_fval is not None:
+        values.append(current_fval)
+
+    if not values:
+        return None
+    return round(sum(values) / len(values), 2)
+
+
 def _build_issue(issue_key: str, issue_name: str, message: str, severity: str = "warning"):
     return {
         "issue_key": issue_key,
@@ -160,8 +202,17 @@ def _extract_issues(instance: DatabaseInstance, payload: dict, thresholds: dict)
     host_cpu = _safe_float(payload.get("host_cpu_usage_pct"))
     host_mem = _safe_float(payload.get("host_memory_usage_pct"))
     host_disk = _safe_float(payload.get("host_data_disk_usage_pct"))
-    if host_cpu is not None and host_cpu >= thresholds["host_cpu_usage_pct"]:
-        issues.append(_build_issue("host_cpu_high", "主机CPU高", f"CPU使用率 {host_cpu}%"))
+
+    # CPU 采用近 10 分钟均值判断，避免瞬时峰值误报
+    host_cpu_avg = _metric_average_window(instance, "host_cpu_usage_pct", host_cpu, CPU_AVERAGE_WINDOW_MINUTES)
+    if host_cpu_avg is not None:
+        payload["host_cpu_usage_pct_avg_10m"] = host_cpu_avg
+    if host_cpu_avg is not None and host_cpu_avg >= thresholds["host_cpu_usage_pct"]:
+        issues.append(_build_issue(
+            "host_cpu_high",
+            "主机CPU高",
+            f"CPU使用率 {host_cpu_avg}% (近10分钟均值，当前 {host_cpu if host_cpu is not None else '-'}%)",
+        ))
     if host_mem is not None and host_mem >= thresholds["host_memory_usage_pct"]:
         issues.append(_build_issue("host_memory_high", "主机内存高", f"内存使用率 {host_mem}%"))
     if host_disk is not None and host_disk >= thresholds["host_data_disk_usage_pct"]:

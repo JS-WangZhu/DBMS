@@ -14,6 +14,7 @@ import ClusterManageView from "../views/ClusterManageView.vue";
 import DashboardView from "../views/DashboardView.vue";
 import DataChangeView from "../views/DataChangeView.vue";
 import DataAccessHistoryView from "../views/DataAccessHistoryView.vue";
+import DataQueryOpConfigView from "../views/DataQueryOpConfigView.vue";
 import HAConfigView from "../views/HAConfigView.vue";
 import DataQueryView from "../views/DataQueryView.vue";
 import InstanceManageView from "../views/InstanceManageView.vue";
@@ -82,6 +83,7 @@ const routes = [
       { path: "/config/ai-models", component: AIModelConfigView, meta: { title: "AI模型管理" } },
       { path: "/config/ha", component: HAConfigView, meta: { title: "高可用配置管理" } },
       { path: "/config/inspection", component: InspectionParamConfigView, meta: { title: "巡检参数管理" } },
+      { path: "/config/data-query-ops", component: DataQueryOpConfigView, meta: { title: "数据查询操作配置" } },
       { path: "/config/sso", component: SsoConfigView, meta: { title: "SSO登录管理" } },
     ],
   },
