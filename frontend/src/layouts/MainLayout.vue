@@ -178,7 +178,7 @@
           </template>
           <el-menu-item v-if="hasMenu('ai_model_config')" index="/config/ai-models">
             <el-icon><Monitor /></el-icon>
-            <span>AI大模型管理</span>
+            <span>AI模型管理</span>
           </el-menu-item>
           <el-menu-item v-if="hasMenu('ha_config')" index="/config/ha">
             <el-icon><Setting /></el-icon>

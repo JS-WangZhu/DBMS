@@ -141,28 +141,37 @@ function renderMarkdown(text) {
     }
   }
 
+  // 使用占位符保护已生成的 HTML 标签和代码块
+  const placeholders = [];
+  let placeholderIndex = 0;
+  
+  // 保护 details/summary/div 标签
+  html = html.replace(/<details[\s\S]*?<\/details>/g, (match) => {
+    const placeholder = `__HTML_PLACEHOLDER_${placeholderIndex}__`;
+    placeholders.push({ placeholder, html: match });
+    placeholderIndex++;
+    return placeholder;
+  });
+  
+  // 保护代码块（包含内容的标签，不需要转义）
+  html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (match, lang, code) => {
+    const placeholder = `__CODE_PLACEHOLDER_${placeholderIndex}__`;
+    placeholders.push({ placeholder, html: `<pre class="code-block"><code>${code}</code></pre>` });
+    placeholderIndex++;
+    return placeholder;
+  });
+  
   // 基础转义
   html = html
     .replace(/&/g, "&amp;")
-    .replace(/</g, (match, offset) => {
-      // 保护我们刚刚生成的 HTML 标签
-      const sub = html.substring(offset);
-      if (sub.startsWith('</details>') || sub.startsWith('<details') || sub.startsWith('<summary') || sub.startsWith('</summary') || sub.startsWith('<div class="think-content"') || sub.startsWith('</div>')) {
-        return match;
-      }
-      return "&lt;";
-    })
-    .replace(/>/g, (match, offset) => {
-      const prev = html.substring(0, offset + 1);
-      if (prev.endsWith('</details>') || prev.endsWith('>') || prev.endsWith('</summary>') || prev.endsWith('</div>')) {
-        return match;
-      }
-      return "&gt;";
-    });
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
 
-  // 代码块
-  html = html.replace(/```(\w*)\n([\s\S]*?)```/g, '<pre class="code-block"><code>$2</code></pre>');
-  
+  // 恢复占位符
+  for (const { placeholder, html: originalHtml } of placeholders) {
+    html = html.replace(placeholder, originalHtml);
+  }
+
   // 行内代码
   html = html.replace(/`([^`]+)`/g, "<code>$1</code>");
   
