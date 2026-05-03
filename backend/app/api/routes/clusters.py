@@ -1,7 +1,7 @@
 import json
 import queue
 import threading
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 from flask import Blueprint, Response, current_app, request, stream_with_context
@@ -20,10 +20,34 @@ from app.services.collectors import collect_instance_metrics
 from app.services.dns_resolver import list_host_addresses, resolve_host
 from app.services.notifier import notify_ha_switch_completion
 from app.services.mysql_ha_switch import build_cluster_topology, failure_switch, normal_switch, promote_current_master, repair_cluster
+from app.services.topology_history import list_topology_history
 from app.utils.crypto import decrypt_secret
 from app.utils.response import error_response, ok_response
 
 bp = Blueprint("clusters", __name__, url_prefix="/clusters")
+
+# 统一使用北京时间（UTC+8）输出给前端，避免服务器本地时区导致偏差。
+_BEIJING_TZ = timezone(timedelta(hours=8))
+
+
+def _beijing_now_iso():
+    """返回带北京时区后缀的当前时间 ISO 字符串。
+    直接取服务器本地挂钟（假定部署环境本地时间即北京时间），附加 +08:00 后缀，
+    避免 Unix epoch 被错配为北京时间时再 astimezone 多加一次 8 小时。
+    """
+    return datetime.now().replace(microsecond=0, tzinfo=_BEIJING_TZ).isoformat()
+
+
+def _beijing_iso(dt):
+    """将 DB 中 naive datetime 或任意 datetime 统一输出为带 +08:00 后缀的 ISO 字符串。
+    naive 值视为已经是北京时间（服务器本地时间 == 北京时间），直接挂 tz；
+    aware 值则 astimezone 到 +08:00。返回 None 对应 None。
+    """
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=_BEIJING_TZ).isoformat()
+    return dt.astimezone(_BEIJING_TZ).isoformat()
 
 
 def _snapshot_failed(payload: dict) -> bool:
@@ -37,7 +61,7 @@ def _snapshot_failed(payload: dict) -> bool:
 
 
 def _event_timestamp():
-    return datetime.now().isoformat()
+    return _beijing_now_iso()
 
 
 def _parse_switch_payload(payload: dict):
@@ -440,7 +464,7 @@ def cluster_latest_health(cluster_id):
                 "instance_id": instance.id,
                 "instance_name": instance.name,
                 "running_status": "error" if failed else "running",
-                "collected_at": snapshot.collected_at.isoformat() if snapshot.collected_at else None,
+                "collected_at": _beijing_iso(snapshot.collected_at),
                 "payload_json": payload,
             })
         else:
@@ -729,3 +753,399 @@ def cluster_ha_switch_stream(cluster_id):
             "Connection": "keep-alive",
         },
     )
+
+
+# ===== MongoDB / Redis 集群连接探测与拓扑历史 =====
+
+def _probe_mongo_instance(instance):
+    """同步探测单个 MongoDB 实例，返回结构化结果。"""
+    from pymongo import MongoClient
+
+    host = instance.resolved_ip or instance.host_input
+    node = {
+        "instance_id": instance.id,
+        "instance_name": instance.name,
+        "host": host,
+        "port": instance.port,
+        "reachable": False,
+        "role": "unknown",
+        "state": None,
+        "set_name": None,
+        "is_arbiter": False,
+        "error": None,
+        "members": [],
+    }
+
+    extra = instance.extra_json if isinstance(instance.extra_json, dict) else {}
+    auth_source = (extra.get("auth_source") or extra.get("auth_db") or "").strip() or None
+    auth_sources = []
+    if auth_source:
+        auth_sources.append(auth_source)
+    for fallback in ("admin", "local"):
+        if fallback not in auth_sources:
+            auth_sources.append(fallback)
+
+    try:
+        password = decrypt_secret(instance.password_encrypted) if instance.password_encrypted else None
+    except Exception as exc:
+        node["error"] = f"decrypt password failed: {exc}"
+        return node
+
+    client_opts = dict(
+        serverSelectionTimeoutMS=2000,
+        connectTimeoutMS=2000,
+        socketTimeoutMS=2000,
+        ssl=False,
+        appname="dbms-probe",
+    )
+
+    client = None
+    last_error = None
+    try:
+        if instance.username and password:
+            for source in auth_sources:
+                try:
+                    client = MongoClient(
+                        host, instance.port,
+                        username=instance.username, password=password, authSource=source,
+                        **client_opts,
+                    )
+                    client.admin.command("ping")
+                    break
+                except Exception as exc:
+                    last_error = exc
+                    client = None
+            if client is None:
+                # 回退到无认证探测 (Arbiter 常见情况)
+                try:
+                    no_auth_client = MongoClient(host, instance.port, **client_opts)
+                    no_auth_client.admin.command("ping")
+                    hello = {}
+                    try:
+                        hello = no_auth_client.admin.command("hello")
+                    except Exception:
+                        try:
+                            hello = no_auth_client.admin.command("isMaster")
+                        except Exception:
+                            hello = {}
+                    node["reachable"] = True
+                    if hello.get("arbiterOnly") is True:
+                        node["role"] = "ARBITER"
+                        node["is_arbiter"] = True
+                    elif hello.get("isWritablePrimary") is True or hello.get("ismaster") is True:
+                        node["role"] = "PRIMARY"
+                    elif hello.get("secondary") is True:
+                        node["role"] = "SECONDARY"
+                    node["set_name"] = hello.get("setName")
+                    no_auth_client.close()
+                    return node
+                except Exception:
+                    raise last_error or Exception("mongo auth failed")
+        else:
+            client = MongoClient(host, instance.port, **client_opts)
+            client.admin.command("ping")
+
+        node["reachable"] = True
+        target_name = f"{host}:{instance.port}"
+        try:
+            repl = client.admin.command("replSetGetStatus")
+            node["set_name"] = repl.get("set")
+            members = repl.get("members") or []
+            members_out = []
+            for member in members:
+                if not isinstance(member, dict):
+                    continue
+                m_name = str(member.get("name") or "").strip()
+                state_str = str(member.get("stateStr") or "").upper()
+                members_out.append({
+                    "name": m_name,
+                    "state": member.get("state"),
+                    "state_str": state_str,
+                    "health": member.get("health"),
+                    "self": bool(member.get("self")),
+                })
+                if member.get("self") is True or m_name == target_name:
+                    node["role"] = state_str or node["role"]
+                    node["state"] = member.get("state")
+            node["members"] = members_out
+        except Exception:
+            # 非副本集或权限不足：用 hello 兑含角色
+            try:
+                hello = client.admin.command("hello")
+            except Exception:
+                try:
+                    hello = client.admin.command("isMaster")
+                except Exception:
+                    hello = {}
+            if hello.get("arbiterOnly") is True:
+                node["role"] = "ARBITER"
+                node["is_arbiter"] = True
+            elif hello.get("isWritablePrimary") is True or hello.get("ismaster") is True:
+                node["role"] = "PRIMARY"
+            elif hello.get("secondary") is True:
+                node["role"] = "SECONDARY"
+            node["set_name"] = hello.get("setName") or node["set_name"]
+    except Exception as exc:
+        node["reachable"] = False
+        node["error"] = str(exc)
+    finally:
+        try:
+            if client is not None:
+                client.close()
+        except Exception:
+            pass
+
+    return node
+
+
+def _probe_redis_instance(instance):
+    """同步探测单个 Redis 实例。"""
+    import redis
+
+    host = instance.resolved_ip or instance.host_input
+    node = {
+        "instance_id": instance.id,
+        "instance_name": instance.name,
+        "host": host,
+        "port": instance.port,
+        "reachable": False,
+        "role": "unknown",
+        "master_host": None,
+        "master_port": None,
+        "master_link_status": None,
+        "replication_source": None,
+        "connected_slaves": None,
+        "cluster_enabled": None,
+        "cluster_state": None,
+        "error": None,
+    }
+
+    try:
+        password = decrypt_secret(instance.password_encrypted) if instance.password_encrypted else None
+    except Exception as exc:
+        node["error"] = f"decrypt password failed: {exc}"
+        return node
+
+    try:
+        client = redis.Redis(
+            host=host,
+            port=instance.port,
+            password=password,
+            socket_connect_timeout=3,
+            socket_timeout=3,
+            decode_responses=True,
+        )
+        client.ping()
+        node["reachable"] = True
+        info = client.info()
+        role = str(info.get("role") or "").strip().lower()
+        if role == "replica":
+            role = "slave"
+        node["role"] = role or "unknown"
+        node["master_host"] = info.get("master_host")
+        node["master_port"] = info.get("master_port")
+        node["master_link_status"] = info.get("master_link_status")
+        if node["master_host"]:
+            node["replication_source"] = (
+                f"{node['master_host']}:{node['master_port']}" if node.get("master_port") else str(node["master_host"]) 
+            )
+        node["connected_slaves"] = info.get("connected_slaves")
+        node["cluster_enabled"] = info.get("cluster_enabled")
+        try:
+            cinfo = client.execute_command("CLUSTER INFO")
+            if isinstance(cinfo, dict):
+                node["cluster_state"] = cinfo.get("cluster_state")
+        except Exception:
+            pass
+    except Exception as exc:
+        node["reachable"] = False
+        node["error"] = str(exc)
+    return node
+
+
+def _summarize_mongo_nodes(nodes):
+    primary = sum(1 for n in nodes if (n.get("role") or "").upper() == "PRIMARY")
+    secondary = sum(1 for n in nodes if (n.get("role") or "").upper() == "SECONDARY")
+    arbiter = sum(1 for n in nodes if (n.get("role") or "").upper() == "ARBITER")
+    reachable = sum(1 for n in nodes if n.get("reachable"))
+    set_name = next((n.get("set_name") for n in nodes if n.get("set_name")), None)
+    return {
+        "set_name": set_name,
+        "primary_count": primary,
+        "secondary_count": secondary,
+        "arbiter_count": arbiter,
+        "reachable_count": reachable,
+        "unreachable_count": max(0, len(nodes) - reachable),
+        "total": len(nodes),
+    }
+
+
+def _summarize_redis_nodes(nodes):
+    master = sum(1 for n in nodes if n.get("role") == "master")
+    slave = sum(1 for n in nodes if n.get("role") in {"slave", "replica"})
+    reachable = sum(1 for n in nodes if n.get("reachable"))
+    cluster_state = next((n.get("cluster_state") for n in nodes if n.get("cluster_state")), None)
+    return {
+        "master_count": master,
+        "slave_count": slave,
+        "reachable_count": reachable,
+        "unreachable_count": max(0, len(nodes) - reachable),
+        "total": len(nodes),
+        "cluster_state": cluster_state,
+    }
+
+
+@bp.post("/<int:cluster_id>/connectivity/probe")
+@active_user_required
+def cluster_connectivity_probe(cluster_id):
+    """对 MongoDB / Redis 集群做集群级可连接性探测，不写快照、不影响定时采集。"""
+    cluster = DatabaseCluster.query.get_or_404(cluster_id)
+    if cluster.db_type not in ("mongodb", "redis"):
+        return error_response("connectivity probe only supports mongodb/redis cluster", code=400)
+    if not require_cluster_permission(cluster.id, "query"):
+        return error_response("permission denied", code=403)
+
+    instances = (
+        DatabaseInstance.query
+        .filter_by(cluster_id=cluster.id, enabled=True)
+        .order_by(DatabaseInstance.id.asc())
+        .all()
+    )
+    if not instances:
+        return error_response("cluster has no enabled instances", code=400)
+
+    nodes = []
+    if cluster.db_type == "mongodb":
+        for ins in instances:
+            try:
+                nodes.append(_probe_mongo_instance(ins))
+            except Exception as exc:
+                nodes.append({
+                    "instance_id": ins.id,
+                    "instance_name": ins.name,
+                    "host": ins.resolved_ip or ins.host_input,
+                    "port": ins.port,
+                    "reachable": False,
+                    "role": "unknown",
+                    "error": str(exc),
+                })
+        summary = _summarize_mongo_nodes(nodes)
+    else:
+        for ins in instances:
+            try:
+                nodes.append(_probe_redis_instance(ins))
+            except Exception as exc:
+                nodes.append({
+                    "instance_id": ins.id,
+                    "instance_name": ins.name,
+                    "host": ins.resolved_ip or ins.host_input,
+                    "port": ins.port,
+                    "reachable": False,
+                    "role": "unknown",
+                    "error": str(exc),
+                })
+        summary = _summarize_redis_nodes(nodes)
+
+    return ok_response(data={
+        "cluster_id": cluster.id,
+        "cluster_name": cluster.name,
+        "db_type": cluster.db_type,
+        "probed_at": _beijing_now_iso(),
+        "summary": summary,
+        "nodes": nodes,
+    })
+
+
+@bp.get("/<int:cluster_id>/connectivity/latest")
+@active_user_required
+def cluster_connectivity_latest(cluster_id):
+    """从最新快照提炼集群连接性概览，不重新连接远端。"""
+    cluster = DatabaseCluster.query.get_or_404(cluster_id)
+    if cluster.db_type not in ("mongodb", "redis"):
+        return error_response("connectivity latest only supports mongodb/redis cluster", code=400)
+    if not require_cluster_permission(cluster.id, "query"):
+        return error_response("permission denied", code=403)
+
+    instances = (
+        DatabaseInstance.query
+        .filter_by(cluster_id=cluster.id, enabled=True)
+        .order_by(DatabaseInstance.id.asc())
+        .all()
+    )
+
+    nodes = []
+    latest_collected_at = None
+    for ins in instances:
+        snapshot = latest_snapshot_for_instance(instance_id=ins.id, db_type=ins.db_type, metric_type="status")
+        payload = snapshot.payload_json if snapshot and isinstance(snapshot.payload_json, dict) else {}
+        collected_at = _beijing_iso(snapshot.collected_at) if snapshot else None
+        if collected_at and (latest_collected_at is None or collected_at > latest_collected_at):
+            latest_collected_at = collected_at
+        if cluster.db_type == "mongodb":
+            role = str(payload.get("mongo_role") or "unknown").upper()
+            repl = payload.get("repl") if isinstance(payload.get("repl"), dict) else {}
+            nodes.append({
+                "instance_id": ins.id,
+                "instance_name": ins.name,
+                "host": ins.resolved_ip or ins.host_input,
+                "port": ins.port,
+                "reachable": bool(payload.get("ping_ok") is True),
+                "role": role,
+                "set_name": repl.get("set"),
+                "collected_at": collected_at,
+                "error": payload.get("error"),
+            })
+        else:
+            role = str(payload.get("role") or "unknown").lower()
+            cinfo = payload.get("cluster_info") if isinstance(payload.get("cluster_info"), dict) else {}
+            nodes.append({
+                "instance_id": ins.id,
+                "instance_name": ins.name,
+                "host": ins.resolved_ip or ins.host_input,
+                "port": ins.port,
+                "reachable": bool(payload.get("ping_ok") is True),
+                "role": role,
+                "master_host": payload.get("master_host"),
+                "master_port": payload.get("master_port"),
+                "replication_source": payload.get("replication_source"),
+                "master_link_status": payload.get("master_link_status"),
+                "cluster_state": cinfo.get("cluster_state"),
+                "collected_at": collected_at,
+                "error": payload.get("error"),
+            })
+
+    summary = _summarize_mongo_nodes(nodes) if cluster.db_type == "mongodb" else _summarize_redis_nodes(nodes)
+    return ok_response(data={
+        "cluster_id": cluster.id,
+        "cluster_name": cluster.name,
+        "db_type": cluster.db_type,
+        "collected_at": latest_collected_at,
+        "summary": summary,
+        "nodes": nodes,
+    })
+
+
+@bp.get("/<int:cluster_id>/topology/history")
+@active_user_required
+def cluster_topology_history(cluster_id):
+    """分页查询集群拓扑变更历史。"""
+    cluster = DatabaseCluster.query.get_or_404(cluster_id)
+    if cluster.db_type not in ("mongodb", "redis", "mysql"):
+        return error_response("topology history only supports mongodb/redis/mysql cluster", code=400)
+    if not require_cluster_permission(cluster.id, "query"):
+        return error_response("permission denied", code=403)
+
+    page, page_size = _parse_page_args()
+    try:
+        data = list_topology_history(
+            cluster_id=cluster.id,
+            page=page,
+            page_size=page_size,
+        )
+    except Exception as exc:
+        current_app.logger.exception("list_topology_history failed: %s", exc)
+        return error_response(f"load topology history failed: {exc}", code=500)
+    data["cluster_id"] = cluster.id
+    data["cluster_name"] = cluster.name
+    data["db_type"] = cluster.db_type
+    return ok_response(data=data)

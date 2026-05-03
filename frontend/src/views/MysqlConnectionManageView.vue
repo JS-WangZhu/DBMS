@@ -50,11 +50,12 @@
       <el-table-column label="原因" min-width="220" show-overflow-tooltip>
         <template #default="scope">{{ scope.row.ha_status_json?.reason || "-" }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="250" fixed="right">
+      <el-table-column label="操作" width="320" fixed="right">
         <template #default="scope">
           <el-button link type="primary" @click="openEdit(scope.row)">编辑</el-button>
           <el-button link type="success" :disabled="!scope.row.ha_switch_enabled" @click="openSwitchDialog(scope.row)">高可用切换</el-button>
-          <el-button link type="warning" @click="doCheck(scope.row)">立即校验</el-button>
+          <el-button link type="warning" @click="doCheck(scope.row)">校验</el-button>
+          <el-button link type="success" @click="openTopologyHistoryDialog(scope.row)">拓扑变更历史</el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -287,6 +288,55 @@
         <el-button @click="historyDialogVisible = false">关闭</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="topoHistoryDialogVisible" title="MySQL 拓扑变更历史" width="1200px" top="5vh">
+      <div v-loading="topoHistoryLoading">
+        <el-table :data="topoHistoryData.items" stripe>
+          <el-table-column label="变更时间" min-width="180">
+            <template #default="scope">{{ formatBeijingTime(scope.row.changed_at) }}</template>
+          </el-table-column>
+          <el-table-column label="HA域名" min-width="180" show-overflow-tooltip>
+            <template #default="scope">{{ scope.row.topology?.ha_domain || "-" }}</template>
+          </el-table-column>
+          <el-table-column label="总节点" width="90">
+            <template #default="scope">{{ scope.row.topology?.total_members ?? "-" }}</template>
+          </el-table-column>
+          <el-table-column label="M / S / RO" width="130">
+            <template #default="scope">
+              {{ scope.row.topology?.master_count ?? 0 }} / {{ scope.row.topology?.slave_count ?? 0 }} / {{ scope.row.topology?.read_only_count ?? 0 }}
+            </template>
+          </el-table-column>
+          <el-table-column label="成员" min-width="420">
+            <template #default="scope">
+              <el-tag
+                v-for="m in scope.row.topology?.members || []"
+                :key="m.host"
+                :type="mysqlRoleTagType(m.role)"
+                class="member-tag"
+              >
+                {{ m.host }} [{{ m.role }}]<span v-if="m.replica_source"> ← {{ m.replica_source }}</span>
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="指纹" width="110">
+            <template #default="scope">{{ (scope.row.fingerprint || "").slice(0, 8) }}</template>
+          </el-table-column>
+        </el-table>
+        <div class="pagination-wrap">
+          <el-pagination
+            background
+            layout="total, prev, pager, next, jumper"
+            :total="topoHistoryData.total"
+            :current-page="topoHistoryData.page"
+            :page-size="topoHistoryData.page_size"
+            @current-change="onTopoHistoryPageChange"
+          />
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="topoHistoryDialogVisible = false">关闭</el-button>
+      </template>
+    </el-dialog>
   </el-card>
 </template>
 
@@ -298,9 +348,11 @@ import {
   checkClusterHa,
   getClusterHaTopology,
   listClusterHaSwitchHistory,
+  listClusterTopologyHistory,
   listClusters,
   updateCluster,
 } from "../api/modules/clusters";
+import { formatBeijingTime } from "../utils/time";
 
 const loading = ref(false);
 const saving = ref(false);
@@ -346,6 +398,16 @@ const historyPager = reactive({
   page: 1,
   page_size: 10,
   total: 0,
+});
+
+const topoHistoryDialogVisible = ref(false);
+const topoHistoryLoading = ref(false);
+const topoHistoryCluster = ref(null);
+const topoHistoryData = reactive({
+  items: [],
+  total: 0,
+  page: 1,
+  page_size: 10,
 });
 
 function matchesStatus(row) {
@@ -778,6 +840,50 @@ async function openHistoryDialog() {
   await loadSwitchHistory(1);
 }
 
+async function loadTopologyHistory(page = topoHistoryData.page) {
+  if (!topoHistoryCluster.value?.id) {
+    return;
+  }
+  topoHistoryLoading.value = true;
+  try {
+    const { data } = await listClusterTopologyHistory(
+      topoHistoryCluster.value.id,
+      page,
+      topoHistoryData.page_size,
+    );
+    const payload = data?.data || {};
+    topoHistoryData.items = payload.items || [];
+    topoHistoryData.total = payload.total || 0;
+    topoHistoryData.page = payload.page || page;
+    topoHistoryData.page_size = payload.page_size || topoHistoryData.page_size;
+  } catch (error) {
+    ElMessage.error(error.response?.data?.message || "加载拓扑变更历史失败");
+  } finally {
+    topoHistoryLoading.value = false;
+  }
+}
+
+async function openTopologyHistoryDialog(row) {
+  topoHistoryCluster.value = row;
+  topoHistoryDialogVisible.value = true;
+  topoHistoryData.items = [];
+  topoHistoryData.total = 0;
+  topoHistoryData.page = 1;
+  await loadTopologyHistory(1);
+}
+
+function onTopoHistoryPageChange(page) {
+  loadTopologyHistory(Number(page) || 1);
+}
+
+function mysqlRoleTagType(role) {
+  const key = String(role || "").toLowerCase();
+  if (key === "master") return "danger";
+  if (key === "slave" || key === "replica") return "success";
+  if (key === "read_only") return "warning";
+  return "info";
+}
+
 async function submitHaSwitch() {
   if (!topologyCluster.value) {
     return;
@@ -1021,5 +1127,10 @@ watch(
 
 .result-card {
   margin-top: 8px;
+}
+
+.member-tag {
+  margin-right: 6px;
+  margin-bottom: 6px;
 }
 </style>

@@ -8,7 +8,7 @@
           <span>总览</span>
         </el-menu-item>
 
-        <el-sub-menu v-if="hasAnyMenu(['mysql_instances','mysql_clusters','mysql_connections','mongodb_instances','mongodb_clusters','redis_instances','redis_clusters','doris_instances','doris_clusters','inspection_manage'])" index="service-manage">
+        <el-sub-menu v-if="hasAnyMenu(['mysql_instances','mysql_clusters','mysql_connections','mongodb_instances','mongodb_clusters','mongodb_connections','redis_instances','redis_clusters','redis_connections','doris_instances','doris_clusters','inspection_manage'])" index="service-manage">
           <template #title>
             <el-icon><Setting /></el-icon>
             <span>服务管理</span>
@@ -33,7 +33,7 @@
             </el-menu-item>
           </el-sub-menu>
 
-          <el-sub-menu v-if="hasAnyMenu(['mongodb_instances','mongodb_clusters'])" index="db-mongodb">
+          <el-sub-menu v-if="hasAnyMenu(['mongodb_instances','mongodb_clusters','mongodb_connections'])" index="db-mongodb">
             <template #title>
               <el-icon class="db-brand-icon"><MongoIcon /></el-icon>
               <span>MongoDB</span>
@@ -46,9 +46,13 @@
               <el-icon><Grid /></el-icon>
               <span>集群管理</span>
             </el-menu-item>
+            <el-menu-item v-if="hasMenu('mongodb_connections')" index="/databases/mongodb/connections">
+              <el-icon><Link /></el-icon>
+              <span>连接管理</span>
+            </el-menu-item>
           </el-sub-menu>
 
-          <el-sub-menu v-if="hasAnyMenu(['redis_instances','redis_clusters'])" index="db-redis">
+          <el-sub-menu v-if="hasAnyMenu(['redis_instances','redis_clusters','redis_connections'])" index="db-redis">
             <template #title>
               <el-icon class="db-brand-icon"><RedisIcon /></el-icon>
               <span>Redis</span>
@@ -60,6 +64,10 @@
             <el-menu-item v-if="hasMenu('redis_clusters')" index="/databases/redis/clusters">
               <el-icon><Grid /></el-icon>
               <span>集群管理</span>
+            </el-menu-item>
+            <el-menu-item v-if="hasMenu('redis_connections')" index="/databases/redis/connections">
+              <el-icon><Link /></el-icon>
+              <span>连接管理</span>
             </el-menu-item>
           </el-sub-menu>
 
@@ -320,8 +328,10 @@ const routePermissionMap = {
   "/databases/mysql/connections": "mysql_connections",
   "/databases/mongodb/instances": "mongodb_instances",
   "/databases/mongodb/clusters": "mongodb_clusters",
+  "/databases/mongodb/connections": "mongodb_connections",
   "/databases/redis/instances": "redis_instances",
   "/databases/redis/clusters": "redis_clusters",
+  "/databases/redis/connections": "redis_connections",
   "/databases/doris/instances": "doris_instances",
   "/databases/doris/clusters": "doris_clusters",
   "/service/inspection": "inspection_manage",

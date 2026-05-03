@@ -16,6 +16,12 @@ from app.services.collectors import collect_instance_metrics
 from app.services.dns_resolver import refresh_all_dns, resolve_host
 from app.services.inspection_service import get_or_create_inspection_config, run_inspection_cycle
 from app.services.notifier import notify_backup_failure
+from app.services.topology_history import (
+    extract_mongo_topology,
+    extract_mysql_topology,
+    extract_redis_topology,
+    record_topology_change_if_diff,
+)
 from app.utils.crypto import decrypt_secret
 
 CRON_ALIAS_MAP = {
@@ -292,6 +298,58 @@ def _refresh_mysql_cluster_ha(instances, payload_by_instance):
         cluster.ha_status_json = status
 
 
+def _refresh_cluster_topology_history(instances, payload_by_instance):
+    """基于本次采集结果，对 MongoDB / Redis / MySQL 集群进行拓扑指纹去重后写入变更历史。单条集群异常不影响其他集群。"""
+    try:
+        target_db_types = {"mongodb", "redis", "mysql"}
+        instance_rows = [
+            item for item in instances
+            if item.db_type in target_db_types and item.enabled and item.cluster_id
+        ]
+        if not instance_rows:
+            return
+
+        grouped = {}
+        for ins in instance_rows:
+            grouped.setdefault((ins.db_type, ins.cluster_id), []).append(ins)
+
+        cluster_ids = sorted({cid for _, cid in grouped.keys()})
+        cluster_map = {
+            row.id: row
+            for row in DatabaseCluster.query.filter(DatabaseCluster.id.in_(cluster_ids)).all()
+        } if cluster_ids else {}
+
+        for (db_type, cluster_id), ins_list in grouped.items():
+            cluster = cluster_map.get(cluster_id)
+            if not cluster or cluster.db_type != db_type:
+                continue
+            try:
+                payload_items = [
+                    {
+                        "instance_id": ins.id,
+                        "instance_name": ins.name,
+                        "host": ins.resolved_ip or ins.host_input,
+                        "port": ins.port,
+                        "payload": payload_by_instance.get(ins.id) or {},
+                    }
+                    for ins in ins_list
+                ]
+                if db_type == "mongodb":
+                    topology = extract_mongo_topology(payload_items)
+                elif db_type == "redis":
+                    topology = extract_redis_topology(payload_items)
+                else:
+                    topology = extract_mysql_topology(payload_items, ha_domain=cluster.ha_domain)
+                record_topology_change_if_diff(cluster, topology)
+            except Exception as exc:
+                current_app.logger.warning(
+                    "topology history refresh failed: cluster_id=%s db_type=%s err=%s",
+                    cluster_id, db_type, exc,
+                )
+    except Exception as exc:
+        current_app.logger.warning("topology history refresh skipped: %s", exc)
+
+
 def job_monitor_collect(app):
     app = _resolve_app(app) or app
     if app is None:
@@ -416,6 +474,7 @@ def job_monitor_collect(app):
                     )
 
             _refresh_mysql_cluster_ha(instances, payload_by_instance)
+            _refresh_cluster_topology_history(instances, payload_by_instance)
             db.session.commit()
             current_app.logger.info(
                 "monitor_collect tick: total=%s ok=%s fail=%s",

@@ -60,3 +60,19 @@ export function listClusterHaSwitchHistory(clusterId, page = 1, pageSize = 10, f
 export function executeClusterHaSwitch(clusterId, payload) {
   return client.post(`/clusters/${clusterId}/ha/switch`, payload);
 }
+
+// 集群连接性探测（MongoDB / Redis）
+export function probeClusterConnectivity(clusterId) {
+  return client.post(`/clusters/${clusterId}/connectivity/probe`);
+}
+
+export function clusterConnectivityLatest(clusterId) {
+  return client.get(`/clusters/${clusterId}/connectivity/latest`);
+}
+
+export function listClusterTopologyHistory(clusterId, page = 1, pageSize = 10) {
+  return client.get(`/clusters/${clusterId}/topology/history`, {
+    params: { page, page_size: pageSize },
+    timeout: 60000,
+  });
+}

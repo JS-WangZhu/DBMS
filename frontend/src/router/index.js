@@ -22,6 +22,8 @@ import InspectionManageView from "../views/InspectionManageView.vue";
 import InspectionParamConfigView from "../views/InspectionParamConfigView.vue";
 import LoginView from "../views/LoginView.vue";
 import MysqlConnectionManageView from "../views/MysqlConnectionManageView.vue";
+import MongoConnectionManageView from "../views/MongoConnectionManageView.vue";
+import RedisConnectionManageView from "../views/RedisConnectionManageView.vue";
 import S3StorageConfigView from "../views/S3StorageConfigView.vue";
 import SsoCallbackView from "../views/SsoCallbackView.vue";
 import SsoConfigView from "../views/SsoConfigView.vue";
@@ -55,10 +57,12 @@ const routes = [
       { path: "/databases/mongodb", redirect: "/databases/mongodb/instances" },
       { path: "/databases/mongodb/clusters", component: ClusterManageView, meta: { title: "MongoDB 集群管理", dbType: "mongodb", dbLabel: "MongoDB" } },
       { path: "/databases/mongodb/instances", component: InstanceManageView, meta: { title: "MongoDB 实例管理", dbType: "mongodb", dbLabel: "MongoDB" } },
+      { path: "/databases/mongodb/connections", component: MongoConnectionManageView, meta: { title: "MongoDB 连接管理", dbType: "mongodb", dbLabel: "MongoDB" } },
 
       { path: "/databases/redis", redirect: "/databases/redis/instances" },
       { path: "/databases/redis/clusters", component: ClusterManageView, meta: { title: "Redis 集群管理", dbType: "redis", dbLabel: "Redis" } },
       { path: "/databases/redis/instances", component: InstanceManageView, meta: { title: "Redis 实例管理", dbType: "redis", dbLabel: "Redis" } },
+      { path: "/databases/redis/connections", component: RedisConnectionManageView, meta: { title: "Redis 连接管理", dbType: "redis", dbLabel: "Redis" } },
 
       { path: "/databases/doris", redirect: "/databases/doris/instances" },
       { path: "/databases/doris/clusters", component: ClusterManageView, meta: { title: "Doris 集群管理", dbType: "doris", dbLabel: "Doris" } },
