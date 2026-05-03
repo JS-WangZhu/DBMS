@@ -18,6 +18,7 @@ DBMS 是一个统一数据库管理平台，支持对 MySQL、Redis、Doris、Mo
 - 关键运行指标：Uptime、版本、QPS/TPS
 - 只读状态监控
 - 集群批量操作：配置变更与巡检
+- **主从高可用切换**：支持在线切换（主库正常）和故障切换（主库异常），可选择新主库、自动等待从库追平日志、重构其他从库复制关系、配合 DNS 切换脚本实现 HA 域名自动指向
 
 ### MongoDB 管理
 
@@ -193,6 +194,10 @@ http://localhost:5000/api/v1/doc/api
 ### MySQL 实例管理
 
 ![MySQL实例管理](docs/mysql实例管理.png)
+
+### MySQL 主从切换
+
+![MySQL主从切换](docs/mysql主从切换.png)
 
 ### Redis 实例管理
 
