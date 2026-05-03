@@ -113,14 +113,18 @@
           </el-menu-item>
         </el-sub-menu>
 
-        <el-sub-menu v-if="hasAnyMenu(['backup_mysql_policies','backup_mongo_policies','backup_records','backup_tool_configs','backup_agents','backup_s3_storage','backup_keys'])" index="backup">
+        <el-sub-menu v-if="hasAnyMenu(['backup_mysql_policies','backup_mongo_policies','backup_records','backup_tool_configs','backup_agents','backup_s3_storage','backup_keys','backup_overview'])" index="backup">
           <template #title>
             <el-icon><Collection /></el-icon>
             <span>备份管理</span>
           </template>
+          <el-menu-item v-if="hasMenu('backup_overview')" index="/backups/overview">
+            <el-icon><Notebook /></el-icon>
+            <span>备份总览</span>
+          </el-menu-item>
           <el-sub-menu v-if="hasAnyMenu(['backup_mysql_policies','backup_mongo_policies'])" index="backup-policies">
             <template #title>
-              <el-icon><Notebook /></el-icon>
+              <el-icon><Cpu /></el-icon>
               <span>策略管理</span>
             </template>
             <el-menu-item v-if="hasMenu('backup_mysql_policies')" index="/backups/mysql-policies">

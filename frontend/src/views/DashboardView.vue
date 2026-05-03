@@ -1,23 +1,39 @@
 <template>
-  <el-row :gutter="16">
-    <el-col :xs="24" :sm="12" :md="4" v-for="card in cards" :key="card.key">
-      <el-card class="metric-card">
-        <div class="label">{{ card.label }}</div>
-        <div class="value">{{ card.value }}</div>
-      </el-card>
-    </el-col>
-  </el-row>
+  <div>
+    <el-row :gutter="16">
+      <el-col :xs="24" :sm="12" :md="6" v-for="card in cards" :key="card.key">
+        <el-card class="metric-card">
+          <div class="label">{{ card.label }}</div>
+          <div class="value">{{ card.value }}</div>
+        </el-card>
+      </el-col>
+    </el-row>
 
-  <el-card class="chart-card">
-    <template #header>
-      <div class="header-row">
-        <span>最近24小时备份结果图表</span>
-        <el-button link type="primary" @click="loadStats">刷新</el-button>
-      </div>
-    </template>
-
-    <div ref="chartRef" class="chart-canvas" @click="loadStats"></div>
-  </el-card>
+    <el-row :gutter="16" class="chart-row">
+      <el-col :xs="24" :sm="12">
+        <el-card class="chart-card">
+          <template #header>
+            <div class="header-row">
+              <span>业务集群分布</span>
+              <el-button link type="primary" @click="loadClusterStats">刷新</el-button>
+            </div>
+          </template>
+          <div ref="projectChartRef" class="chart-canvas--pie"></div>
+        </el-card>
+      </el-col>
+      <el-col :xs="24" :sm="12">
+        <el-card class="chart-card">
+          <template #header>
+            <div class="header-row">
+              <span>数据库分布</span>
+              <el-button link type="primary" @click="loadClusterStats">刷新</el-button>
+            </div>
+          </template>
+          <div ref="dbTypeChartRef" class="chart-canvas--pie"></div>
+        </el-card>
+      </el-col>
+    </el-row>
+  </div>
 </template>
 
 <script setup>
@@ -25,28 +41,20 @@ import * as echarts from "echarts";
 import { nextTick, onBeforeUnmount, onMounted, reactive, ref } from "vue";
 import { ElMessage } from "element-plus";
 
-import { backupOverview } from "../api/modules/backups";
 import { listInstances } from "../api/modules/instances";
-import { formatBeijingTime } from "../utils/time";
+import { getClusterStats } from "../api/modules/clusters";
 
 const cards = reactive([
   { key: "mysql", label: "MySQL 实例", value: "0/0" },
   { key: "mongodb", label: "MongoDB 实例", value: "0/0" },
   { key: "redis", label: "Redis 实例", value: "0/0" },
   { key: "doris", label: "Doris 实例", value: "0/0" },
-  { key: "backup_success", label: "备份成功(24h)", value: 0 },
-  { key: "backup_failed", label: "备份失败(24h)", value: 0 },
 ]);
 
-const chartRef = ref(null);
-let chartInstance = null;
-
-function setCardValue(key, value) {
-  const card = cards.find((item) => item.key === key);
-  if (card) {
-    card.value = value;
-  }
-}
+const projectChartRef = ref(null);
+const dbTypeChartRef = ref(null);
+let projectChartInstance = null;
+let dbTypeChartInstance = null;
 
 function setInstanceCard(key, instances) {
   const card = cards.find((item) => item.key === key);
@@ -57,103 +65,137 @@ function setInstanceCard(key, instances) {
   }
 }
 
-function convertToBeijingTime(utcLabel) {
-  if (!utcLabel) {
-    return utcLabel;
+function renderProjectChart(data) {
+  if (!projectChartRef.value) return;
+  if (!projectChartInstance) {
+    projectChartInstance = echarts.init(projectChartRef.value);
   }
-  const dateStr = utcLabel.replace(" ", "T") + ":00Z";
-  const date = new Date(dateStr);
-  if (Number.isNaN(date.getTime())) {
-    return utcLabel;
-  }
-  return new Intl.DateTimeFormat("zh-CN", {
-    timeZone: "Asia/Shanghai",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    hour12: false,
-  }).format(date);
-}
-
-function renderChart(chart) {
-  if (!chartRef.value) {
-    return;
-  }
-  if (!chartInstance) {
-    chartInstance = echarts.init(chartRef.value);
-  }
-
-  const beijingLabels = (chart.labels || []).map(convertToBeijingTime);
-
-  chartInstance.setOption({
+  projectChartInstance.setOption({
     tooltip: {
-      trigger: "axis",
+      trigger: "item",
+      formatter: "{b}: {c}",
     },
     legend: {
-      data: ["成功", "失败"],
-      top: 0,
-    },
-    grid: {
-      left: 42,
-      right: 20,
-      top: 48,
-      bottom: 42,
-    },
-    xAxis: {
-      type: "category",
-      data: beijingLabels,
-      axisLabel: {
-        rotate: 35,
-      },
-    },
-    yAxis: {
-      type: "value",
-      minInterval: 1,
+      orient: "vertical",
+      right: 10,
+      top: "center",
     },
     series: [
       {
-        name: "成功",
-        type: "line",
-        smooth: true,
-        data: chart.success || [],
-        itemStyle: { color: "#2f9e44" },
-        areaStyle: { color: "rgba(47, 158, 68, 0.15)" },
-      },
-      {
-        name: "失败",
-        type: "line",
-        smooth: true,
-        data: chart.failed || [],
-        itemStyle: { color: "#d9480f" },
-        areaStyle: { color: "rgba(217, 72, 15, 0.12)" },
+        type: "pie",
+        radius: ["40%", "70%"],
+        center: ["40%", "50%"],
+        avoidLabelOverlap: false,
+        itemStyle: {
+          borderRadius: 6,
+          borderColor: "#fff",
+          borderWidth: 2,
+        },
+        label: {
+          show: true,
+          position: "outside",
+          formatter: "{b}\n{c}套 ({d}%)",
+          fontSize: 12,
+        },
+        labelLine: {
+          show: true,
+        },
+        data: data.map((item, index) => ({
+          name: item.name,
+          value: item.value,
+          itemStyle: {
+            color: ["#5470c6", "#91cc75", "#fac858", "#ee6666", "#73c0de", "#3ba272", "#fc8452", "#9a60b4", "#ea7ccc"][index % 9],
+          },
+        })),
       },
     ],
   });
 }
 
+function renderDbTypeChart(data) {
+  if (!dbTypeChartRef.value) return;
+  if (!dbTypeChartInstance) {
+    dbTypeChartInstance = echarts.init(dbTypeChartRef.value);
+  }
+  const dbTypeLabels = {
+    mysql: "MySQL",
+    mongodb: "MongoDB",
+    redis: "Redis",
+    doris: "Doris",
+  };
+  dbTypeChartInstance.setOption({
+    tooltip: {
+      trigger: "item",
+      formatter: "{b}: {c}",
+    },
+    legend: {
+      orient: "vertical",
+      right: 10,
+      top: "center",
+    },
+    series: [
+      {
+        type: "pie",
+        radius: ["40%", "70%"],
+        center: ["40%", "50%"],
+        avoidLabelOverlap: false,
+        itemStyle: {
+          borderRadius: 6,
+          borderColor: "#fff",
+          borderWidth: 2,
+        },
+        label: {
+          show: true,
+          position: "outside",
+          formatter: "{b}\n{c}套 ({d}%)",
+          fontSize: 12,
+        },
+        labelLine: {
+          show: true,
+        },
+        data: data.map((item, index) => ({
+          name: dbTypeLabels[item.name] || item.name,
+          value: item.value,
+          itemStyle: {
+            color: ["#5470c6", "#91cc75", "#fac858", "#ee6666"][index % 4],
+          },
+        })),
+      },
+    ],
+  });
+}
+
+async function loadClusterStats() {
+  try {
+    const { data } = await getClusterStats();
+    const stats = data.data || { by_business: [], by_db_type: [] };
+    await nextTick();
+    renderProjectChart(stats.by_business || []);
+    renderDbTypeChart(stats.by_db_type || []);
+  } catch (error) {
+    console.error("加载集群统计失败", error);
+  }
+}
+
 async function loadStats() {
   try {
+    await loadClusterStats();
+
     const tasks = ["mysql", "mongodb", "redis", "doris"].map(async (dbType) => {
       const { data } = await listInstances(dbType);
       const instances = Array.isArray(data.data) ? data.data : [];
       setInstanceCard(dbType, instances);
     });
 
-    const backupTask = backupOverview(24).then(async ({ data }) => {
-      setCardValue("backup_success", data.data.success || 0);
-      setCardValue("backup_failed", data.data.failed || 0);
-      await nextTick();
-      renderChart(data.data.chart || {});
-    });
-
-    await Promise.all([...tasks, backupTask]);
+    await Promise.all(tasks);
   } catch (error) {
     ElMessage.error(error.response?.data?.message || "加载总览失败");
   }
 }
 
 function handleResize() {
-  chartInstance?.resize();
+  projectChartInstance?.resize();
+  dbTypeChartInstance?.resize();
 }
 
 onMounted(() => {
@@ -163,8 +205,10 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   window.removeEventListener("resize", handleResize);
-  chartInstance?.dispose();
-  chartInstance = null;
+  projectChartInstance?.dispose();
+  dbTypeChartInstance?.dispose();
+  projectChartInstance = null;
+  dbTypeChartInstance = null;
 });
 </script>
 
@@ -185,18 +229,26 @@ onBeforeUnmount(() => {
 }
 
 .chart-card {
+  margin-top: 16px;
+}
+
+.chart-row {
   margin-top: 8px;
+}
+
+.chart-row .chart-card {
+  margin-top: 0;
+}
+
+.chart-canvas--pie {
+  width: 100%;
+  height: 320px;
+  cursor: pointer;
 }
 
 .header-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
-}
-
-.chart-canvas {
-  width: 100%;
-  height: 380px;
-  cursor: pointer;
 }
 </style>

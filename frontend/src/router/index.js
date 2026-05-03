@@ -8,6 +8,7 @@ import BackupKeyManageView from "../views/BackupKeyManageView.vue";
 import BackupMongoPolicyView from "../views/BackupMongoPolicyView.vue";
 import BackupMysqlPolicyView from "../views/BackupMysqlPolicyView.vue";
 import BackupNotifyTargetsView from "../views/BackupNotifyTargetsView.vue";
+import BackupOverviewView from "../views/BackupOverviewView.vue";
 import BackupRecordsView from "../views/BackupRecordsView.vue";
 import BackupToolConfigView from "../views/BackupToolConfigView.vue";
 import ClusterManageView from "../views/ClusterManageView.vue";
@@ -70,6 +71,7 @@ const routes = [
       { path: "/service/inspection", component: InspectionManageView, meta: { title: "巡检管理" } },
 
       { path: "/backups/mysql-policies", component: BackupMysqlPolicyView, meta: { title: "MySQL策略" } },
+            { path: "/backups/overview", component: BackupOverviewView, meta: { title: "备份总览" } },
       { path: "/backups/mongo-policies", component: BackupMongoPolicyView, meta: { title: "MongoDB策略" } },
       { path: "/backups/records", component: BackupRecordsView, meta: { title: "备份记录" } },
       { path: "/backups/agents", component: BackupAgentView, meta: { title: "备份Agent管理" } },

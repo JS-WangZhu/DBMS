@@ -76,3 +76,8 @@ export function listClusterTopologyHistory(clusterId, page = 1, pageSize = 10) {
     timeout: 60000,
   });
 }
+
+// 获取集群统计（按项目+按数据库类型）
+export function getClusterStats() {
+  return client.get("/clusters/stats");
+}

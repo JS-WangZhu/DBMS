@@ -260,7 +260,7 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="操作" min-width="90" class-name="op-col">
+        <el-table-column label="操作" width="90" fixed="right" class-name="op-col">
           <template #default="scope">
             <div class="op-actions">
               <button v-if="isAdmin" type="button" class="table-link table-link--primary" @click.stop="openEditDialog(scope.row)">编辑</button>
@@ -269,7 +269,7 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="心跳时间" min-width="50" show-overflow-tooltip>
+        <el-table-column label="心跳时间" width="160" fixed="right" show-overflow-tooltip>
           <template #default="scope">
             {{ lastCheckText(scope.row) }}
           </template>
