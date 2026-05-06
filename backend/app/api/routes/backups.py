@@ -307,6 +307,8 @@ def _infer_mysql_replication_role(payload: dict):
 def _mysql_role_text(role: str):
     if role == "dual":
         return "主库/从库"
+    if role == "master_slave":
+        return "主库/从库"
     if role == "slave":
         return "从库"
     if role == "master":

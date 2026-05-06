@@ -177,6 +177,9 @@ function replicationFor(row) {
 }
 
 function roleTagType(role) {
+  if (role === "master_slave" || role === "dual") {
+    return "warning";
+  }
   if (role === "master") {
     return "success";
   }
@@ -190,6 +193,9 @@ function roleTagType(role) {
 }
 
 function roleText(role) {
+  if (role === "master_slave" || role === "dual") {
+    return "主/从";
+  }
   if (role === "master") {
     return "主库";
   }

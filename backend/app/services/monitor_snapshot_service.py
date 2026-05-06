@@ -46,3 +46,32 @@ def latest_payload_by_instance_ids(
     for row in snapshots:
         payload_by_instance[row.instance_id] = row.payload_json if isinstance(row.payload_json, dict) else {}
     return payload_by_instance
+
+
+def latest_snapshots_by_instance_ids(
+    db_type: str,
+    instance_ids: Iterable[int],
+    metric_type: str = "status",
+):
+    model = snapshot_model_for_db(db_type)
+    if not model:
+        return {}
+    ids: List[int] = [int(item) for item in instance_ids if item is not None]
+    if not ids:
+        return {}
+
+    latest_ids = (
+        db.session.query(
+            model.instance_id,
+            db.func.max(model.id).label("max_id"),
+        )
+        .filter(model.instance_id.in_(ids), model.metric_type == metric_type)
+        .group_by(model.instance_id)
+        .subquery()
+    )
+    snapshots = (
+        db.session.query(model)
+        .join(latest_ids, model.id == latest_ids.c.max_id)
+        .all()
+    )
+    return {row.instance_id: row for row in snapshots}

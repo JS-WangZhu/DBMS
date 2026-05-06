@@ -128,6 +128,8 @@ def mysql_list_instances():
     keyword = request.args.get("keyword")
     cluster_id = request.args.get("cluster_id")
     namespace = request.args.get("namespace")
+    business_line = request.args.get("business_line")
+    environment = request.args.get("environment")
     items, total, page, page_size = list_instances_paginated(
         db_type="mysql",
         page=page,
@@ -135,6 +137,8 @@ def mysql_list_instances():
         keyword=keyword,
         cluster_id=cluster_id,
         namespace=namespace,
+        business_line=business_line,
+        environment=environment,
     )
     return ok_response(
         data={
@@ -244,4 +248,3 @@ def mysql_instance_detail(instance_id):
     if snapshot_payload:
         return ok_response(data=_instance_detail_view(instance.id, snapshot_payload, source="snapshot", running_status=instance.running_status or "unknown"))
     return ok_response(data=_instance_detail_view(instance.id, {}, source="none", running_status="unknown"))
-

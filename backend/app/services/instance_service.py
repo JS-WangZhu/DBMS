@@ -123,7 +123,17 @@ def list_instances(db_type=None, enabled=None):
     return query.order_by(DatabaseInstance.id.desc()).all()
 
 
-def list_instances_paginated(db_type=None, enabled=None, page=1, page_size=20, keyword=None, cluster_id=None, namespace=None):
+def list_instances_paginated(
+    db_type=None,
+    enabled=None,
+    page=1,
+    page_size=20,
+    keyword=None,
+    cluster_id=None,
+    namespace=None,
+    business_line=None,
+    environment=None,
+):
     try:
         page = int(page)
     except (TypeError, ValueError):
@@ -147,8 +157,19 @@ def list_instances_paginated(db_type=None, enabled=None, page=1, page_size=20, k
         except (TypeError, ValueError):
             query = query.filter(DatabaseInstance.id == -1)
     namespace_text = str(namespace or "").strip()
-    if namespace_text:
-        query = query.join(DatabaseCluster, DatabaseCluster.id == DatabaseInstance.cluster_id).filter(DatabaseCluster.namespace == namespace_text)
+    business_line_text = str(business_line or "").strip()
+    environment_text = str(environment or "").strip()
+    needs_cluster_filter = bool(namespace_text or business_line_text or environment_text)
+    if needs_cluster_filter:
+        query = query.join(DatabaseCluster, DatabaseCluster.id == DatabaseInstance.cluster_id)
+        if namespace_text:
+            query = query.filter(DatabaseCluster.namespace == namespace_text)
+        if business_line_text:
+            query = query.filter(
+                (DatabaseCluster.business_line == business_line_text) | (DatabaseCluster.namespace == business_line_text)
+            )
+        if environment_text:
+            query = query.filter(DatabaseCluster.environment == environment_text)
     keyword_text = str(keyword or "").strip()
     if keyword_text:
         pattern = f"%{keyword_text}%"

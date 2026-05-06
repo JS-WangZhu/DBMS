@@ -1,12 +1,12 @@
 ﻿from datetime import datetime
 
-from flask import Blueprint
+from flask import Blueprint, request
 
 from app.api.routes.common import active_user_required
 from app.extensions import db
 from app.models.db_asset import DatabaseInstance
 from app.models.monitor_snapshot import snapshot_model_for_instance
-from app.services.monitor_snapshot_service import latest_snapshot_for_instance
+from app.services.monitor_snapshot_service import latest_snapshot_for_instance, latest_snapshots_by_instance_ids
 from app.services.collectors import collect_instance_metrics
 from app.utils.crypto import decrypt_secret
 from app.utils.response import error_response, ok_response
@@ -124,4 +124,66 @@ def get_instance_health(instance_id):
             "seconds_since_base": seconds_since_base,
         }
     )
+
+
+@bp.post("/instances/health")
+@active_user_required
+def get_instances_health():
+    """批量获取实例最新健康状态，减少前端 N+1 请求。"""
+    payload = request.get_json(silent=True) or {}
+    db_type = str(payload.get("db_type") or "").strip().lower()
+    if db_type not in {"mysql", "mongodb", "redis", "doris"}:
+        return error_response("invalid db_type", code=400)
+
+    raw_ids = payload.get("instance_ids")
+    if not isinstance(raw_ids, list):
+        return error_response("instance_ids must be a list", code=400)
+
+    instance_ids = []
+    for item in raw_ids:
+        try:
+            instance_ids.append(int(item))
+        except (TypeError, ValueError):
+            continue
+    if not instance_ids:
+        return ok_response(data={})
+
+    rows = (
+        DatabaseInstance.query
+        .filter(DatabaseInstance.id.in_(instance_ids), DatabaseInstance.db_type == db_type)
+        .all()
+    )
+    if not rows:
+        return ok_response(data={})
+
+    status_by_id = {row.id: (row.running_status or "unknown") for row in rows}
+    latest_snapshot_by_id = latest_snapshots_by_instance_ids(db_type=db_type, instance_ids=[row.id for row in rows], metric_type="status")
+
+    snapshot_payload_by_id = {}
+    for row in rows:
+        snapshot = latest_snapshot_by_id.get(row.id)
+        if not snapshot:
+            continue
+        payload_json = snapshot.payload_json if isinstance(snapshot.payload_json, dict) else {}
+        ping_ok = payload_json.get("ping_ok")
+        if ping_ok is True:
+            running_status = "running"
+        elif ping_ok is False:
+            running_status = "unknown"
+        else:
+            running_status = status_by_id.get(row.id, "unknown")
+        snapshot_payload_by_id[row.id] = {
+            "running_status": running_status,
+            "collected_at": snapshot.collected_at.isoformat() if snapshot.collected_at else None,
+            "payload_json": payload_json,
+        }
+
+    result = {}
+    for row in rows:
+        result[row.id] = snapshot_payload_by_id.get(row.id) or {
+            "running_status": status_by_id.get(row.id, "unknown"),
+            "collected_at": None,
+            "payload_json": {},
+        }
+    return ok_response(data=result)
 

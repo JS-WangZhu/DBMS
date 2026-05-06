@@ -253,6 +253,35 @@ def _failure_reason(node: dict):
     return "；".join(reasons) if reasons else "满足故障切换条件"
 
 
+def _node_host_key(node: dict):
+    host = (node.get("resolved_ip") or node.get("host") or "").strip().lower()
+    port = node.get("port")
+    if not host or port in (None, ""):
+        return None
+    return f"{host}:{int(port)}"
+
+
+def _node_source_key(node: dict):
+    host = (node.get("replica_source_resolved_ip") or node.get("replica_source_host") or "").strip().lower()
+    port = node.get("replica_source_port")
+    if not host or port in (None, ""):
+        return None
+    return f"{host}:{int(port)}"
+
+
+def _mark_mysql_master_slave_roles(nodes: list):
+    if not nodes:
+        return
+    downstream_source_keys = {_node_source_key(node) for node in nodes}
+    for node in nodes:
+        role = str(node.get("replication_role") or "").strip().lower()
+        if role != "slave" or node.get("effective_read_only") is not False:
+            continue
+        self_key = _node_host_key(node)
+        if self_key and self_key in downstream_source_keys:
+            node["replication_role"] = "master_slave"
+
+
 def _failure_switch_block_reason(topology: dict):
     nodes = topology.get("nodes") or []
     current_master_id = topology.get("current_master_instance_id")
@@ -265,7 +294,7 @@ def _failure_switch_block_reason(topology: dict):
 
     master_healthy = (
         current_master.get("ok") is True
-        and current_master.get("replication_role") == "master"
+        and current_master.get("replication_role") in {"master", "master_slave"}
         and current_master.get("effective_read_only") is False
     )
     if not master_healthy:
@@ -800,14 +829,16 @@ def build_cluster_topology(cluster_id: int):
         node["ha_domain_matched"] = bool(node.get("resolved_ip") and node["resolved_ip"] in resolved_servers)
         nodes.append(node)
 
+    _mark_mysql_master_slave_roles(nodes)
+
     current_master = None
     for node in nodes:
-        if node.get("ha_domain_matched") and node.get("replication_role") == "master" and node.get("effective_read_only") is False:
+        if node.get("ha_domain_matched") and node.get("replication_role") in {"master", "master_slave"} and node.get("effective_read_only") is False:
             current_master = node
             break
     if current_master is None:
         for node in nodes:
-            if node.get("replication_role") == "master" and node.get("effective_read_only") is False:
+            if node.get("replication_role") in {"master", "master_slave"} and node.get("effective_read_only") is False:
                 current_master = node
                 break
 

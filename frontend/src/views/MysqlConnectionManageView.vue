@@ -182,6 +182,7 @@
             <template #default="scope">
               <el-tag v-if="scope.row.is_current_master" type="danger">当前主库</el-tag>
               <el-tag v-else-if="scope.row.replication_role === 'slave'" type="success">从库</el-tag>
+              <el-tag v-else-if="scope.row.replication_role === 'master_slave'" type="warning">主库/从库</el-tag>
               <el-tag v-else-if="scope.row.replication_role === 'master'" type="warning">主库</el-tag>
               <el-tag v-else>{{ scope.row.replication_role || "未知" }}</el-tag>
             </template>
@@ -654,7 +655,7 @@ function getFailureSwitchBlockedReason(nodes, currentMasterId) {
   if (!currentMaster) {
     return "";
   }
-  const masterHealthy = currentMaster.ok && currentMaster.replication_role === "master" && currentMaster.effective_read_only === false;
+  const masterHealthy = currentMaster.ok && ["master", "master_slave"].includes(currentMaster.replication_role) && currentMaster.effective_read_only === false;
   if (!masterHealthy) {
     return "";
   }
@@ -878,6 +879,7 @@ function onTopoHistoryPageChange(page) {
 
 function mysqlRoleTagType(role) {
   const key = String(role || "").toLowerCase();
+  if (key === "master_slave" || key === "dual") return "warning";
   if (key === "master") return "danger";
   if (key === "slave" || key === "replica") return "success";
   if (key === "read_only") return "warning";

@@ -258,6 +258,21 @@ def _refresh_mysql_cluster_ha(instances, payload_by_instance):
     for ins in instance_rows:
         cluster_instances.setdefault(ins.cluster_id, []).append(ins)
 
+    def _instance_host_key(instance):
+        host = (instance.resolved_ip or instance.host_input or "").strip().lower()
+        if not host or instance.port in (None, ""):
+            return None
+        return f"{host}:{int(instance.port)}"
+
+    def _payload_source_key(payload):
+        host = (payload.get("replica_source_resolved_ip") or payload.get("replica_source_host") or "").strip().lower()
+        port = payload.get("replica_source_port")
+        if not host or port in (None, ""):
+            return None
+        return f"{host}:{int(port)}"
+
+    downstream_source_keys = {_payload_source_key(payload_by_instance.get(ins.id) or {}) for ins in instance_rows}
+
     for cluster in mysql_clusters:
         ha_domain = (cluster.ha_domain or "").strip()
         if not ha_domain:
@@ -273,9 +288,12 @@ def _refresh_mysql_cluster_ha(instances, payload_by_instance):
                 continue
             payload = payload_by_instance.get(ins.id) or {}
             matched_instance = ins
+            role = str(payload.get("replication_role") or "").strip().lower()
+            self_key = _instance_host_key(ins)
+            has_downstream_replica = bool(self_key and self_key in downstream_source_keys)
             matched_writable = bool(
                 payload.get("ping_ok") is True
-                and payload.get("replication_role") == "master"
+                and (role in {"master", "master_slave"} or (role == "slave" and has_downstream_replica))
                 and payload.get("effective_read_only") is False
             )
             break

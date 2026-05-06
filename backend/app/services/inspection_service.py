@@ -484,15 +484,50 @@ def run_inspection_cycle(trigger: str = "manual", force: bool = False):
         _INSPECTION_LOCK.release()
 
 
-def inspection_overview(db_type: str = None, cluster_id: int = None, status: str = None):
+def inspection_overview(
+    db_type: str = None,
+    cluster_id: int = None,
+    status: str = None,
+    page: int = 1,
+    page_size: int = 10,
+    allowed_cluster_ids=None,
+):
+    try:
+        page = int(page)
+    except (TypeError, ValueError):
+        page = 1
+    try:
+        page_size = int(page_size)
+    except (TypeError, ValueError):
+        page_size = 10
+    page = max(page, 1)
+    page_size = max(1, min(page_size, 100))
+
     instances_query = DatabaseInstance.query.filter_by(enabled=True)
     if db_type:
         instances_query = instances_query.filter_by(db_type=db_type)
     if cluster_id:
         instances_query = instances_query.filter_by(cluster_id=cluster_id)
+    if allowed_cluster_ids is not None:
+        ids = [int(item) for item in (allowed_cluster_ids or []) if item is not None]
+        if not ids:
+            return {
+                "items": [],
+                "page": page,
+                "page_size": page_size,
+                "total": 0,
+                "summary": {"total": 0, "abnormal": 0, "normal": 0},
+            }
+        instances_query = instances_query.filter(DatabaseInstance.cluster_id.in_(ids))
     instances = instances_query.order_by(DatabaseInstance.id.desc()).all()
     if not instances:
-        return {"items": [], "summary": {"total": 0, "abnormal": 0, "normal": 0}}
+        return {
+            "items": [],
+            "page": page,
+            "page_size": page_size,
+            "total": 0,
+            "summary": {"total": 0, "abnormal": 0, "normal": 0},
+        }
 
     cluster_ids = sorted({item.cluster_id for item in instances if item.cluster_id})
     cluster_map = {
@@ -542,8 +577,16 @@ def inspection_overview(db_type: str = None, cluster_id: int = None, status: str
         )
     abnormal = sum(1 for item in items if item["inspection_status"] == "abnormal")
     total = len(items)
+    total = len(items)
+    start = (page - 1) * page_size
+    end = start + page_size
+    paged_items = items[start:end]
+
     return {
-        "items": items,
+        "items": paged_items,
+        "page": page,
+        "page_size": page_size,
+        "total": total,
         "summary": {
             "total": total,
             "abnormal": abnormal,

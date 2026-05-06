@@ -32,23 +32,24 @@ def get_overview():
     db_type = (request.args.get("db_type") or "").strip() or None
     status = (request.args.get("status") or "").strip() or None
     cluster_id = _safe_int(request.args.get("cluster_id"))
+    page = _safe_int(request.args.get("page")) or 1
+    page_size = _safe_int(request.args.get("page_size")) or 10
     user = get_current_user()
+    allowed = None
     if user and user.role != "admin":
         allowed = list_allowed_cluster_ids("query") or []
         if cluster_id and cluster_id not in allowed:
-            return ok_response(data={"items": [], "summary": {"total": 0, "abnormal": 0, "normal": 0}})
+            return ok_response(data={"items": [], "page": page, "page_size": page_size, "total": 0, "summary": {"total": 0, "abnormal": 0, "normal": 0}})
         if not cluster_id and not allowed:
-            return ok_response(data={"items": [], "summary": {"total": 0, "abnormal": 0, "normal": 0}})
-    data = inspection_overview(db_type=db_type, cluster_id=cluster_id, status=status)
-    if user and user.role != "admin":
-        allowed = set(list_allowed_cluster_ids("query") or [])
-        if allowed:
-            data["items"] = [item for item in data["items"] if item.get("cluster_id") in allowed]
-            total = len(data["items"])
-            abnormal = sum(1 for item in data["items"] if item.get("inspection_status") == "abnormal")
-            data["summary"] = {"total": total, "abnormal": abnormal, "normal": total - abnormal}
-        else:
-            data = {"items": [], "summary": {"total": 0, "abnormal": 0, "normal": 0}}
+            return ok_response(data={"items": [], "page": page, "page_size": page_size, "total": 0, "summary": {"total": 0, "abnormal": 0, "normal": 0}})
+    data = inspection_overview(
+        db_type=db_type,
+        cluster_id=cluster_id,
+        status=status,
+        page=page,
+        page_size=page_size,
+        allowed_cluster_ids=allowed,
+    )
     return ok_response(data=data)
 
 

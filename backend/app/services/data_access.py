@@ -305,7 +305,7 @@ def pick_instance(db_type: str, cluster_id: int, instance_id: int, for_change: b
     if not cluster_id:
         return None
     if db_type == "mysql":
-        return _select_instance_by_role(db_type, cluster_id, ["master"] if for_change else ["slave", "master"], "replication_role")
+        return _select_instance_by_role(db_type, cluster_id, ["master", "master_slave"] if for_change else ["slave", "master_slave", "master"], "replication_role")
     if db_type == "mongodb":
         return _select_instance_by_role(db_type, cluster_id, ["primary"] if for_change else ["secondary", "primary"], "mongo_role")
     if db_type == "redis":

@@ -12,3 +12,10 @@ export function latestSnapshot(instanceId) {
 export function getInstanceHealth(instanceId) {
   return client.get(`/monitoring/instance/${instanceId}/health`);
 }
+
+export function getInstancesHealth(dbType, instanceIds = []) {
+  return client.post("/monitoring/instances/health", {
+    db_type: dbType,
+    instance_ids: instanceIds,
+  });
+}

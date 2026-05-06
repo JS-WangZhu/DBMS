@@ -60,6 +60,30 @@ def _snapshot_failed(payload: dict) -> bool:
     return False
 
 
+def _is_mysql_writable_master(payload: dict, has_downstream_replica: bool = False) -> bool:
+    role = str(payload.get("replication_role") or "").strip().lower()
+    return bool(
+        payload.get("ping_ok") is True
+        and (role in {"master", "master_slave"} or (role == "slave" and has_downstream_replica))
+        and payload.get("effective_read_only") is False
+    )
+
+
+def _instance_host_key(instance: DatabaseInstance):
+    host = (instance.resolved_ip or instance.host_input or "").strip().lower()
+    if not host or instance.port in (None, ""):
+        return None
+    return f"{host}:{int(instance.port)}"
+
+
+def _payload_source_key(payload: dict):
+    host = (payload.get("replica_source_resolved_ip") or payload.get("replica_source_host") or "").strip().lower()
+    port = payload.get("replica_source_port")
+    if not host or port in (None, ""):
+        return None
+    return f"{host}:{int(port)}"
+
+
 def _event_timestamp():
     return _beijing_now_iso()
 
@@ -466,17 +490,15 @@ def collect_cluster_health(cluster_id):
         resolved_ip = resolve_host(cluster.ha_domain) or cluster.ha_domain
         matched_instance = None
         matched_writable = False
+        downstream_source_keys = {_payload_source_key(payload_map.get(ins.id) or {}) for ins in instances}
         for instance in instances:
             host = (instance.resolved_ip or instance.host_input or "").strip()
             if host != resolved_ip:
                 continue
             payload = payload_map.get(instance.id) or {}
             matched_instance = instance
-            matched_writable = bool(
-                payload.get("ping_ok") is True and
-                payload.get("replication_role") == "master" and
-                payload.get("effective_read_only") is False
-            )
+            self_key = _instance_host_key(instance)
+            matched_writable = _is_mysql_writable_master(payload, bool(self_key and self_key in downstream_source_keys))
             break
 
         cluster.ha_status_json = {
@@ -544,16 +566,14 @@ def check_cluster_ha(cluster_id):
 
     matched_instance = None
     matched_writable = False
+    downstream_source_keys = {_payload_source_key(payload_map.get(ins.id) or {}) for ins in instances}
     for instance in instances:
         host = (instance.resolved_ip or instance.host_input or "").strip()
         payload = payload_map.get(instance.id) or {}
         if host == resolved_ip:
             matched_instance = instance
-            matched_writable = bool(
-                payload.get("ping_ok") is True and
-                payload.get("replication_role") == "master" and
-                payload.get("effective_read_only") is False
-            )
+            self_key = _instance_host_key(instance)
+            matched_writable = _is_mysql_writable_master(payload, bool(self_key and self_key in downstream_source_keys))
             break
 
     status = {
