@@ -14,7 +14,7 @@
         <el-card class="chart-card">
           <template #header>
             <div class="header-row">
-              <span>业务集群分布</span>
+              <span>业务维度集群分布</span>
               <el-button link type="primary" @click="loadClusterStats">刷新</el-button>
             </div>
           </template>
@@ -25,7 +25,7 @@
         <el-card class="chart-card">
           <template #header>
             <div class="header-row">
-              <span>数据库分布</span>
+              <span>系统维度集群分布</span>
               <el-button link type="primary" @click="loadClusterStats">刷新</el-button>
             </div>
           </template>
