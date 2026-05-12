@@ -15,6 +15,7 @@ from app.services.backup_executor import run_backup_policy
 from app.services.collectors import collect_instance_metrics
 from app.services.dns_resolver import refresh_all_dns, resolve_host
 from app.services.inspection_service import get_or_create_inspection_config, run_inspection_cycle
+from app.services.instance_status_config import get_or_create_instance_status_config
 from app.services.notifier import notify_backup_failure
 from app.services.topology_history import (
     extract_mongo_topology,
@@ -68,16 +69,7 @@ def register_jobs(scheduler, app):
         kwargs={"app": app},
     )
 
-    scheduler.add_job(
-        id="monitor_collect_1min",
-        func=job_monitor_collect,
-        trigger="interval",
-        seconds=30,
-        replace_existing=True,
-        max_instances=1,
-        coalesce=True,
-        kwargs={"app": app},
-    )
+    sync_monitor_collect_job(scheduler=scheduler, app=app)
 
     scheduler.add_job(
         id="monitor_snapshot_cleanup_daily",
@@ -115,6 +107,27 @@ def sync_backup_jobs(scheduler, app):
                 replace_existing=True,
                 kwargs={"app": app, "policy_id": policy.id},
             )
+
+
+def sync_monitor_collect_job(scheduler, app):
+    app = _resolve_app(app) or app
+    job_id = "monitor_collect_1min"
+    if scheduler.get_job(job_id):
+        scheduler.remove_job(job_id)
+
+    with app.app_context():
+        cfg = get_or_create_instance_status_config()
+        interval_seconds = max(10, int(cfg.probe_poll_interval_seconds or 30))
+        scheduler.add_job(
+            id=job_id,
+            func=job_monitor_collect,
+            trigger="interval",
+            seconds=interval_seconds,
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+            kwargs={"app": app},
+        )
 
 
 def sync_inspection_job(scheduler, app):
@@ -424,7 +437,8 @@ def job_monitor_collect(app):
                     future_map[future] = instance_id
 
                 completed = set()
-                collect_timeout_seconds = float(current_app.config.get("MONITOR_COLLECT_TIMEOUT_SECONDS", 8))
+                status_cfg = get_or_create_instance_status_config()
+                collect_timeout_seconds = float(status_cfg.metric_refresh_timeout_seconds or 8)
                 if collect_timeout_seconds < 1:
                     collect_timeout_seconds = 1
                 try:

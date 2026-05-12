@@ -216,6 +216,14 @@ CREATE TABLE `inspection_configs` (`created_at` DATETIME NOT NULL DEFAULT CURREN
 `last_run_summary_json` JSON NULL,
 `extra_json` JSON NULL,
 PRIMARY KEY (`id`)) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci AUTO_INCREMENT = 2 ROW_FORMAT = Dynamic;
+-- instance_status_configs DDL
+DROP TABLE IF EXISTS `instance_status_configs`;
+CREATE TABLE `instance_status_configs` (`created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+`updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+`id` INT NOT NULL AUTO_INCREMENT,
+`metric_refresh_timeout_seconds` INT NOT NULL,
+`probe_poll_interval_seconds` INT NOT NULL,
+PRIMARY KEY (`id`)) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci AUTO_INCREMENT = 2 ROW_FORMAT = Dynamic;
 -- monitor_snapshots_doris DDL
 DROP TABLE IF EXISTS `monitor_snapshots_doris`;
 CREATE TABLE `monitor_snapshots_doris` (`created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,

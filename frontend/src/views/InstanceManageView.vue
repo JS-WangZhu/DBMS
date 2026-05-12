@@ -349,12 +349,12 @@ import { Coin, Files, Lightning, DataAnalysis } from "@element-plus/icons-vue";
 
 import { collectClusterHealth, listClusters } from "../api/modules/clusters";
   import { createDorisInstance, dorisFeStatus, listDorisInstances } from "../api/modules/doris";
-  import { deleteInstance, updateInstance as updateInstanceById } from "../api/modules/instances";
+  import { deleteInstance, getInstanceStatusConfig, updateInstance as updateInstanceById } from "../api/modules/instances";
   import { createMongoInstance, listMongoInstances, mongoReplicaStatus } from "../api/modules/mongodb";
   import { getInstanceHealth } from "../api/modules/monitoring";
   import { createMysqlInstance, listMysqlInstances, mysqlInstanceDetail, mysqlReplication } from "../api/modules/mysql";
   import { createRedisInstance, listRedisInstances, redisClusterHealth } from "../api/modules/redis";
-  import { formatBeijingTime } from "../utils/time";
+  import { formatBeijingTime, parseBeijingTimeMs } from "../utils/time";
 
 const route = useRoute();
 
@@ -427,6 +427,7 @@ const rows = ref([]);
 const clusters = ref([]);
 const keyword = ref("");
 const healthIntervalSec = ref(0);
+const statusProbePollIntervalSec = ref(30);
 const selectedBusinessLine = ref(null);
 const selectedEnvironment = ref(null);
 const selectedClusterId = ref(null);
@@ -1226,7 +1227,7 @@ function lastCheckText(row) {
   if (!raw) {
     return "-";
   }
-  const ts = Date.parse(raw);
+  const ts = parseBeijingTimeMs(raw);
   if (Number.isNaN(ts)) {
     return "-";
   }
@@ -1767,6 +1768,19 @@ async function executeHealthCheckBatch(force = false) {
   await loadHealthStatusFromDb(force);
 }
 
+async function loadInstanceStatusConfig() {
+  try {
+    const { data } = await getInstanceStatusConfig();
+    const interval = Number(data?.data?.probe_poll_interval_seconds || 30);
+    statusProbePollIntervalSec.value = interval > 0 ? interval : 30;
+    healthIntervalSec.value = statusProbePollIntervalSec.value;
+  } catch (error) {
+    statusProbePollIntervalSec.value = 30;
+    healthIntervalSec.value = 30;
+    console.warn("Load instance status config failed:", error);
+  }
+}
+
 // 刷新所有实例健康状态（从数据库读取）
 async function runHealthCheck(force = false) {
   if (healthBatchRunning.value || !rows.value.length) {
@@ -1783,7 +1797,7 @@ async function runHealthCheck(force = false) {
 }
 
 function healthRefreshTtlMs() {
-  return 30 * 1000;
+  return statusProbePollIntervalSec.value * 1000;
 }
 
 function shouldRefreshHealth(force = false) {
@@ -1910,7 +1924,7 @@ function setupRefreshTimer() {
   clearRefreshTimer();
   refreshTimer = setInterval(() => {
     reloadAll();
-  }, 30 * 1000);
+  }, statusProbePollIntervalSec.value * 1000);
 }
 
 async function reloadAll(forceHealth = false) {
@@ -2221,15 +2235,17 @@ async function removeInstance(row) {
 onMounted(async () => {
   resetForm();
   resetPager();
+  await loadInstanceStatusConfig();
   await reloadAll();
   setupHealthTimer();
 });
 
-onActivated(() => {
+onActivated(async () => {
   // 页面激活时启动定时器（keep-alive 缓存后重新激活）
+  await loadInstanceStatusConfig();
   setupHealthTimer();
   setupRelativeTimer();
-  setupRefreshTimer(); // 每30秒刷新实例列表
+  setupRefreshTimer();
 });
 
 onDeactivated(() => {

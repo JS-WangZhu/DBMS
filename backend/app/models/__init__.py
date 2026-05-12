@@ -8,6 +8,7 @@ from app.models.data_query_op import DataQueryOperationConfig
 from app.models.db_asset import DatabaseCluster, DatabaseInstance
 from app.models.ha_config import HAConfig
 from app.models.inspection import InspectionAlert, InspectionConfig
+from app.models.instance_status_config import InstanceStatusConfig
 from app.models.monitor_snapshot import (
     MonitorSnapshotDoris,
     MonitorSnapshotMongoDB,
@@ -43,6 +44,7 @@ __all__ = [
     "HAConfig",
     "InspectionConfig",
     "InspectionAlert",
+    "InstanceStatusConfig",
     "MonitorSnapshotMySQL",
     "MonitorSnapshotMongoDB",
     "MonitorSnapshotRedis",

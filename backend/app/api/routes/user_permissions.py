@@ -51,6 +51,7 @@ MENU_CATALOG = [
     {"key": "users_permissions", "label": "用户权限管理"},
     {"key": "ai_model_config", "label": "AI模型管理"},
     {"key": "ha_config", "label": "高可用配置管理"},
+    {"key": "instance_status_config", "label": "实例状态检测管理"},
     {"key": "inspection_param_config", "label": "巡检参数管理"},
     {"key": "data_query_op_config", "label": "数据查询操作配置"},
     {"key": "sso_config", "label": "SSO登录管理"},

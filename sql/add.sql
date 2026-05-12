@@ -100,3 +100,9 @@ ALTER TABLE users ADD COLUMN display_name VARCHAR(128) NULL;
 ALTER TABLE users ADD COLUMN last_login_at DATETIME    NULL;
 ALTER TABLE users ADD UNIQUE KEY uk_users_sso_subject (sso_subject);
 
+CREATE TABLE `instance_status_configs` (`created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+`updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+`id` INT NOT NULL AUTO_INCREMENT,
+`metric_refresh_timeout_seconds` INT NOT NULL,
+`probe_poll_interval_seconds` INT NOT NULL,
+PRIMARY KEY (`id`)) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci AUTO_INCREMENT = 2 ROW_FORMAT = Dynamic;

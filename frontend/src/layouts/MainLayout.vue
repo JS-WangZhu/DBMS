@@ -183,7 +183,7 @@
           </el-menu-item>
         </el-sub-menu>
 
-        <el-sub-menu v-if="hasAnyMenu(['ai_model_config', 'ha_config', 'inspection_param_config', 'data_query_op_config', 'backup_notify_targets', 'sso_config'])" index="config">
+        <el-sub-menu v-if="hasAnyMenu(['ai_model_config', 'ha_config', 'instance_status_config', 'inspection_param_config', 'data_query_op_config', 'backup_notify_targets', 'sso_config'])" index="config">
           <template #title>
             <el-icon><Management /></el-icon>
             <span>配置管理</span>
@@ -195,6 +195,10 @@
           <el-menu-item v-if="hasMenu('ha_config')" index="/config/ha">
             <el-icon><Setting /></el-icon>
             <span>高可用配置管理</span>
+          </el-menu-item>
+          <el-menu-item v-if="hasMenu('instance_status_config')" index="/config/instance-status">
+            <el-icon><Timer /></el-icon>
+            <span>实例状态检测管理</span>
           </el-menu-item>
           <el-menu-item v-if="hasMenu('inspection_param_config')" index="/config/inspection">
             <el-icon><Operation /></el-icon>
@@ -356,6 +360,7 @@ const routePermissionMap = {
   "/users/permissions": "users_permissions",
   "/config/ai-models": "ai_model_config",
   "/config/ha": "ha_config",
+  "/config/instance-status": "instance_status_config",
   "/config/inspection": "inspection_param_config",
   "/config/data-query-ops": "data_query_op_config",
   "/config/sso": "sso_config",

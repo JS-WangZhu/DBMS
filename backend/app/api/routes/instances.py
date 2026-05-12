@@ -1,16 +1,18 @@
-﻿from flask import Blueprint, request
+from flask import Blueprint, current_app, request
 
-from app.api.routes.common import active_user_required, admin_required
-from app.extensions import db
+from app.api.routes.common import active_user_required, admin_required, require_menu_permission
+from app.extensions import db, scheduler
 from app.models.db_asset import DatabaseInstance
 from app.models.monitor_snapshot import snapshot_model_for_instance
 from app.services.audit import log_audit
 from app.services.dns_resolver import resolve_and_update_instance
+from app.services.instance_status_config import get_or_create_instance_status_config, update_instance_status_config
 from app.services.instance_service import (
     create_instance as create_instance_by_type,
     list_instances as list_instances_by_type,
     update_instance as update_instance_entity,
 )
+from app.tasks.scheduler import sync_monitor_collect_job
 from app.utils.response import error_response, ok_response
 
 bp = Blueprint("instances", __name__, url_prefix="/instances")
@@ -25,6 +27,28 @@ def list_instances():
     parsed_enabled = None if enabled is None else (enabled.lower() == "true")
     items = list_instances_by_type(db_type=db_type, enabled=parsed_enabled)
     return ok_response(data=[item.to_dict() for item in items])
+
+
+@bp.get("/status-config")
+@active_user_required
+def get_status_config():
+    cfg = get_or_create_instance_status_config()
+    return ok_response(data=cfg.to_dict())
+
+
+@bp.put("/status-config")
+@require_menu_permission("instance_status_config")
+def update_status_config():
+    payload = request.get_json(silent=True) or {}
+    cfg = get_or_create_instance_status_config()
+    err = update_instance_status_config(cfg, payload)
+    if err:
+        return error_response(err, code=400)
+    db.session.commit()
+    if current_app.config.get("ENABLE_SCHEDULER"):
+        sync_monitor_collect_job(scheduler=scheduler, app=current_app)
+    log_audit(user_id=None, action="instance.status_config.update", target_type="instance_status_config", target_id=str(cfg.id), detail=payload)
+    return ok_response(data=cfg.to_dict())
 
 
 @bp.post("")

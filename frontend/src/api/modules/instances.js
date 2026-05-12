@@ -19,3 +19,11 @@ export function deleteInstance(instanceId) {
 export function refreshResolve(instanceId) {
   return client.post(`/instances/${instanceId}/resolve`);
 }
+
+export function getInstanceStatusConfig() {
+  return client.get("/instances/status-config");
+}
+
+export function updateInstanceStatusConfig(payload) {
+  return client.put("/instances/status-config", payload);
+}
