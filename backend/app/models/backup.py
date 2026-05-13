@@ -2,6 +2,14 @@ from app.extensions import db
 from app.models.base import TimestampMixin
 
 
+def _utc_isoformat(value):
+    if not value:
+        return None
+    if value.tzinfo is None:
+        return f"{value.isoformat()}+00:00"
+    return value.isoformat()
+
+
 TARGET_TYPE_ENUM = db.Enum("instance", "cluster", name="backup_target_type", native_enum=False)
 BACKUP_TYPE_ENUM = db.Enum("full", "incremental", name="backup_type_enum", native_enum=False)
 BACKUP_STATUS_ENUM = db.Enum("running", "success", "failed", name="backup_status_enum", native_enum=False)
@@ -92,8 +100,8 @@ class BackupLog(db.Model, TimestampMixin):
             "id": self.id,
             "policy_id": self.policy_id,
             "policy_name": self.policy.name if self.policy else None,
-            "started_at": self.started_at.isoformat() if self.started_at else None,
-            "finished_at": self.finished_at.isoformat() if self.finished_at else None,
+            "started_at": _utc_isoformat(self.started_at),
+            "finished_at": _utc_isoformat(self.finished_at),
             "file_path": self.file_path,
             "size_bytes": self.size_bytes,
             "status": self.status,

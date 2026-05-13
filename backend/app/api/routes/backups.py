@@ -8,7 +8,7 @@ from flask import Blueprint, current_app, request, send_file, Response, stream_w
 from app.api.routes.common import active_user_required, admin_required
 from app.extensions import db, scheduler
 from app.models.backup_agent import BackupAgent
-from app.models.backup import BackupLog, BackupPolicy
+from app.models.backup import BackupLog, BackupPolicy, _utc_isoformat
 from app.models.db_asset import DatabaseInstance
 from app.models.notify_target import BackupNotifyTarget
 from app.models.s3_storage_config import S3StorageConfig
@@ -1030,7 +1030,7 @@ def backup_overview():
                     "policy_name": policy.name,
                     "db_type": policy.db_type,
                     "error_message": log.error_message,
-                    "started_at": log.started_at.isoformat() if log.started_at else None,
+                    "started_at": _utc_isoformat(log.started_at),
                 }
             )
 
