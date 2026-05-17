@@ -137,11 +137,11 @@ def test_sso_token_callback_uses_configured_token_placeholders(app, monkeypatch)
 
     captured = {}
 
-    def fake_post(url, data, timeout):
-        captured.update({"url": url, "data": data, "timeout": timeout})
+    def fake_get(url, timeout):
+        captured.update({"url": url, "timeout": timeout})
         return Response()
 
-    monkeypatch.setattr("app.services.auth.requests.post", fake_post)
+    monkeypatch.setattr("app.services.auth.requests.get", fake_get)
 
     client = app.test_client()
     resp = client.get("/api/v1/auth/sso/callback?sso_ticket=custom-token")
@@ -150,9 +150,61 @@ def test_sso_token_callback_uses_configured_token_placeholders(app, monkeypatch)
     assert resp.get_json()["data"]["user"]["username"] == "placeholder.user"
     parsed = urlparse(captured["url"])
     query = parse_qs(parsed.query)
-    assert captured["data"] == {}
     assert query["ticket"] == ["custom-token"]
     assert query["return_to"] == ["http://localhost/sso/callback?sso_ticket={token}"]
+
+
+def test_sso_token_callback_fetches_userinfo_url_with_token_placeholder(app, monkeypatch):
+    with app.app_context():
+        row = SsoConfig.get_current()
+        row.enabled = True
+        row.provider_name = "Acme SSO"
+        row.authorize_url = "https://sso.example.com/login"
+        row.token_url = "https://sso.example.com/token/verify"
+        row.userinfo_url = "https://sso.example.com/login/userinfo?token={token}"
+        row.redirect_uri = "http://localhost/sso/callback"
+        db.session.commit()
+
+    class TokenResponse:
+        status_code = 200
+        content = b"{}"
+
+        def json(self):
+            return {"ok": True}
+
+    class UserInfoResponse:
+        status_code = 200
+        content = b"{}"
+
+        def json(self):
+            return {
+                "data": {
+                    "username": "userinfo.user",
+                    "email": "userinfo.user@example.com",
+                }
+            }
+
+    captured = {}
+
+    def fake_post(url, data, timeout):
+        captured["post"] = {"url": url, "data": data, "timeout": timeout}
+        return TokenResponse()
+
+    def fake_get(url, headers=None, timeout=10):
+        captured["get"] = {"url": url, "headers": headers, "timeout": timeout}
+        return UserInfoResponse()
+
+    monkeypatch.setattr("app.services.auth.requests.post", fake_post)
+    monkeypatch.setattr("app.services.auth.requests.get", fake_get)
+
+    client = app.test_client()
+    resp = client.get(
+        "/api/v1/auth/sso/callback?token=enterprise-token&redirect_uri=http://localhost/sso/callback"
+    )
+
+    assert resp.status_code == 200
+    assert resp.get_json()["data"]["user"]["username"] == "userinfo.user"
+    assert parse_qs(urlparse(captured["get"]["url"]).query)["token"] == ["enterprise-token"]
 
 
 def test_sso_token_callback_supports_dotted_username_field(app, monkeypatch):
@@ -191,3 +243,42 @@ def test_sso_token_callback_supports_dotted_username_field(app, monkeypatch):
     payload = resp.get_json()["data"]
     assert payload["user"]["username"] == "nested.user"
     assert payload["user"]["email"] == "nested.user@example.com"
+
+
+def test_sso_token_callback_supports_custom_p_username_field(app, monkeypatch):
+    with app.app_context():
+        row = SsoConfig.get_current()
+        row.enabled = True
+        row.provider_name = "Acme SSO"
+        row.authorize_url = "https://sso.example.com/login"
+        row.token_url = "https://sso.example.com/login/userinfo?token={token}"
+        row.redirect_uri = "http://localhost/sso/callback"
+        row.username_field = "p.username"
+        row.email_field = "p.email"
+        db.session.commit()
+
+    class Response:
+        status_code = 200
+        content = b"{}"
+
+        def json(self):
+            return {
+                "code": 0,
+                "p": {
+                    "id": "u-1004",
+                    "username": "path.user",
+                    "email": "path.user@example.com",
+                },
+            }
+
+    monkeypatch.setattr("app.services.auth.requests.get", lambda url, timeout: Response())
+
+    client = app.test_client()
+    resp = client.get(
+        "/api/v1/auth/sso/callback?token=enterprise-token&redirect_uri=http://localhost/sso/callback"
+    )
+
+    assert resp.status_code == 200
+    payload = resp.get_json()["data"]
+    assert payload["user"]["username"] == "path.user"
+    assert payload["user"]["email"] == "path.user@example.com"

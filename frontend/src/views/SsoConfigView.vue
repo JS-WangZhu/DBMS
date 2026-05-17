@@ -53,7 +53,8 @@
         </el-form-item>
 
         <el-form-item label="Token 校验 URL" required>
-          <el-input v-model="form.token_url" placeholder="如 https://sso.example.com/token/verify?ticket={token}" />
+          <el-input v-model="form.token_url" placeholder="如 https://sso.example.com/login/userinfo?token={token}" />
+          <el-text class="hint" type="info">URL 中包含 {token} 时会使用 GET 请求，适合从登录端点按 token 获取用户信息</el-text>
         </el-form-item>
 
         <el-form-item label="UserInfo 端点 URL">

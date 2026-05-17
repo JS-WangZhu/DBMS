@@ -201,6 +201,19 @@ def build_sso_authorize_url(redirect_uri: str = ""):
     return {"authorize_url": authorize_url, "state": state, "redirect_uri": final_redirect_uri}
 
 
+def _get_by_path(data, key):
+    if not key:
+        return None
+    current = data
+    for part in str(key).split("."):
+        if not isinstance(current, dict):
+            return None
+        current = current.get(part)
+        if current is None:
+            return None
+    return current
+
+
 def _extract_sso_identity(userinfo: dict):
     """从 userinfo 中提取 SSO 身份关键信息。
 
@@ -210,18 +223,6 @@ def _extract_sso_identity(userinfo: dict):
     info = userinfo if isinstance(userinfo, dict) else {}
     username_field = str(_sso_cfg("username_field", "preferred_username") or "preferred_username").strip()
     email_field = str(_sso_cfg("email_field", "email") or "email").strip()
-
-    def _get_by_path(data, key):
-        if not key:
-            return None
-        current = data
-        for part in str(key).split("."):
-            if not isinstance(current, dict):
-                return None
-            current = current.get(part)
-            if current is None:
-                return None
-        return current
 
     def _pick(keys):
         for k in keys:
@@ -467,11 +468,10 @@ def authenticate_sso_token(token: str, redirect_uri: str = ""):
     token_url = str(_sso_cfg("token_url") or "")
     if "{token}" in token_url or "{redirect_uri}" in token_url:
         token_url = _render_sso_template(token_url, {"token": token, "redirect_uri": final_redirect_uri})
-        token_payload = {}
+        token_resp = requests.get(token_url, timeout=10)
     else:
         token_payload = {"token": token, "redirect_uri": final_redirect_uri}
-
-    token_resp = requests.post(token_url, data=token_payload, timeout=10)
+        token_resp = requests.post(token_url, data=token_payload, timeout=10)
     if token_resp.status_code >= 400:
         raise ValueError(f"sso token verify failed: HTTP {token_resp.status_code}")
     token_data = token_resp.json() if token_resp.content else {}
@@ -479,6 +479,10 @@ def authenticate_sso_token(token: str, redirect_uri: str = ""):
     userinfo_url = str(_sso_cfg("userinfo_url", "") or "").strip()
     if userinfo_url:
         access_token = token_data.get("access_token") or token
+        userinfo_url = _render_sso_template(
+            userinfo_url,
+            {"token": token, "access_token": access_token, "redirect_uri": final_redirect_uri},
+        )
         userinfo_resp = requests.get(
             userinfo_url,
             headers={"Authorization": f"Bearer {access_token}"},
