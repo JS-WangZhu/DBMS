@@ -74,11 +74,12 @@
         </el-form-item>
 
         <el-form-item label="用户名字段">
-          <el-input v-model="form.username_field" placeholder="preferred_username" />
+          <el-input v-model="form.username_field" placeholder="preferred_username 或 data.accountName" />
+          <el-text class="hint" type="info">Token 校验返回嵌套 JSON 时可填写点路径，如 data.username</el-text>
         </el-form-item>
 
         <el-form-item label="邮箱字段">
-          <el-input v-model="form.email_field" placeholder="email" />
+          <el-input v-model="form.email_field" placeholder="email 或 data.mail" />
         </el-form-item>
 
         <el-form-item>

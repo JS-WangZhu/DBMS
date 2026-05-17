@@ -211,11 +211,23 @@ def _extract_sso_identity(userinfo: dict):
     username_field = str(_sso_cfg("username_field", "preferred_username") or "preferred_username").strip()
     email_field = str(_sso_cfg("email_field", "email") or "email").strip()
 
+    def _get_by_path(data, key):
+        if not key:
+            return None
+        current = data
+        for part in str(key).split("."):
+            if not isinstance(current, dict):
+                return None
+            current = current.get(part)
+            if current is None:
+                return None
+        return current
+
     def _pick(keys):
         for k in keys:
             if not k:
                 continue
-            v = info.get(k)
+            v = _get_by_path(info, k)
             if v is None:
                 continue
             text = str(v).strip()
@@ -223,10 +235,70 @@ def _extract_sso_identity(userinfo: dict):
                 return text
         return None
 
-    subject = _pick(["sub", "id", "user_id", "uid", username_field])
-    username = _pick([username_field, "preferred_username", "username", "name", email_field, "email", "sub"])
-    email = _pick([email_field, "email"])
-    display_name = _pick(["name", "display_name", "nickname", username_field])
+    subject = _pick(
+        [
+            "sub",
+            "id",
+            "user_id",
+            "uid",
+            "data.id",
+            "data.user_id",
+            "user.id",
+            "result.id",
+            "result.user_id",
+            username_field,
+        ]
+    )
+    username = _pick(
+        [
+            username_field,
+            "preferred_username",
+            "username",
+            "account",
+            "accountName",
+            "loginName",
+            "name",
+            email_field,
+            "email",
+            "sub",
+            "data.preferred_username",
+            "data.username",
+            "data.account",
+            "data.accountName",
+            "data.loginName",
+            "data.email",
+            "user.preferred_username",
+            "user.username",
+            "user.account",
+            "user.accountName",
+            "user.loginName",
+            "user.email",
+            "result.preferred_username",
+            "result.username",
+            "result.account",
+            "result.accountName",
+            "result.loginName",
+            "result.email",
+        ]
+    )
+    email = _pick([email_field, "email", "data.email", "data.mail", "user.email", "user.mail", "result.email", "result.mail"])
+    display_name = _pick(
+        [
+            "name",
+            "display_name",
+            "nickname",
+            username_field,
+            "data.name",
+            "data.display_name",
+            "data.nickname",
+            "user.name",
+            "user.display_name",
+            "user.nickname",
+            "result.name",
+            "result.display_name",
+            "result.nickname",
+        ]
+    )
 
     return {
         "subject": subject,
@@ -241,12 +313,7 @@ def _extract_username_from_userinfo(userinfo: dict):
 
 
 def _normalize_sso_userinfo(payload: dict):
-    info = payload if isinstance(payload, dict) else {}
-    for key in ("data", "user", "userinfo", "user_info"):
-        nested = info.get(key)
-        if isinstance(nested, dict):
-            return nested
-    return info
+    return payload if isinstance(payload, dict) else {}
 
 
 def _upsert_sso_user(identity: dict):

@@ -153,3 +153,41 @@ def test_sso_token_callback_uses_configured_token_placeholders(app, monkeypatch)
     assert captured["data"] == {}
     assert query["ticket"] == ["custom-token"]
     assert query["return_to"] == ["http://localhost/sso/callback?sso_ticket={token}"]
+
+
+def test_sso_token_callback_supports_dotted_username_field(app, monkeypatch):
+    with app.app_context():
+        row = SsoConfig.get_current()
+        row.enabled = True
+        row.provider_name = "Acme SSO"
+        row.authorize_url = "https://sso.example.com/login"
+        row.token_url = "https://sso.example.com/token/verify"
+        row.redirect_uri = "http://localhost/sso/callback"
+        row.username_field = "data.accountName"
+        row.email_field = "data.mail"
+        db.session.commit()
+
+    class Response:
+        status_code = 200
+        content = b"{}"
+
+        def json(self):
+            return {
+                "data": {
+                    "id": "u-1003",
+                    "accountName": "nested.user",
+                    "mail": "nested.user@example.com",
+                }
+            }
+
+    monkeypatch.setattr("app.services.auth.requests.post", lambda url, data, timeout: Response())
+
+    client = app.test_client()
+    resp = client.get(
+        "/api/v1/auth/sso/callback?token=enterprise-token&redirect_uri=http://localhost/sso/callback"
+    )
+
+    assert resp.status_code == 200
+    payload = resp.get_json()["data"]
+    assert payload["user"]["username"] == "nested.user"
+    assert payload["user"]["email"] == "nested.user@example.com"
