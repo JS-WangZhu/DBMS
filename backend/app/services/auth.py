@@ -1,4 +1,4 @@
-from urllib.parse import urlencode
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from datetime import datetime
 
 import requests
@@ -117,12 +117,14 @@ def _is_sso_enabled():
 def _sso_required_fields_ready():
     return all(
         [
-            _sso_cfg("client_id"),
-            _sso_cfg("client_secret"),
             _sso_cfg("authorize_url"),
             _sso_cfg("token_url"),
         ]
     )
+
+
+def _sso_oauth_fields_ready():
+    return bool(_sso_cfg("client_id") and _sso_cfg("client_secret"))
 
 
 def _sso_state_serializer():
@@ -151,17 +153,23 @@ def build_sso_authorize_url(redirect_uri: str = ""):
     final_redirect_uri = _resolve_redirect_uri(redirect_uri)
     if not final_redirect_uri:
         raise ValueError("redirect_uri is required")
-    state = _sso_state_serializer().dumps({"redirect_uri": final_redirect_uri})
-    query = urlencode(
-        {
-            "client_id": _sso_cfg("client_id"),
-            "redirect_uri": final_redirect_uri,
-            "response_type": "code",
-            "scope": _sso_cfg("scope", "openid profile email") or "openid profile email",
-            "state": state,
-        }
-    )
-    authorize_url = f"{_sso_cfg('authorize_url')}?{query}"
+    params = {"redirect_uri": final_redirect_uri}
+    state = ""
+    if _sso_oauth_fields_ready():
+        state = _sso_state_serializer().dumps({"redirect_uri": final_redirect_uri})
+        params.update(
+            {
+                "client_id": _sso_cfg("client_id"),
+                "response_type": "code",
+                "scope": _sso_cfg("scope", "openid profile email") or "openid profile email",
+                "state": state,
+            }
+        )
+    authorize_base = str(_sso_cfg("authorize_url") or "")
+    parts = urlsplit(authorize_base)
+    query = dict(parse_qsl(parts.query, keep_blank_values=True))
+    query.update(params)
+    authorize_url = urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
     return {"authorize_url": authorize_url, "state": state, "redirect_uri": final_redirect_uri}
 
 
@@ -202,6 +210,15 @@ def _extract_sso_identity(userinfo: dict):
 
 def _extract_username_from_userinfo(userinfo: dict):
     return _extract_sso_identity(userinfo).get("username")
+
+
+def _normalize_sso_userinfo(payload: dict):
+    info = payload if isinstance(payload, dict) else {}
+    for key in ("data", "user", "userinfo", "user_info"):
+        nested = info.get(key)
+        if isinstance(nested, dict):
+            return nested
+    return info
 
 
 def _upsert_sso_user(identity: dict):
@@ -279,6 +296,8 @@ def authenticate_sso_code(code: str, state: str, redirect_uri: str = ""):
         raise ValueError("sso is disabled")
     if not _sso_required_fields_ready():
         raise ValueError("sso config is incomplete")
+    if not _sso_oauth_fields_ready():
+        raise ValueError("sso oauth config is incomplete")
 
     try:
         state_data = _sso_state_serializer().loads(state, max_age=600)
@@ -326,6 +345,54 @@ def authenticate_sso_code(code: str, state: str, redirect_uri: str = ""):
     else:
         userinfo = token_data
 
+    userinfo = _normalize_sso_userinfo(userinfo)
+    username = _extract_username_from_userinfo(userinfo)
+    if not username:
+        raise ValueError("sso userinfo missing username")
+
+    identity = _extract_sso_identity(userinfo)
+    user = _upsert_sso_user(identity)
+    if not user:
+        raise ValueError("sso user is disabled or username conflict")
+    return user
+
+
+def authenticate_sso_token(token: str, redirect_uri: str = ""):
+    if not token:
+        raise ValueError("token is required")
+    if not _is_sso_enabled():
+        raise ValueError("sso is disabled")
+    if not _sso_required_fields_ready():
+        raise ValueError("sso config is incomplete")
+
+    final_redirect_uri = _resolve_redirect_uri(redirect_uri)
+    if not final_redirect_uri:
+        raise ValueError("redirect_uri is required")
+
+    token_resp = requests.post(
+        _sso_cfg("token_url"),
+        data={"token": token, "redirect_uri": final_redirect_uri},
+        timeout=10,
+    )
+    if token_resp.status_code >= 400:
+        raise ValueError(f"sso token verify failed: HTTP {token_resp.status_code}")
+    token_data = token_resp.json() if token_resp.content else {}
+
+    userinfo_url = str(_sso_cfg("userinfo_url", "") or "").strip()
+    if userinfo_url:
+        access_token = token_data.get("access_token") or token
+        userinfo_resp = requests.get(
+            userinfo_url,
+            headers={"Authorization": f"Bearer {access_token}"},
+            timeout=10,
+        )
+        if userinfo_resp.status_code >= 400:
+            raise ValueError(f"sso userinfo fetch failed: HTTP {userinfo_resp.status_code}")
+        userinfo = userinfo_resp.json() if userinfo_resp.content else {}
+    else:
+        userinfo = token_data
+
+    userinfo = _normalize_sso_userinfo(userinfo)
     username = _extract_username_from_userinfo(userinfo)
     if not username:
         raise ValueError("sso userinfo missing username")

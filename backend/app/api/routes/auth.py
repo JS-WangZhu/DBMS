@@ -4,7 +4,13 @@ from flask_jwt_extended import create_access_token
 from app.api.routes.common import active_user_required, get_current_user
 from app.extensions import db
 from app.services.audit import log_audit
-from app.services.auth import authenticate_sso_code, authenticate_user, build_sso_authorize_url, get_sso_meta
+from app.services.auth import (
+    authenticate_sso_code,
+    authenticate_sso_token,
+    authenticate_user,
+    build_sso_authorize_url,
+    get_sso_meta,
+)
 from app.utils.response import error_response, ok_response
 
 bp = Blueprint("auth", __name__, url_prefix="/auth")
@@ -56,9 +62,13 @@ def sso_url():
 def sso_callback():
     code = (request.args.get("code") or "").strip()
     state = (request.args.get("state") or "").strip()
+    token_value = (request.args.get("token") or request.args.get("access_token") or "").strip()
     redirect_uri = (request.args.get("redirect_uri") or "").strip()
     try:
-        user = authenticate_sso_code(code=code, state=state, redirect_uri=redirect_uri)
+        if token_value:
+            user = authenticate_sso_token(token=token_value, redirect_uri=redirect_uri)
+        else:
+            user = authenticate_sso_code(code=code, state=state, redirect_uri=redirect_uri)
     except ValueError as exc:
         return error_response(str(exc), code=401)
     token = create_access_token(identity=str(user.id), additional_claims={"role": user.role})

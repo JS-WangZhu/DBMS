@@ -14,7 +14,7 @@
         </el-form-item>
         <div v-if="ssoEnabled" class="sso-link-wrap">
           <el-link type="primary" :underline="false" @click="onSsoLogin">
-            {{ ssoLoading ? "SSO登录中..." : "使用SSO登录" }}
+            {{ ssoLoading ? `${ssoProviderName}登录中...` : `使用${ssoProviderName}登录` }}
           </el-link>
         </div>
       </el-form>
@@ -33,6 +33,7 @@ const router = useRouter();
 const loading = ref(false);
 const ssoLoading = ref(false);
 const ssoEnabled = ref(false);
+const ssoProviderName = ref("SSO");
 const form = reactive({
   username: "",
   password: "",
@@ -65,9 +66,12 @@ function getSsoRedirectUri() {
 async function loadSsoMeta() {
   try {
     const { data } = await getSsoMeta(getSsoRedirectUri());
-    ssoEnabled.value = !!data?.data?.enabled;
+    const meta = data?.data || {};
+    ssoEnabled.value = !!meta.enabled;
+    ssoProviderName.value = meta.provider_name || "SSO";
   } catch {
     ssoEnabled.value = false;
+    ssoProviderName.value = "SSO";
   }
 }
 

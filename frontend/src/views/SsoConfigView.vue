@@ -19,9 +19,9 @@
         title="SSO 登录流程"
       >
         <template #default>
-          <div>1. 在 SSO 身份提供商（如 Keycloak / Okta / 公司统一登录）创建 OAuth2 应用，获取 Client ID 与 Client Secret。</div>
+          <div>1. 配置企业 SSO 登录域名，系统跳转时会自动附带回调地址参数。</div>
           <div>2. 将下方「回调地址」配置到身份提供商允许回调列表：<el-text type="primary">{{ defaultRedirectUri }}</el-text></div>
-          <div>3. 填写授权端点、Token 端点、UserInfo 端点等信息并启用，保存后用户即可在登录页使用 SSO 登录。</div>
+          <div>3. 回调携带 token 后，系统会调用 Token 校验端点完成登录校验；Client ID 与 Client Secret 可不填写。</div>
         </template>
       </el-alert>
 
@@ -35,25 +35,25 @@
           <el-input v-model="form.provider_name" placeholder="如 Keycloak / Okta / 公司 SSO" />
         </el-form-item>
 
-        <el-form-item label="Client ID" required>
-          <el-input v-model="form.client_id" placeholder="OAuth2 应用的 Client ID" />
+        <el-form-item label="Client ID">
+          <el-input v-model="form.client_id" placeholder="可选，仅 OAuth2 模式需要" />
         </el-form-item>
 
-        <el-form-item label="Client Secret" required>
+        <el-form-item label="Client Secret">
           <el-input
             v-model="form.client_secret"
             type="password"
             show-password
-            placeholder="留空或 ****** 表示不修改"
+            placeholder="可选，留空或 ****** 表示不修改"
           />
         </el-form-item>
 
-        <el-form-item label="授权端点 URL" required>
-          <el-input v-model="form.authorize_url" placeholder="如 https://sso.example.com/oauth2/authorize" />
+        <el-form-item label="企业 SSO 域名" required>
+          <el-input v-model="form.authorize_url" placeholder="如 https://sso.example.com/login" />
         </el-form-item>
 
-        <el-form-item label="Token 端点 URL" required>
-          <el-input v-model="form.token_url" placeholder="如 https://sso.example.com/oauth2/token" />
+        <el-form-item label="Token 校验 URL" required>
+          <el-input v-model="form.token_url" placeholder="如 https://sso.example.com/token/verify" />
         </el-form-item>
 
         <el-form-item label="UserInfo 端点 URL">
@@ -148,12 +148,8 @@ async function loadConfig() {
 
 function validateForm() {
   if (!form.enabled) return true;
-  if (!form.client_id || !form.authorize_url || !form.token_url) {
-    ElMessage.warning("启用 SSO 时 Client ID / 授权端点 / Token 端点 均为必填");
-    return false;
-  }
-  if (!form.client_secret) {
-    ElMessage.warning("启用 SSO 时 Client Secret 必填（或使用先前保存的值）");
+  if (!form.authorize_url || !form.token_url) {
+    ElMessage.warning("启用 SSO 时企业 SSO 域名 / Token 校验 URL 均为必填");
     return false;
   }
   return true;
