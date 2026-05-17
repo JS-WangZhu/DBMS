@@ -70,7 +70,7 @@
               <el-button @click="useDefaultRedirect">使用当前域名</el-button>
             </template>
           </el-input>
-          <el-text class="hint" type="info">如企业 SSO 回调 token 参数名不是 token，可填写如 {{ defaultRedirectUri }}?ticket={token}</el-text>
+          <el-text class="hint" type="info">默认回调参数名为 token，可填写如 {{ defaultRedirectUri }}?token={token}</el-text>
         </el-form-item>
 
         <el-form-item label="用户名字段">
