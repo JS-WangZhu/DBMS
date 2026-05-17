@@ -3,7 +3,7 @@ from urllib.parse import parse_qs, urlparse
 from app.extensions import db
 from app.models.sso_config import SsoConfig
 from app.models.user import User
-from app.models.user_permission import UserRoleGroup
+from app.models.user_permission import UserMenuPermission, UserRoleGroup
 
 
 def test_sso_meta_enabled_without_client_credentials(app):
@@ -112,6 +112,7 @@ def test_sso_token_callback_creates_plain_user_without_role_groups(app, monkeypa
         assert user.auth_source == "sso"
         assert user.sso_provider == "Acme SSO"
         assert UserRoleGroup.query.filter_by(user_id=user.id).count() == 0
+        assert UserMenuPermission.query.filter_by(user_id=user.id, menu_key="dashboard").count() == 1
 
 
 def test_sso_token_callback_uses_configured_token_placeholders(app, monkeypatch):
@@ -282,3 +283,43 @@ def test_sso_token_callback_supports_custom_p_username_field(app, monkeypatch):
     payload = resp.get_json()["data"]
     assert payload["user"]["username"] == "path.user"
     assert payload["user"]["email"] == "path.user@example.com"
+
+
+def test_sso_token_callback_supports_configured_display_name_field(app, monkeypatch):
+    with app.app_context():
+        row = SsoConfig.get_current()
+        row.enabled = True
+        row.provider_name = "Acme SSO"
+        row.authorize_url = "https://sso.example.com/login"
+        row.token_url = "https://sso.example.com/login/userinfo?token={token}"
+        row.redirect_uri = "http://localhost/sso/callback"
+        row.username_field = "p.username"
+        row.email_field = "p.email"
+        row.display_name_field = "p.displayName"
+        db.session.commit()
+
+    class Response:
+        status_code = 200
+        content = b"{}"
+
+        def json(self):
+            return {
+                "p": {
+                    "id": "u-1005",
+                    "username": "display.user",
+                    "email": "display.user@example.com",
+                    "displayName": "Display User",
+                },
+            }
+
+    monkeypatch.setattr("app.services.auth.requests.get", lambda url, timeout: Response())
+
+    client = app.test_client()
+    resp = client.get(
+        "/api/v1/auth/sso/callback?token=enterprise-token&redirect_uri=http://localhost/sso/callback"
+    )
+
+    assert resp.status_code == 200
+    payload = resp.get_json()["data"]
+    assert payload["user"]["username"] == "display.user"
+    assert payload["user"]["display_name"] == "Display User"

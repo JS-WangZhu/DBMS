@@ -7,6 +7,7 @@ from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 
 from app.extensions import db
 from app.models.user import User
+from app.models.user_permission import UserMenuPermission
 
 
 _SSO_DB_FIELDS = (
@@ -21,6 +22,7 @@ _SSO_DB_FIELDS = (
     "redirect_uri",
     "username_field",
     "email_field",
+    "display_name_field",
 )
 
 
@@ -223,6 +225,7 @@ def _extract_sso_identity(userinfo: dict):
     info = userinfo if isinstance(userinfo, dict) else {}
     username_field = str(_sso_cfg("username_field", "preferred_username") or "preferred_username").strip()
     email_field = str(_sso_cfg("email_field", "email") or "email").strip()
+    display_name_field = str(_sso_cfg("display_name_field", "") or "").strip()
 
     def _pick(keys):
         for k in keys:
@@ -285,18 +288,23 @@ def _extract_sso_identity(userinfo: dict):
     email = _pick([email_field, "email", "data.email", "data.mail", "user.email", "user.mail", "result.email", "result.mail"])
     display_name = _pick(
         [
+            display_name_field,
             "name",
             "display_name",
+            "displayName",
             "nickname",
             username_field,
             "data.name",
             "data.display_name",
+            "data.displayName",
             "data.nickname",
             "user.name",
             "user.display_name",
+            "user.displayName",
             "user.nickname",
             "result.name",
             "result.display_name",
+            "result.displayName",
             "result.nickname",
         ]
     )
@@ -360,6 +368,8 @@ def _upsert_sso_user(identity: dict):
             user.display_name = display_name
         user.last_login_at = datetime.utcnow()
         db.session.add(user)
+        db.session.flush()
+        db.session.add(UserMenuPermission(user_id=user.id, menu_key="dashboard"))
         db.session.commit()
         return user
 

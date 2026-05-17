@@ -88,6 +88,7 @@ CREATE TABLE IF NOT EXISTS sso_configs (
         redirect_uri VARCHAR(512) NOT NULL DEFAULT '',
         username_field VARCHAR(64) NOT NULL DEFAULT 'preferred_username',
         email_field VARCHAR(64) NOT NULL DEFAULT 'email',
+        display_name_field VARCHAR(64) NOT NULL DEFAULT '',
         PRIMARY KEY (id)
 );
 
@@ -99,6 +100,7 @@ ALTER TABLE users ADD COLUMN email        VARCHAR(128) NULL;
 ALTER TABLE users ADD COLUMN display_name VARCHAR(128) NULL;
 ALTER TABLE users ADD COLUMN last_login_at DATETIME    NULL;
 ALTER TABLE users ADD UNIQUE KEY uk_users_sso_subject (sso_subject);
+ALTER TABLE sso_configs ADD COLUMN display_name_field VARCHAR(64) NOT NULL DEFAULT '';
 
 CREATE TABLE `instance_status_configs` (`created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,

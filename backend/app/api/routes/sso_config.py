@@ -20,6 +20,7 @@ EDITABLE_FIELDS = [
     "redirect_uri",
     "username_field",
     "email_field",
+    "display_name_field",
 ]
 
 
