@@ -21,7 +21,7 @@
         <template #default>
           <div>1. 配置企业 SSO 登录域名，系统跳转时会自动附带回调地址参数；如需自定义参数名，可在 URL 中使用 {redirect_uri} 占位符。</div>
           <div>2. 将下方「回调地址」配置到身份提供商允许回调列表：<el-text type="primary">{{ defaultRedirectUri }}</el-text></div>
-          <div>3. 回调携带 token 后，系统会调用 Token 校验端点完成登录校验；token 参数名可通过回调地址中的 {token} 占位符配置。</div>
+          <div>3. 企业 SSO 回跳到回调地址并追加 token 后，系统会调用 Token 校验端点完成登录校验。</div>
         </template>
       </el-alert>
 
@@ -70,7 +70,7 @@
               <el-button @click="useDefaultRedirect">使用当前域名</el-button>
             </template>
           </el-input>
-          <el-text class="hint" type="info">默认回调参数名为 token，可填写如 {{ defaultRedirectUri }}?token={token}</el-text>
+          <el-text class="hint" type="info">默认填写 {{ defaultRedirectUri }}；企业 SSO 会在末尾追加 ?token=xxx</el-text>
         </el-form-item>
 
         <el-form-item label="用户名字段">
