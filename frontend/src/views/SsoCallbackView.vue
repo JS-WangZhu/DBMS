@@ -27,18 +27,13 @@ async function completeSsoLogin() {
   const code = String(route.query.code || "");
   const state = String(route.query.state || "");
   const token = String(route.query.token || route.query.access_token || "");
-  if (!token && (!code || !state)) {
+  const callbackParams = { ...route.query };
+  if (!token && (!code || !state) && Object.keys(callbackParams).length === 0) {
     errorText.value = "缺少 SSO 回调参数";
     return;
   }
   try {
-    const params = { redirect_uri: getSsoRedirectUri() };
-    if (token) {
-      params.token = token;
-    } else {
-      params.code = code;
-      params.state = state;
-    }
+    const params = { ...callbackParams, redirect_uri: getSsoRedirectUri() };
     const { data } = await loginBySsoCallback(params);
     localStorage.setItem("dbms_token", data.data.access_token);
     localStorage.setItem("dbms_user", JSON.stringify(data.data.user));
