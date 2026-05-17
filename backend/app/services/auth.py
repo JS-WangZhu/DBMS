@@ -1,4 +1,4 @@
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 from datetime import datetime
 
 import requests
@@ -133,8 +133,32 @@ def _sso_state_serializer():
 
 
 def _resolve_redirect_uri(redirect_uri: str = ""):
-    value = (redirect_uri or "").strip() or str(_sso_cfg("redirect_uri", "") or "").strip()
+    configured = str(_sso_cfg("redirect_uri", "") or "").strip()
+    if configured and "{token}" in configured:
+        return configured
+    value = (redirect_uri or "").strip() or configured
     return value
+
+
+def _render_sso_template(template: str, values: dict):
+    rendered = str(template or "")
+    for key, value in values.items():
+        rendered = rendered.replace("{" + key + "}", quote(str(value or ""), safe=""))
+    return rendered
+
+
+def extract_sso_callback_token(args):
+    token = (args.get("token") or args.get("access_token") or "").strip()
+    if token:
+        return token
+
+    configured_redirect_uri = str(_sso_cfg("redirect_uri", "") or "").strip()
+    if not configured_redirect_uri:
+        return ""
+    for key, value in parse_qsl(urlsplit(configured_redirect_uri).query, keep_blank_values=True):
+        if "{token}" in value or "{access_token}" in value:
+            return (args.get(key) or "").strip()
+    return ""
 
 
 def get_sso_meta(redirect_uri: str = ""):
@@ -153,7 +177,7 @@ def build_sso_authorize_url(redirect_uri: str = ""):
     final_redirect_uri = _resolve_redirect_uri(redirect_uri)
     if not final_redirect_uri:
         raise ValueError("redirect_uri is required")
-    params = {"redirect_uri": final_redirect_uri}
+    params = {}
     state = ""
     if _sso_oauth_fields_ready():
         state = _sso_state_serializer().dumps({"redirect_uri": final_redirect_uri})
@@ -166,6 +190,10 @@ def build_sso_authorize_url(redirect_uri: str = ""):
             }
         )
     authorize_base = str(_sso_cfg("authorize_url") or "")
+    if "{redirect_uri}" in authorize_base:
+        authorize_base = _render_sso_template(authorize_base, {"redirect_uri": final_redirect_uri})
+    else:
+        params["redirect_uri"] = final_redirect_uri
     parts = urlsplit(authorize_base)
     query = dict(parse_qsl(parts.query, keep_blank_values=True))
     query.update(params)
@@ -369,11 +397,14 @@ def authenticate_sso_token(token: str, redirect_uri: str = ""):
     if not final_redirect_uri:
         raise ValueError("redirect_uri is required")
 
-    token_resp = requests.post(
-        _sso_cfg("token_url"),
-        data={"token": token, "redirect_uri": final_redirect_uri},
-        timeout=10,
-    )
+    token_url = str(_sso_cfg("token_url") or "")
+    if "{token}" in token_url or "{redirect_uri}" in token_url:
+        token_url = _render_sso_template(token_url, {"token": token, "redirect_uri": final_redirect_uri})
+        token_payload = {}
+    else:
+        token_payload = {"token": token, "redirect_uri": final_redirect_uri}
+
+    token_resp = requests.post(token_url, data=token_payload, timeout=10)
     if token_resp.status_code >= 400:
         raise ValueError(f"sso token verify failed: HTTP {token_resp.status_code}")
     token_data = token_resp.json() if token_resp.content else {}

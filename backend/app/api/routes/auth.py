@@ -9,6 +9,7 @@ from app.services.auth import (
     authenticate_sso_token,
     authenticate_user,
     build_sso_authorize_url,
+    extract_sso_callback_token,
     get_sso_meta,
 )
 from app.utils.response import error_response, ok_response
@@ -62,7 +63,7 @@ def sso_url():
 def sso_callback():
     code = (request.args.get("code") or "").strip()
     state = (request.args.get("state") or "").strip()
-    token_value = (request.args.get("token") or request.args.get("access_token") or "").strip()
+    token_value = extract_sso_callback_token(request.args)
     redirect_uri = (request.args.get("redirect_uri") or "").strip()
     try:
         if token_value:

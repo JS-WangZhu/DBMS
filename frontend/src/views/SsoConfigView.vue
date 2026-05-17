@@ -19,9 +19,9 @@
         title="SSO 登录流程"
       >
         <template #default>
-          <div>1. 配置企业 SSO 登录域名，系统跳转时会自动附带回调地址参数。</div>
+          <div>1. 配置企业 SSO 登录域名，系统跳转时会自动附带回调地址参数；如需自定义参数名，可在 URL 中使用 {redirect_uri} 占位符。</div>
           <div>2. 将下方「回调地址」配置到身份提供商允许回调列表：<el-text type="primary">{{ defaultRedirectUri }}</el-text></div>
-          <div>3. 回调携带 token 后，系统会调用 Token 校验端点完成登录校验；Client ID 与 Client Secret 可不填写。</div>
+          <div>3. 回调携带 token 后，系统会调用 Token 校验端点完成登录校验；token 参数名可通过回调地址中的 {token} 占位符配置。</div>
         </template>
       </el-alert>
 
@@ -49,11 +49,11 @@
         </el-form-item>
 
         <el-form-item label="企业 SSO 域名" required>
-          <el-input v-model="form.authorize_url" placeholder="如 https://sso.example.com/login" />
+          <el-input v-model="form.authorize_url" placeholder="如 https://sso.example.com/login?callback={redirect_uri}" />
         </el-form-item>
 
         <el-form-item label="Token 校验 URL" required>
-          <el-input v-model="form.token_url" placeholder="如 https://sso.example.com/token/verify" />
+          <el-input v-model="form.token_url" placeholder="如 https://sso.example.com/token/verify?ticket={token}" />
         </el-form-item>
 
         <el-form-item label="UserInfo 端点 URL">
@@ -70,7 +70,7 @@
               <el-button @click="useDefaultRedirect">使用当前域名</el-button>
             </template>
           </el-input>
-          <el-text class="hint" type="info">必须与 SSO 提供商处配置的 redirect_uri 完全一致</el-text>
+          <el-text class="hint" type="info">如企业 SSO 回调 token 参数名不是 token，可填写如 {{ defaultRedirectUri }}?ticket={token}</el-text>
         </el-form-item>
 
         <el-form-item label="用户名字段">
