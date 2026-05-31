@@ -11,7 +11,8 @@
       "Read(//d d:/个人项目空间/DBMS/**)",
       "Bash(/c/ProgramData/Anaconda3/python.exe -c \"import sys; print\\(sys.executable\\); from app import create_app; app = create_app\\(\\)\")",
       "Bash(\"/c/ProgramData/Anaconda3/python.exe\" -c \"import sys; sys.path.insert\\(0, ''d:/个人项目空间/DBMS/backend''\\); from app import create_app; create_app\\(\\)\")",
-      "Bash(\"/d/个人项目空间/DBMS/.venv/Scripts/python\" -c \"from app import create_app; app = create_app\\(\\); print\\(''App created successfully''\\)\")"
+      "Bash(\"/d/个人项目空间/DBMS/.venv/Scripts/python\" -c \"from app import create_app; app = create_app\\(\\); print\\(''App created successfully''\\)\")",
+      "Bash(npx vite *)"
     ]
   }
 }

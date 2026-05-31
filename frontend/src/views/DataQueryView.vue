@@ -130,7 +130,7 @@
           </div>
           <div class="schema-tree">
             <el-tree
-              v-if="schemaTreeData.length"
+              v-show="schemaTreeData.length"
               :key="schemaTreeKey"
               ref="schemaTreeRef"
               :data="schemaTreeData"
@@ -171,7 +171,7 @@
                 </span>
               </template>
             </el-tree>
-            <el-empty v-else description="请选择数据库" :image-size="80" />
+            <el-empty v-if="!schemaTreeData.length" description="请选择数据库" :image-size="80" />
           </div>
         </template>
         <template v-else>
@@ -690,12 +690,13 @@ async function onRouteInstanceChange() {
   }
 }
 
-async function onMysqlDatabaseChange() {
-  await loadMysqlSchema();
+async function onMysqlDatabaseChange(value) {
+  // 使用事件传递的值，确保拿到的是用户最新选择
+  await loadMysqlSchema(value || form.mysql_db);
 }
 
-async function onMongoDatabaseChange() {
-  await loadMongoSchema();
+async function onMongoDatabaseChange(value) {
+  await loadMongoSchema(value || form.mongo_db);
 }
 
 function resetSchema() {
@@ -753,13 +754,14 @@ async function loadMongoDatabasesOptions(silent = false) {
   }
 }
 
-async function loadMysqlSchema() {
-  if (!form.cluster_id || !form.mysql_db) {
+async function loadMysqlSchema(dbName) {
+  const database = dbName || form.mysql_db;
+  if (!form.cluster_id || !database) {
     schemaTreeData.value = [];
     return;
   }
   try {
-    const { data } = await listMysqlObjects(form.cluster_id, form.mysql_db, currentRoutePayload());
+    const { data } = await listMysqlObjects(form.cluster_id, database, currentRoutePayload());
     const payload = data?.data || {};
     schemaObjects.value = {
       tables: payload.tables || [],
@@ -776,14 +778,15 @@ async function loadMysqlSchema() {
   }
 }
 
-async function loadMongoSchema() {
-  if (!form.cluster_id || !form.mongo_db) {
+async function loadMongoSchema(dbName) {
+  const database = dbName || form.mongo_db;
+  if (!form.cluster_id || !database) {
     schemaTreeData.value = [];
     mongoSchemaObjects.value = { collections: [], views: [] };
     return;
   }
   try {
-    const { data } = await listMongoCollections(form.cluster_id, form.mongo_db);
+    const { data } = await listMongoCollections(form.cluster_id, database);
     const payload = data?.data || {};
     const collections = payload.collections || [];
     const views = payload.views || [];
@@ -804,7 +807,7 @@ function buildSchemaTree(objects) {
       label: `${label} (${items?.length || 0})`,
       kind: "group",
       leaf: children.length === 0,
-      _children: children,
+      children,
     };
   };
   const tablesGroup = mkGroup("Tables", "tables", objects.tables, (t) => ({
@@ -862,7 +865,7 @@ function buildMongoSchemaTree(collections, views) {
       label: `${label} (${items?.length || 0})`,
       kind: "group",
       leaf: children.length === 0,
-      _children: children,
+      children,
     };
   };
   const collGroup = mkGroup("Collections", "collections", collections, (c) => ({
@@ -926,7 +929,7 @@ async function loadSchemaNode(node, resolve) {
   const data = node.data;
   if (!data) return resolve([]);
   if (data.kind === "group") {
-    return resolve(data._children || []);
+    return resolve(data.children || []);
   }
   if (data.kind === "table") {
     const cached = tableColumnsCache[data.label];
@@ -973,7 +976,7 @@ function buildMongoCollectionChildren(collectionName, info) {
       label: `Fields (${fields.length})`,
       kind: "group",
       leaf: false,
-      _children: fields.map((f) => ({
+      children: fields.map((f) => ({
         key: `field:${collectionName}.${f.name}`,
         label: f.name,
         kind: "field",
@@ -990,7 +993,7 @@ function buildMongoCollectionChildren(collectionName, info) {
       label: `Indexes (${indexes.length})`,
       kind: "group",
       leaf: false,
-      _children: indexes.map((idx) => ({
+      children: indexes.map((idx) => ({
         key: `index:${collectionName}.${idx.name}`,
         label: idx.name,
         kind: "index",
