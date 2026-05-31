@@ -124,3 +124,44 @@ ALTER TABLE api_keys ADD COLUMN purpose VARCHAR(32) NOT NULL DEFAULT 'general';
 ALTER TABLE api_keys ADD COLUMN scopes JSON NULL;
 ALTER TABLE api_keys ADD COLUMN last_used_at DATETIME NULL;
 ALTER TABLE db_clusters ADD COLUMN data_access_route_json JSON NULL;
+
+-- 任务管理
+CREATE TABLE IF NOT EXISTS scheduled_tasks (
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        id INTEGER NOT NULL AUTO_INCREMENT,
+        name VARCHAR(128) NOT NULL,
+        description VARCHAR(255) NULL,
+        task_type VARCHAR(32) NOT NULL,
+        cron_expr VARCHAR(64) NOT NULL,
+        enabled TINYINT(1) NOT NULL DEFAULT 1,
+        timeout_seconds INTEGER NOT NULL DEFAULT 300,
+        max_retries INTEGER NOT NULL DEFAULT 0,
+        content_json JSON NULL,
+        last_run_at DATETIME NULL,
+        last_status VARCHAR(32) NULL,
+        last_message VARCHAR(512) NULL,
+        PRIMARY KEY (id)
+);
+
+CREATE TABLE IF NOT EXISTS scheduled_task_runs (
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        id INTEGER NOT NULL AUTO_INCREMENT,
+        task_id INTEGER NOT NULL,
+        status VARCHAR(32) NOT NULL,
+        trigger_type VARCHAR(32) NOT NULL,
+        retry_of_id INTEGER NULL,
+        attempt INTEGER NOT NULL DEFAULT 1,
+        started_at DATETIME NOT NULL,
+        finished_at DATETIME NULL,
+        duration_ms INTEGER NULL,
+        stdout TEXT NULL,
+        stderr TEXT NULL,
+        error_message TEXT NULL,
+        result_json JSON NULL,
+        INDEX ix_scheduled_task_runs_task_id (task_id),
+        INDEX ix_scheduled_task_runs_retry_of_id (retry_of_id),
+        PRIMARY KEY (id),
+        CONSTRAINT scheduled_task_runs_ibfk_1 FOREIGN KEY (task_id) REFERENCES scheduled_tasks (id) ON DELETE CASCADE
+);

@@ -43,6 +43,17 @@ def _trigger_from_expr(expr: str):
         timezone = pytz.timezone(tz_name)
     except Exception:
         timezone = None
+    parts = normalized.split()
+    if len(parts) == 6:
+        return CronTrigger(
+            second=parts[0],
+            minute=parts[1],
+            hour=parts[2],
+            day=parts[3],
+            month=parts[4],
+            day_of_week=parts[5],
+            timezone=timezone,
+        )
     return CronTrigger.from_crontab(normalized, timezone=timezone)
 
 
@@ -83,6 +94,7 @@ def register_jobs(scheduler, app):
 
     sync_backup_jobs(scheduler=scheduler, app=app)
     sync_inspection_job(scheduler=scheduler, app=app)
+    sync_scheduled_task_jobs(scheduler=scheduler, app=app)
 
 
 def sync_backup_jobs(scheduler, app):
@@ -107,6 +119,44 @@ def sync_backup_jobs(scheduler, app):
                 replace_existing=True,
                 kwargs={"app": app, "policy_id": policy.id},
             )
+
+
+def sync_scheduled_task_jobs(scheduler, app):
+    from app.models.task_management import ScheduledTask
+
+    app = _resolve_app(app) or app
+    existing = scheduler.get_jobs()
+    for job in existing:
+        if job.id.startswith("scheduled_task_"):
+            scheduler.remove_job(job.id)
+
+    with app.app_context():
+        tasks = ScheduledTask.query.filter_by(enabled=True).all()
+        for task in tasks:
+            try:
+                trigger = _trigger_from_expr(task.cron_expr)
+            except Exception:
+                continue
+            scheduler.add_job(
+                id=f"scheduled_task_{task.id}",
+                func=job_run_scheduled_task,
+                trigger=trigger,
+                replace_existing=True,
+                max_instances=1,
+                coalesce=True,
+                kwargs={"app": app, "task_id": task.id},
+            )
+
+
+def job_run_scheduled_task(app, task_id: int):
+    from app.services.task_management import run_scheduled_task
+
+    app = _resolve_app(app) or app
+    if app is None:
+        current_app.logger.error("scheduled task job missing app context")
+        return {"ok": False, "message": "app context missing"}
+    with app.app_context():
+        return run_scheduled_task(task_id=task_id, trigger_type="scheduler")
 
 
 def sync_monitor_collect_job(scheduler, app):

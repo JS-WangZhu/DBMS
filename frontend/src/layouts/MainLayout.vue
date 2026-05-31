@@ -113,6 +113,21 @@
           </el-menu-item>
         </el-sub-menu>
 
+        <el-sub-menu v-if="hasAnyMenu(['task_schedule','task_results'])" index="task-management">
+          <template #title>
+            <el-icon><Timer /></el-icon>
+            <span>任务管理</span>
+          </template>
+          <el-menu-item v-if="hasMenu('task_schedule')" index="/tasks/schedules">
+            <el-icon><Operation /></el-icon>
+            <span>调度管理</span>
+          </el-menu-item>
+          <el-menu-item v-if="hasMenu('task_results')" index="/tasks/results">
+            <el-icon><DocumentCopy /></el-icon>
+            <span>结果查询</span>
+          </el-menu-item>
+        </el-sub-menu>
+
         <el-sub-menu v-if="hasAnyMenu(['backup_mysql_policies','backup_mongo_policies','backup_records','backup_tool_configs','backup_agents','backup_s3_storage','backup_keys','backup_overview'])" index="backup">
           <template #title>
             <el-icon><Collection /></el-icon>
@@ -352,6 +367,8 @@ const routePermissionMap = {
   "/data-access/change": "data_change",
   "/data-access/history": "data_history",
   "/data-access/ai-analysis": "ai_analysis",
+  "/tasks/schedules": "task_schedule",
+  "/tasks/results": "task_results",
   "/backups/mysql-policies": "backup_mysql_policies",
   "/backups/mongo-policies": "backup_mongo_policies",
   "/backups/records": "backup_records",

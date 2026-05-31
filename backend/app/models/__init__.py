@@ -18,6 +18,7 @@ from app.models.monitor_snapshot import (
 from app.models.notify_target import BackupNotifyTarget
 from app.models.s3_storage_config import S3StorageConfig
 from app.models.sso_config import SsoConfig
+from app.models.task_management import ScheduledTask, ScheduledTaskRun
 from app.models.user import User
 from app.models.user_permission import (
     ApiKey,
@@ -51,6 +52,8 @@ __all__ = [
     "MonitorSnapshotDoris",
     "S3StorageConfig",
     "SsoConfig",
+    "ScheduledTask",
+    "ScheduledTaskRun",
     "User",
     "UserMenuPermission",
     "UserClusterPermission",

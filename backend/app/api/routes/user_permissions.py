@@ -38,6 +38,8 @@ MENU_CATALOG = [
     {"key": "data_change", "label": "数据变更"},
     {"key": "ai_analysis", "label": "智能分析"},
     {"key": "data_history", "label": "历史记录"},
+    {"key": "task_schedule", "label": "调度管理"},
+    {"key": "task_results", "label": "结果查询"},
     {"key": "backup_mysql_policies", "label": "MySQL策略"},
     {"key": "backup_mongo_policies", "label": "MongoDB策略"},
     {"key": "backup_records", "label": "备份记录"},

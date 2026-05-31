@@ -30,6 +30,8 @@ import RedisConnectionManageView from "../views/RedisConnectionManageView.vue";
 import S3StorageConfigView from "../views/S3StorageConfigView.vue";
 import SsoCallbackView from "../views/SsoCallbackView.vue";
 import SsoConfigView from "../views/SsoConfigView.vue";
+import TaskResultView from "../views/TaskResultView.vue";
+import TaskScheduleView from "../views/TaskScheduleView.vue";
 import UserRoleGroupView from "../views/UserRoleGroupView.vue";
 import UserPermissionView from "../views/UserPermissionView.vue";
 import UsersView from "../views/UsersView.vue";
@@ -85,6 +87,8 @@ const routes = [
       { path: "/data-access/change", component: DataChangeView, meta: { title: "数据变更" } },
       { path: "/data-access/ai-analysis", component: AIAnalysisView, meta: { title: "智能分析" } },
       { path: "/data-access/history", component: DataAccessHistoryView, meta: { title: "历史记录" } },
+      { path: "/tasks/schedules", component: TaskScheduleView, meta: { title: "调度管理" } },
+      { path: "/tasks/results", component: TaskResultView, meta: { title: "结果查询" } },
       { path: "/users/info", component: UsersView, meta: { title: "用户信息" } },
       { path: "/users/role-groups", component: UserRoleGroupView, meta: { title: "角色组管理" } },
       { path: "/users/permissions", component: UserPermissionView, meta: { title: "用户权限管理" } },

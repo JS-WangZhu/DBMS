@@ -343,6 +343,43 @@ CREATE TABLE `sso_configs` (`created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMES
 `email_field` VARCHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL,
 `display_name_field` VARCHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL,
 PRIMARY KEY (`id`)) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci AUTO_INCREMENT = 2 ROW_FORMAT = Dynamic;
+-- scheduled_tasks DDL
+DROP TABLE IF EXISTS `scheduled_tasks`;
+CREATE TABLE `scheduled_tasks` (`created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+`updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+`id` INT NOT NULL AUTO_INCREMENT,
+`name` VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL,
+`description` VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL,
+`task_type` VARCHAR(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL,
+`cron_expr` VARCHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL,
+`enabled` TINYINT(1) NOT NULL DEFAULT 1,
+`timeout_seconds` INT NOT NULL DEFAULT 300,
+`max_retries` INT NOT NULL DEFAULT 0,
+`content_json` JSON NULL,
+`last_run_at` DATETIME NULL,
+`last_status` VARCHAR(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL,
+`last_message` VARCHAR(512) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL,
+PRIMARY KEY (`id`)) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = Dynamic;
+-- scheduled_task_runs DDL
+DROP TABLE IF EXISTS `scheduled_task_runs`;
+CREATE TABLE `scheduled_task_runs` (`created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+`updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+`id` INT NOT NULL AUTO_INCREMENT,
+`task_id` INT NOT NULL,
+`status` VARCHAR(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL,
+`trigger_type` VARCHAR(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL,
+`retry_of_id` INT NULL,
+`attempt` INT NOT NULL DEFAULT 1,
+`started_at` DATETIME NOT NULL,
+`finished_at` DATETIME NULL,
+`duration_ms` INT NULL,
+`stdout` TEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL,
+`stderr` TEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL,
+`error_message` TEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL,
+`result_json` JSON NULL,
+INDEX `ix_scheduled_task_runs_task_id`(`task_id` ASC) USING BTREE,
+INDEX `ix_scheduled_task_runs_retry_of_id`(`retry_of_id` ASC) USING BTREE,
+PRIMARY KEY (`id`)) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = Dynamic;
 -- user_cluster_permissions DDL
 DROP TABLE IF EXISTS `user_cluster_permissions`;
 CREATE TABLE `user_cluster_permissions` (`created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -405,4 +442,7 @@ ALTER TABLE `db_instances`
 -- role_group_menu_permissions Constraints
 ALTER TABLE `role_group_menu_permissions` 
  ADD CONSTRAINT `role_group_menu_permissions_ibfk_1` FOREIGN KEY (`role_group_id`) REFERENCES `role_groups` (`id`) ON DELETE NO ACTION ON UPDATE NO ACTION;
+-- scheduled_task_runs Constraints
+ALTER TABLE `scheduled_task_runs`
+ ADD CONSTRAINT `scheduled_task_runs_ibfk_1` FOREIGN KEY (`task_id`) REFERENCES `scheduled_tasks` (`id`) ON DELETE CASCADE ON UPDATE NO ACTION;
 SET FOREIGN_KEY_CHECKS = 1;
