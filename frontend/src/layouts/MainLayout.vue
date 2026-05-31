@@ -213,7 +213,7 @@
             <span>通知地址管理</span>
           </el-menu-item>
           <el-menu-item v-if="hasMenu('mcp_platform')" index="/config/mcp-platform">
-            <el-icon><Key /></el-icon>
+            <el-icon><Connection /></el-icon>
             <span>MCP开放平台</span>
           </el-menu-item>
           <el-menu-item v-if="hasMenu('sso_config')" index="/config/sso">
@@ -270,6 +270,7 @@ import {
   Box,
   Coin,
   Collection,
+  Connection,
   Cpu,
   DataAnalysis,
   DocumentCopy,

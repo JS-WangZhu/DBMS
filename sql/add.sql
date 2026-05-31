@@ -21,8 +21,12 @@ CREATE TABLE api_keys (
         updated_at DATETIME NOT NULL DEFAULT now(),
         id INTEGER NOT NULL AUTO_INCREMENT,
         user_id INTEGER NOT NULL,
+        name VARCHAR(128) NULL,
         token VARCHAR(128) NOT NULL,
+        purpose VARCHAR(32) NOT NULL DEFAULT 'general',
+        scopes JSON NULL,
         status VARCHAR(16) NOT NULL,
+        last_used_at DATETIME NULL,
         PRIMARY KEY (id),
         UNIQUE (token)
 );
@@ -49,8 +53,12 @@ CREATE TABLE api_keys (
         updated_at DATETIME NOT NULL DEFAULT now(),
         id INTEGER NOT NULL AUTO_INCREMENT,
         user_id INTEGER NOT NULL,
+        name VARCHAR(128) NULL,
         token VARCHAR(128) NOT NULL,
+        purpose VARCHAR(32) NOT NULL DEFAULT 'general',
+        scopes JSON NULL,
         status VARCHAR(16) NOT NULL,
+        last_used_at DATETIME NULL,
         PRIMARY KEY (id),
         UNIQUE (token)
 );
@@ -108,3 +116,11 @@ CREATE TABLE `instance_status_configs` (`created_at` DATETIME NOT NULL DEFAULT C
 `metric_refresh_timeout_seconds` INT NOT NULL,
 `probe_poll_interval_seconds` INT NOT NULL,
 PRIMARY KEY (`id`)) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci AUTO_INCREMENT = 2 ROW_FORMAT = Dynamic;
+
+-- MCP开放平台 / 数据访问路由相关字段
+-- 如字段已存在，请按需跳过对应 ALTER。
+ALTER TABLE api_keys ADD COLUMN name VARCHAR(128) NULL;
+ALTER TABLE api_keys ADD COLUMN purpose VARCHAR(32) NOT NULL DEFAULT 'general';
+ALTER TABLE api_keys ADD COLUMN scopes JSON NULL;
+ALTER TABLE api_keys ADD COLUMN last_used_at DATETIME NULL;
+ALTER TABLE db_clusters ADD COLUMN data_access_route_json JSON NULL;

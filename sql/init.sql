@@ -19,8 +19,12 @@ CREATE TABLE `api_keys` (`created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAM
 `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 `id` INT NOT NULL AUTO_INCREMENT,
 `user_id` INT NOT NULL,
+`name` VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL,
 `token` VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL,
+`purpose` VARCHAR(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL DEFAULT 'general',
+`scopes` JSON NULL,
 `status` VARCHAR(16) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL,
+`last_used_at` DATETIME NULL,
 UNIQUE INDEX `token`(`token` ASC) USING BTREE,
 PRIMARY KEY (`id`)) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci AUTO_INCREMENT = 5 ROW_FORMAT = Dynamic;
 -- audit_logs DDL
@@ -139,6 +143,7 @@ CREATE TABLE `db_clusters` (`id` BIGINT NOT NULL AUTO_INCREMENT,
 `business_line` VARCHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL,
 `environment` VARCHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL,
 `ha_switch_enabled` TINYINT(1) NOT NULL DEFAULT 0,
+`data_access_route_json` JSON NULL,
 PRIMARY KEY (`id`)) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci AUTO_INCREMENT = 6 ROW_FORMAT = Dynamic;
 -- db_instances DDL
 DROP TABLE IF EXISTS `db_instances`;
