@@ -54,6 +54,7 @@ MENU_CATALOG = [
     {"key": "instance_status_config", "label": "实例状态检测管理"},
     {"key": "inspection_param_config", "label": "巡检参数管理"},
     {"key": "data_query_op_config", "label": "数据查询操作配置"},
+    {"key": "mcp_platform", "label": "MCP开放平台"},
     {"key": "sso_config", "label": "SSO登录管理"},
 ]
 MENU_KEY_SET = {item["key"] for item in MENU_CATALOG}

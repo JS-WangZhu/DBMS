@@ -299,11 +299,46 @@ def _select_instance_by_role(db_type: str, cluster_id: int, role_candidates, pay
     return instances[0]
 
 
-def pick_instance(db_type: str, cluster_id: int, instance_id: int, for_change: bool):
+def _safe_optional_int(value):
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
+
+
+def _configured_route_instance_id(cluster: DatabaseCluster, for_change: bool):
+    route = cluster.data_access_route_json if cluster and isinstance(cluster.data_access_route_json, dict) else {}
+    key = "change" if for_change else "query"
+    item = route.get(key) if isinstance(route.get(key), dict) else {}
+    if str(item.get("mode") or "auto").strip().lower() != "manual":
+        return None
+    return _safe_optional_int(item.get("instance_id"))
+
+
+def pick_instance(db_type: str, cluster_id: int, instance_id: int, for_change: bool, route_mode: str = "auto"):
     if instance_id:
-        return DatabaseInstance.query.filter_by(id=instance_id, db_type=db_type).first()
+        query = DatabaseInstance.query.filter_by(id=instance_id, db_type=db_type)
+        if cluster_id:
+            query = query.filter_by(cluster_id=cluster_id)
+        return query.first()
     if not cluster_id:
         return None
+    cluster = DatabaseCluster.query.get(cluster_id)
+    normalized_route_mode = str(route_mode or "auto").strip().lower()
+    if normalized_route_mode == "manual":
+        return None
+    if normalized_route_mode != "manual":
+        configured_instance_id = _configured_route_instance_id(cluster, for_change)
+        if configured_instance_id:
+            configured = DatabaseInstance.query.filter_by(
+                id=configured_instance_id,
+                cluster_id=cluster_id,
+                db_type=db_type,
+                enabled=True,
+            ).first()
+            if configured:
+                return configured
     if db_type == "mysql":
         return _select_instance_by_role(db_type, cluster_id, ["master", "master_slave"] if for_change else ["slave", "master_slave", "master"], "replication_role")
     if db_type == "mongodb":
@@ -324,9 +359,7 @@ def execute_mysql(
     import pymysql
 
     password = decrypt_secret(instance.password_encrypted) if instance.password_encrypted else None
-    cluster = instance.cluster
-    ha_domain = (cluster.ha_domain or "").strip() if cluster else ""
-    host = ha_domain or instance.resolved_ip or instance.host_input
+    host = instance.resolved_ip or instance.host_input
     timeout = max(0, int(timeout_seconds or 0))
     read_timeout = timeout if timeout > 0 else None
     connection = pymysql.connect(

@@ -45,6 +45,14 @@
           </el-tag>
         </template>
       </el-table-column>
+      <el-table-column v-if="dbType === 'mysql'" label="访问路由" min-width="220">
+        <template #default="scope">
+          <div class="route-summary">
+            <span>查询：{{ routeSummary(scope.row, "query") }}</span>
+            <span>变更：{{ routeSummary(scope.row, "change") }}</span>
+          </div>
+        </template>
+      </el-table-column>
       <el-table-column prop="description" label="描述" min-width="240" show-overflow-tooltip />
       <el-table-column prop="created_at" label="创建时间" min-width="180">
         <template #default="scope">
@@ -82,6 +90,48 @@
         <el-form-item v-if="dbType === 'mysql'" label="启用HA切换">
           <el-switch v-model="form.ha_switch_enabled" />
         </el-form-item>
+        <template v-if="dbType === 'mysql'">
+          <el-form-item label="查询路由">
+            <div class="route-form-row">
+              <el-segmented v-model="form.data_access_route_json.query.mode" :options="routeModeOptions" />
+              <el-select
+                v-if="form.data_access_route_json.query.mode === 'manual'"
+                v-model="form.data_access_route_json.query.instance_id"
+                clearable
+                filterable
+                placeholder="选择查询实例"
+                class="route-instance-select"
+              >
+                <el-option
+                  v-for="instance in currentClusterInstances"
+                  :key="instance.id"
+                  :label="instanceLabel(instance)"
+                  :value="instance.id"
+                />
+              </el-select>
+            </div>
+          </el-form-item>
+          <el-form-item label="变更路由">
+            <div class="route-form-row">
+              <el-segmented v-model="form.data_access_route_json.change.mode" :options="routeModeOptions" />
+              <el-select
+                v-if="form.data_access_route_json.change.mode === 'manual'"
+                v-model="form.data_access_route_json.change.instance_id"
+                clearable
+                filterable
+                placeholder="选择变更实例"
+                class="route-instance-select"
+              >
+                <el-option
+                  v-for="instance in currentClusterInstances"
+                  :key="instance.id"
+                  :label="instanceLabel(instance)"
+                  :value="instance.id"
+                />
+              </el-select>
+            </div>
+          </el-form-item>
+        </template>
         <el-form-item label="备注"><el-input v-model.trim="form.description" type="textarea" :rows="3" /></el-form-item>
       </el-form>
       <template #footer>
@@ -98,6 +148,7 @@ import { computed, onMounted, reactive, ref, watch } from "vue";
   import { useRoute } from "vue-router";
 
   import { createCluster, deleteCluster, listClusters, updateCluster } from "../api/modules/clusters";
+  import { listInstances } from "../api/modules/instances";
   import { formatBeijingTime } from "../utils/time";
 
 const route = useRoute();
@@ -118,6 +169,7 @@ const loading = ref(false);
 const saving = ref(false);
 const dialogVisible = ref(false);
 const rows = ref([]);
+const instances = ref([]);
 const editingClusterId = ref(null);
 const pager = reactive({
   page: 1,
@@ -136,8 +188,17 @@ const form = reactive({
   name: "",
   ha_domain: "",
   ha_switch_enabled: false,
+  data_access_route_json: {
+    query: { mode: "auto", instance_id: null },
+    change: { mode: "auto", instance_id: null },
+  },
   description: "",
 });
+
+const routeModeOptions = [
+  { label: "自动", value: "auto" },
+  { label: "手动", value: "manual" },
+];
 
 const dialogTitle = computed(() => (editingClusterId.value ? `编辑${dbLabel.value}集群` : `新建${dbLabel.value}集群`));
 
@@ -239,6 +300,40 @@ const environmentOptions = computed(() => {
   return Array.from(set).sort();
 });
 
+const currentClusterInstances = computed(() => {
+  if (!editingClusterId.value) return [];
+  return instances.value.filter((item) => Number(item.cluster_id) === Number(editingClusterId.value));
+});
+
+function normalizeRouteConfig(value) {
+  const source = value && typeof value === "object" ? value : {};
+  const normalizePart = (key) => {
+    const item = source[key] && typeof source[key] === "object" ? source[key] : {};
+    const mode = item.mode === "manual" ? "manual" : "auto";
+    return {
+      mode,
+      instance_id: mode === "manual" ? (item.instance_id || null) : null,
+    };
+  };
+  return {
+    query: normalizePart("query"),
+    change: normalizePart("change"),
+  };
+}
+
+function instanceLabel(instance) {
+  const address = `${instance.resolved_ip || instance.host_input || "-"}:${instance.port || "-"}`;
+  return `${instance.name || `实例-${instance.id}`} (${address})`;
+}
+
+function routeSummary(row, key) {
+  const route = normalizeRouteConfig(row.data_access_route_json);
+  const item = route[key] || { mode: "auto" };
+  if (item.mode !== "manual") return "自动";
+  const instance = instances.value.find((ins) => Number(ins.id) === Number(item.instance_id));
+  return instance ? instanceLabel(instance) : `实例 ${item.instance_id || "-"}`;
+}
+
 function resetForm() {
   editingClusterId.value = null;
   form.business_line = filters.business_line || "";
@@ -246,6 +341,7 @@ function resetForm() {
   form.name = "";
   form.ha_domain = "";
   form.ha_switch_enabled = false;
+  form.data_access_route_json = normalizeRouteConfig(null);
   form.description = "";
 }
 
@@ -261,13 +357,28 @@ function openEditDialog(row) {
   form.name = row.name || "";
   form.ha_domain = row.ha_domain || "";
   form.ha_switch_enabled = !!row.ha_switch_enabled;
+  form.data_access_route_json = normalizeRouteConfig(row.data_access_route_json);
   form.description = row.description || "";
   dialogVisible.value = true;
+}
+
+async function loadInstancesForRoutes() {
+  if (dbType.value !== "mysql") {
+    instances.value = [];
+    return;
+  }
+  try {
+    const { data } = await listInstances(dbType.value);
+    instances.value = data.data || [];
+  } catch {
+    instances.value = [];
+  }
 }
 
 async function loadClusters() {
   loading.value = true;
   try {
+    await loadInstancesForRoutes();
     const { data } = await listClusters(dbType.value, {
       business_line: filters.business_line,
       environment: filters.environment,
@@ -299,12 +410,24 @@ async function onSubmit() {
     name: (form.name || "").trim(),
     ha_domain: (form.ha_domain || "").trim(),
     ha_switch_enabled: !!form.ha_switch_enabled,
+    data_access_route_json: normalizeRouteConfig(form.data_access_route_json),
     description: (form.description || "").trim(),
   };
 
   if (!payload.name) {
     ElMessage.warning("请填写集群名称");
     return;
+  }
+
+  if (dbType.value === "mysql") {
+    if (payload.data_access_route_json.query.mode === "manual" && !payload.data_access_route_json.query.instance_id) {
+      ElMessage.warning("请选择查询路由实例");
+      return;
+    }
+    if (payload.data_access_route_json.change.mode === "manual" && !payload.data_access_route_json.change.instance_id) {
+      ElMessage.warning("请选择变更路由实例");
+      return;
+    }
   }
 
   saving.value = true;
@@ -321,6 +444,7 @@ async function onSubmit() {
         name: payload.name,
         ha_domain: payload.ha_domain,
         ha_switch_enabled: payload.ha_switch_enabled,
+        data_access_route_json: payload.data_access_route_json,
         db_type: dbType.value,
         description: payload.description,
       });
@@ -398,5 +522,23 @@ watch(
 .no-perm-hint {
   color: #94a3b8;
   font-size: 12px;
+}
+
+.route-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  line-height: 1.35;
+}
+
+.route-form-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.route-instance-select {
+  flex: 1;
 }
 </style>

@@ -30,6 +30,14 @@ def _memory_usage_pct(used_memory, maxmemory):
     return round(max(0.0, min((used / max_mem) * 100, 100.0)), 2)
 
 
+def _connection_usage_pct(connected_clients, maxclients):
+    connected = _safe_int(connected_clients)
+    max_clients = _safe_int(maxclients)
+    if connected is None or max_clients is None or max_clients <= 0:
+        return None
+    return round(max(0.0, min((connected / max_clients) * 100, 100.0)), 2)
+
+
 def _key_count_total(info: dict):
     total = 0
     db_count = 0
@@ -68,9 +76,17 @@ def collect_redis_status(instance, password):
         except Exception:
             cluster_info = {}
 
+        maxclients = _safe_int(info.get("maxclients"))
+        if maxclients is None:
+            try:
+                maxclients = _safe_int((client.config_get("maxclients") or {}).get("maxclients"))
+            except Exception:
+                maxclients = None
+
         redis_role = _resolve_redis_role(info)
         used_memory = _safe_int(info.get("used_memory"))
         maxmemory = _safe_int(info.get("maxmemory"))
+        connected_clients = _safe_int(info.get("connected_clients"))
         total_keys, keyspace_db_count = _key_count_total(info)
         master_host = info.get("master_host")
         master_port = info.get("master_port")
@@ -95,7 +111,9 @@ def collect_redis_status(instance, password):
             "replication_lag_seconds": replication_lag_seconds,
             "master_link_status": info.get("master_link_status"),
             "connected_slaves": info.get("connected_slaves"),
-            "connected_clients": info.get("connected_clients"),
+            "connected_clients": connected_clients,
+            "maxclients": maxclients,
+            "connection_usage_pct": _connection_usage_pct(connected_clients, maxclients),
             "used_memory": used_memory,
             "used_memory_human": info.get("used_memory_human"),
             "maxmemory": maxmemory,
@@ -112,4 +130,3 @@ def collect_redis_status(instance, password):
         }
     except Exception as exc:
         return {"ok": False, "error": f"redis collect failed: {exc}"}
-

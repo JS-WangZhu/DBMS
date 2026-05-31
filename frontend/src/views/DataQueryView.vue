@@ -43,6 +43,30 @@
             :value="cluster.id"
           />
         </el-select>
+        <el-segmented
+          v-if="form.db_type === 'mysql'"
+          v-model="form.route_mode"
+          :options="routeModeOptions"
+          size="default"
+          @change="onRouteModeChange"
+        />
+        <el-select
+          v-if="form.db_type === 'mysql' && form.route_mode === 'manual'"
+          v-model="form.instance_id"
+          clearable
+          filterable
+          placeholder="指定查询实例"
+          size="default"
+          style="width: 260px"
+          @change="onRouteInstanceChange"
+        >
+          <el-option
+            v-for="instance in filteredInstances"
+            :key="instance.id"
+            :label="instanceLabel(instance)"
+            :value="instance.id"
+          />
+        </el-select>
       </div>
       <div class="topbar-right">
         <el-button size="default" @click="reloadOptions">
@@ -107,6 +131,7 @@
           <div class="schema-tree">
             <el-tree
               v-if="schemaTreeData.length"
+              :key="schemaTreeKey"
               ref="schemaTreeRef"
               :data="schemaTreeData"
               :props="schemaTreeProps"
@@ -408,6 +433,7 @@ import {
 
 import SqlEditor from "../components/SqlEditor.vue";
 import { listClusters } from "../api/modules/clusters";
+import { listInstances } from "../api/modules/instances";
 import {
   cancelDataAccessExecution,
   describeMongoCollection,
@@ -424,6 +450,8 @@ const form = reactive({
   business_line: "",
   environment: "",
   cluster_id: null,
+  route_mode: "auto",
+  instance_id: null,
   sql: "",
   mysql_db: "",
   mongo_db: "admin",
@@ -432,6 +460,7 @@ const form = reactive({
 });
 
 const clusters = ref([]);
+const instances = ref([]);
 const running = ref(false);
 const resultVisible = ref(false);
 const tableColumns = ref([]);
@@ -450,9 +479,14 @@ const activeResultTab = ref("result");
 const lastElapsedMs = ref(-1);
 const schemaKeyword = ref("");
 const schemaTreeRef = ref(null);
+const schemaTreeVersion = ref(0);
 const sqlEditorRef = ref(null);
 const mongoEditorRef = ref(null);
 const redisEditorRef = ref(null);
+const routeModeOptions = [
+  { label: "自动", value: "auto" },
+  { label: "手动", value: "manual" },
+];
 
 /** 左侧树数据（由数据库切换驱动） */
 const schemaTreeData = ref([]);
@@ -498,12 +532,26 @@ const filteredClusters = computed(() => {
   return list;
 });
 
+const filteredInstances = computed(() => {
+  if (!form.cluster_id) return [];
+  return instances.value.filter((item) => Number(item.cluster_id) === Number(form.cluster_id));
+});
+
 const pagedTableRows = computed(() => {
   const start = (currentPage.value - 1) * pageSize.value;
   return tableRows.value.slice(start, start + pageSize.value);
 });
 
 const isMongoResult = computed(() => form.db_type === "mongodb");
+const schemaTreeKey = computed(() => [
+  form.db_type,
+  form.cluster_id || "",
+  form.route_mode || "auto",
+  form.instance_id || "",
+  form.mysql_db || "",
+  form.mongo_db || "",
+  schemaTreeVersion.value,
+].join(":"));
 
 /** 供 SqlEditor 补全使用 */
 const sqlSchema = computed(() => {
@@ -535,8 +583,31 @@ async function loadClusters() {
   clusters.value = data.data || [];
 }
 
+function instanceLabel(instance) {
+  const address = `${instance.resolved_ip || instance.host_input || "-"}:${instance.port || "-"}`;
+  return `${instance.name || `实例-${instance.id}`} (${address})`;
+}
+
+function currentRoutePayload() {
+  if (form.db_type !== "mysql") return {};
+  if (form.route_mode === "manual" && form.instance_id) {
+    return { route_mode: "manual", instance_id: form.instance_id };
+  }
+  return { route_mode: "auto" };
+}
+
+async function loadInstances() {
+  if (form.db_type !== "mysql") {
+    instances.value = [];
+    return;
+  }
+  const { data } = await listInstances(form.db_type);
+  instances.value = data.data || [];
+}
+
 async function reloadOptions() {
   await loadClusters();
+  await loadInstances();
   await loadMysqlDatabasesOptions(true);
   await loadMongoDatabasesOptions(true);
 }
@@ -545,8 +616,10 @@ function onDbTypeChange() {
   form.business_line = "";
   form.environment = "";
   form.cluster_id = null;
+  form.route_mode = "auto";
+  form.instance_id = null;
   form.mysql_db = "";
-  form.mongo_db = "admin";
+  form.mongo_db = "";
   form.mongo_command = "";
   form.redis_command = "";
   mysqlDatabases.value = [];
@@ -558,8 +631,10 @@ function onDbTypeChange() {
 function onBusinessLineChange() {
   form.environment = "";
   form.cluster_id = null;
+  form.route_mode = "auto";
+  form.instance_id = null;
   form.mysql_db = "";
-  form.mongo_db = "admin";
+  form.mongo_db = "";
   mysqlDatabases.value = [];
   mongoDatabases.value = [];
   resetSchema();
@@ -567,14 +642,20 @@ function onBusinessLineChange() {
 
 function onEnvironmentChange() {
   form.cluster_id = null;
+  form.route_mode = "auto";
+  form.instance_id = null;
   form.mysql_db = "";
-  form.mongo_db = "admin";
+  form.mongo_db = "";
   mysqlDatabases.value = [];
   mongoDatabases.value = [];
   resetSchema();
 }
 
 async function onClusterChange() {
+  form.route_mode = "auto";
+  form.instance_id = null;
+  form.mysql_db = "";
+  form.mongo_db = "";
   resetSchema();
   await loadMysqlDatabasesOptions();
   await loadMongoDatabasesOptions();
@@ -582,6 +663,30 @@ async function onClusterChange() {
     await loadMysqlSchema();
   } else if (form.db_type === "mongodb" && form.mongo_db) {
     await loadMongoSchema();
+  }
+}
+
+async function onRouteModeChange() {
+  if (form.route_mode !== "manual") {
+    form.instance_id = null;
+  } else if (!form.instance_id) {
+    form.mysql_db = "";
+    mysqlDatabases.value = [];
+    resetSchema();
+    return;
+  }
+  resetSchema();
+  await loadMysqlDatabasesOptions();
+  if (form.db_type === "mysql" && form.mysql_db) {
+    await loadMysqlSchema();
+  }
+}
+
+async function onRouteInstanceChange() {
+  resetSchema();
+  await loadMysqlDatabasesOptions();
+  if (form.db_type === "mysql" && form.mysql_db) {
+    await loadMysqlSchema();
   }
 }
 
@@ -594,6 +699,7 @@ async function onMongoDatabaseChange() {
 }
 
 function resetSchema() {
+  schemaTreeVersion.value += 1;
   schemaTreeData.value = [];
   schemaObjects.value = { tables: [], views: [], procedures: [], functions: [], triggers: [], events: [] };
   mongoSchemaObjects.value = { collections: [], views: [] };
@@ -609,11 +715,11 @@ async function loadMysqlDatabasesOptions(silent = false) {
   }
   mysqlDatabasesLoading.value = true;
   try {
-    const { data } = await listMysqlDatabases(form.cluster_id);
+    const { data } = await listMysqlDatabases(form.cluster_id, currentRoutePayload());
     const list = data?.data?.databases || [];
     mysqlDatabases.value = list;
-    if (list.length && !list.includes(form.mysql_db)) {
-      form.mysql_db = list[0];
+    if (form.mysql_db && !list.includes(form.mysql_db)) {
+      form.mysql_db = "";
     }
   } catch (error) {
     if (!silent) {
@@ -627,7 +733,7 @@ async function loadMysqlDatabasesOptions(silent = false) {
 async function loadMongoDatabasesOptions(silent = false) {
   if (form.db_type !== "mongodb" || !form.cluster_id) {
     mongoDatabases.value = [];
-    form.mongo_db = "admin";
+    form.mongo_db = "";
     return;
   }
   mongoDatabasesLoading.value = true;
@@ -635,10 +741,8 @@ async function loadMongoDatabasesOptions(silent = false) {
     const { data } = await listMongoDatabases(form.cluster_id);
     const list = data?.data?.databases || [];
     mongoDatabases.value = list;
-    if (list.length && !list.includes(form.mongo_db)) {
-      form.mongo_db = list[0];
-    } else if (!list.length && !form.mongo_db) {
-      form.mongo_db = "admin";
+    if (form.mongo_db && !list.includes(form.mongo_db)) {
+      form.mongo_db = "";
     }
   } catch (error) {
     if (!silent) {
@@ -655,7 +759,7 @@ async function loadMysqlSchema() {
     return;
   }
   try {
-    const { data } = await listMysqlObjects(form.cluster_id, form.mysql_db);
+    const { data } = await listMysqlObjects(form.cluster_id, form.mysql_db, currentRoutePayload());
     const payload = data?.data || {};
     schemaObjects.value = {
       tables: payload.tables || [],
@@ -830,7 +934,7 @@ async function loadSchemaNode(node, resolve) {
       return resolve(cached.map((c) => columnToTreeNode(data.label, c)));
     }
     try {
-      const res = await listMysqlTableColumns(form.cluster_id, form.mysql_db, data.label);
+      const res = await listMysqlTableColumns(form.cluster_id, form.mysql_db, data.label, currentRoutePayload());
       const cols = res.data?.data?.columns || [];
       tableColumnsCache[data.label] = cols;
       resolve(cols.map((c) => columnToTreeNode(data.label, c)));
@@ -1038,6 +1142,10 @@ async function runQuery() {
     return;
   }
   if (form.db_type === "mysql") {
+    if (form.route_mode === "manual" && !form.instance_id) {
+      ElMessage.warning("请选择查询实例");
+      return;
+    }
     if (!form.sql.trim()) {
       ElMessage.warning("请填写 SQL");
       return;
@@ -1070,6 +1178,8 @@ async function runQuery() {
       business_line: form.business_line || undefined,
       environment: form.environment || undefined,
       cluster_id: form.cluster_id,
+      route_mode: form.db_type === "mysql" ? form.route_mode : undefined,
+      instance_id: form.db_type === "mysql" && form.route_mode === "manual" ? form.instance_id : undefined,
       sql: form.db_type === "mysql" ? form.sql : undefined,
       database: form.db_type === "mysql" ? `${form.mysql_db || ""}`.trim() : undefined,
       mongo_command: form.db_type === "mongodb" ? form.mongo_command : undefined,

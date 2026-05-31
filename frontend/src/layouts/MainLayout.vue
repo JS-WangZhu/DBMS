@@ -183,7 +183,7 @@
           </el-menu-item>
         </el-sub-menu>
 
-        <el-sub-menu v-if="hasAnyMenu(['ai_model_config', 'ha_config', 'instance_status_config', 'inspection_param_config', 'data_query_op_config', 'backup_notify_targets', 'sso_config'])" index="config">
+        <el-sub-menu v-if="hasAnyMenu(['ai_model_config', 'ha_config', 'instance_status_config', 'inspection_param_config', 'data_query_op_config', 'backup_notify_targets', 'mcp_platform', 'sso_config'])" index="config">
           <template #title>
             <el-icon><Management /></el-icon>
             <span>配置管理</span>
@@ -211,6 +211,10 @@
           <el-menu-item v-if="hasMenu('backup_notify_targets')" index="/backups/notify-targets">
             <el-icon><Bell /></el-icon>
             <span>通知地址管理</span>
+          </el-menu-item>
+          <el-menu-item v-if="hasMenu('mcp_platform')" index="/config/mcp-platform">
+            <el-icon><Key /></el-icon>
+            <span>MCP开放平台</span>
           </el-menu-item>
           <el-menu-item v-if="hasMenu('sso_config')" index="/config/sso">
             <el-icon><Key /></el-icon>
@@ -363,6 +367,7 @@ const routePermissionMap = {
   "/config/instance-status": "instance_status_config",
   "/config/inspection": "inspection_param_config",
   "/config/data-query-ops": "data_query_op_config",
+  "/config/mcp-platform": "mcp_platform",
   "/config/sso": "sso_config",
 };
 

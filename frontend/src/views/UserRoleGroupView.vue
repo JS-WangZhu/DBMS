@@ -155,7 +155,7 @@ function buildMenuTree(catalog) {
       "backup_records",
       { key: "backup_config", label: "配置管理", children: ["backup_tool_configs", "backup_agents", "backup_s3_storage", "backup_keys"] },
     ] },
-    { key: "config", label: "配置管理", children: ["ai_model_config", "ha_config", "instance_status_config", "inspection_param_config", "data_query_op_config", "backup_notify_targets", "sso_config"] },
+    { key: "config", label: "配置管理", children: ["ai_model_config", "ha_config", "instance_status_config", "inspection_param_config", "data_query_op_config", "backup_notify_targets", "mcp_platform", "sso_config"] },
     { key: "users", label: "用户管理", children: ["users_info", "users_permissions", "users_role_groups"] },
   ];
   function convert(node) {

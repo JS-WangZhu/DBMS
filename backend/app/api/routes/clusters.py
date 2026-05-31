@@ -148,6 +148,33 @@ def _safe_int(value, default_value: int):
         return default_value
 
 
+def _safe_optional_int(value):
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
+
+
+def _normalize_data_access_route(value):
+    source = value if isinstance(value, dict) else {}
+
+    def normalize_part(key):
+        raw = source.get(key) if isinstance(source.get(key), dict) else {}
+        mode = str(raw.get("mode") or "auto").strip().lower()
+        if mode not in {"auto", "manual"}:
+            mode = "auto"
+        instance_id = _safe_optional_int(raw.get("instance_id"))
+        if mode != "manual":
+            instance_id = None
+        return {"mode": mode, "instance_id": instance_id}
+
+    return {
+        "query": normalize_part("query"),
+        "change": normalize_part("change"),
+    }
+
+
 def _parse_page_args():
     page = max(_safe_int(request.args.get("page"), 1), 1)
     page_size = min(max(_safe_int(request.args.get("page_size"), 20), 1), 200)
@@ -361,6 +388,7 @@ def create_cluster():
     namespace = str(namespace_raw).strip() if namespace_raw is not None else ""
     description = payload.get("description")
     ha_domain = (payload.get("ha_domain") or "").strip() or None
+    data_access_route = _normalize_data_access_route(payload.get("data_access_route_json"))
 
     if not name or not db_type:
         return error_response("name and db_type are required", code=400)
@@ -376,6 +404,7 @@ def create_cluster():
         db_type=db_type,
         description=description,
         ha_domain=ha_domain,
+        data_access_route_json=data_access_route,
     )
     db.session.add(cluster)
     db.session.commit()
@@ -407,6 +436,8 @@ def update_cluster(cluster_id):
         cluster.ha_domain = (payload.get("ha_domain") or "").strip() or None
     if "ha_switch_enabled" in payload:
         cluster.ha_switch_enabled = bool(payload.get("ha_switch_enabled"))
+    if "data_access_route_json" in payload:
+        cluster.data_access_route_json = _normalize_data_access_route(payload.get("data_access_route_json"))
 
     db.session.commit()
     log_audit(user_id=None, action="cluster.update", target_type="cluster", target_id=str(cluster.id), detail=payload)

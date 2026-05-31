@@ -16,6 +16,7 @@ from app.api.routes.ha_configs import bp as ha_configs_bp
 from app.api.routes.instances import bp as instances_bp
 from app.api.routes.inspection import bp as inspection_bp
 from app.api.routes.metrics import bp as metrics_bp
+from app.api.routes.mcp_platform import bp as mcp_platform_bp
 from app.api.routes.mongodb import bp as mongodb_bp
 from app.api.routes.monitoring import bp as monitoring_bp
 from app.api.routes.mysql import bp as mysql_bp
@@ -44,6 +45,7 @@ def register_blueprints(app):
     api_v1.register_blueprint(doris_bp)
     api_v1.register_blueprint(monitoring_bp)
     api_v1.register_blueprint(metrics_bp)
+    api_v1.register_blueprint(mcp_platform_bp)
     api_v1.register_blueprint(backups_bp)
     api_v1.register_blueprint(backup_agents_bp)
     api_v1.register_blueprint(backup_tools_bp)

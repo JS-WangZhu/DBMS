@@ -54,6 +54,8 @@ def ensure_backup_extra_columns():
         statements.append("ALTER TABLE db_clusters ADD COLUMN ha_status_json JSON NULL")
     if table_columns["db_clusters"] and "ha_switch_enabled" not in table_columns["db_clusters"]:
         statements.append("ALTER TABLE db_clusters ADD COLUMN ha_switch_enabled BOOLEAN NOT NULL DEFAULT FALSE")
+    if table_columns["db_clusters"] and "data_access_route_json" not in table_columns["db_clusters"]:
+        statements.append("ALTER TABLE db_clusters ADD COLUMN data_access_route_json JSON NULL")
 
     if "extra_json" not in table_columns["backup_policies"]:
         statements.append("ALTER TABLE backup_policies ADD COLUMN extra_json JSON NULL")
@@ -97,6 +99,16 @@ def ensure_backup_extra_columns():
         statements.append(
             "ALTER TABLE audit_logs ADD COLUMN updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP"
         )
+
+    if table_columns["api_keys"]:
+        if "name" not in table_columns["api_keys"]:
+            statements.append("ALTER TABLE api_keys ADD COLUMN name VARCHAR(128) NULL")
+        if "purpose" not in table_columns["api_keys"]:
+            statements.append("ALTER TABLE api_keys ADD COLUMN purpose VARCHAR(32) NOT NULL DEFAULT 'general'")
+        if "scopes" not in table_columns["api_keys"]:
+            statements.append("ALTER TABLE api_keys ADD COLUMN scopes JSON NULL")
+        if "last_used_at" not in table_columns["api_keys"]:
+            statements.append("ALTER TABLE api_keys ADD COLUMN last_used_at DATETIME NULL")
 
     for sql in statements:
         try:

@@ -20,6 +20,7 @@ DEFAULT_THRESHOLDS = {
     "mongodb_repl_lag_seconds": 60,
     "mongodb_cache_used_pct": 90,
     "redis_memory_usage_pct": 90,
+    "redis_connection_usage_pct": 90,
     "host_cpu_usage_pct": 90,
     "host_memory_usage_pct": 90,
     "host_data_disk_usage_pct": 90,
@@ -243,8 +244,16 @@ def _extract_issues(instance: DatabaseInstance, payload: dict, thresholds: dict)
 
     if instance.db_type == "redis":
         memory_pct = _safe_float(payload.get("memory_usage_pct"))
+        connection_pct = _safe_float(payload.get("connection_usage_pct"))
+        if connection_pct is None:
+            maxclients = _safe_int(payload.get("maxclients"))
+            connected_clients = _safe_int(payload.get("connected_clients"))
+            if maxclients and connected_clients is not None and maxclients > 0:
+                connection_pct = round(connected_clients * 100 / maxclients, 2)
         if memory_pct is not None and memory_pct >= thresholds["redis_memory_usage_pct"]:
             issues.append(_build_issue("redis_memory_high", "Redis内存使用率高", f"内存使用率 {memory_pct}%"))
+        if connection_pct is not None and connection_pct >= thresholds["redis_connection_usage_pct"]:
+            issues.append(_build_issue("redis_connection_high", "Redis连接数使用率高", f"连接数使用率 {connection_pct}%"))
         if payload.get("role") == "slave" and str(payload.get("master_link_status") or "").lower() == "down":
             issues.append(_build_issue("redis_replication_link", "Redis主从链路异常", "master_link_status=down", "critical"))
 

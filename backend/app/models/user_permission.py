@@ -25,15 +25,23 @@ class ApiKey(db.Model, TimestampMixin):
 
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
+    name = db.Column(db.String(128), nullable=True)
     token = db.Column(db.String(128), nullable=False, unique=True)
+    purpose = db.Column(db.String(32), nullable=False, default="general")
+    scopes = db.Column(db.JSON, nullable=True)
     status = db.Column(db.String(16), nullable=False, default="active")
+    last_used_at = db.Column(db.DateTime, nullable=True)
 
     def to_dict(self) -> dict:
         return {
             "id": self.id,
             "user_id": self.user_id,
+            "name": self.name,
             "token": self.token,
+            "purpose": self.purpose,
+            "scopes": self.scopes if isinstance(self.scopes, list) else [],
             "status": self.status,
+            "last_used_at": self.last_used_at.isoformat() if self.last_used_at else None,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }

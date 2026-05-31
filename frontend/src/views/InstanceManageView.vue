@@ -29,8 +29,9 @@
         :data="displayRows"
         v-loading="loading"
         stripe
+        border
         size="small"
-        table-layout="auto"
+        table-layout="fixed"
         :row-class-name="tableRowClassName"
         @row-click="onRowClick"
         @row-mouse-enter="onRowMouseEnter"
@@ -129,7 +130,7 @@
             {{ rowVersion(scope.row) }}
           </template>
         </el-table-column>
-        <el-table-column v-if="dbType === 'redis'" label="容器内存使用率" min-width="132" show-overflow-tooltip>
+        <el-table-column v-if="dbType === 'redis'" label="实例内存使用率" min-width="132" show-overflow-tooltip>
           <template #default="scope">
             <div v-if="redisContainerMemoryText(scope.row) !== '-'" class="redis-memory-cell">
               <el-tag size="small" :class="usageTagClass(redisContainerMemoryValue(scope.row))">
@@ -1534,7 +1535,7 @@ function buildRedisReplicationRows(payload, row) {
     { label: "复制源信息", value: redisReplicationSourceFromPayload(mergedPayload) },
     { label: "复制延迟(s)", value: redisReplicationLagFromPayload(mergedPayload) },
     { label: "Key数量", value: redisKeyCountFromPayload(mergedPayload) },
-    { label: "容器内存使用率", value: redisContainerMemorySummary(mergedPayload) },
+    { label: "实例内存使用率", value: redisContainerMemorySummary(mergedPayload) },
     { label: "主从链路状态", value: normalizeInfoValue(mergedPayload.master_link_status) },
     { label: "从库数量", value: normalizeInfoValue(mergedPayload.connected_slaves) },
   ];
@@ -2128,7 +2129,8 @@ async function removeInstance(row) {
       { label: "高可用模式", value: redisHaModeText(redisHaMode(mergedForMode)) },
       { label: "版本", value: normalizeInfoValue(payload.version || payload.redis_version) },
       { label: "当前连接数", value: normalizeInfoValue(payload.connected_clients) },
-      { label: "容器内存使用率", value: redisContainerMemorySummary(payload) },
+      { label: "最大连接数", value: normalizeInfoValue(payload.maxclients) },
+      { label: "实例内存使用率", value: redisContainerMemorySummary(payload) },
       { label: "配置最大内存", value: formatBytes(payload.maxmemory) },
       { label: "当前使用内存", value: formatBytes(payload.used_memory) },
       { label: "当前内存使用率", value: asPercentText(payload.memory_usage_pct) },
@@ -2631,4 +2633,3 @@ watch(
   }
 }
 </style>
-

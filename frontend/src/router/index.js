@@ -23,6 +23,7 @@ import InstanceStatusConfigView from "../views/InstanceStatusConfigView.vue";
 import InspectionManageView from "../views/InspectionManageView.vue";
 import InspectionParamConfigView from "../views/InspectionParamConfigView.vue";
 import LoginView from "../views/LoginView.vue";
+import McpPlatformView from "../views/McpPlatformView.vue";
 import MysqlConnectionManageView from "../views/MysqlConnectionManageView.vue";
 import MongoConnectionManageView from "../views/MongoConnectionManageView.vue";
 import RedisConnectionManageView from "../views/RedisConnectionManageView.vue";
@@ -92,6 +93,7 @@ const routes = [
       { path: "/config/instance-status", component: InstanceStatusConfigView, meta: { title: "实例状态检测管理" } },
       { path: "/config/inspection", component: InspectionParamConfigView, meta: { title: "巡检参数管理" } },
       { path: "/config/data-query-ops", component: DataQueryOpConfigView, meta: { title: "数据查询操作配置" } },
+      { path: "/config/mcp-platform", component: McpPlatformView, meta: { title: "MCP开放平台" } },
       { path: "/config/sso", component: SsoConfigView, meta: { title: "SSO登录管理" } },
     ],
   },

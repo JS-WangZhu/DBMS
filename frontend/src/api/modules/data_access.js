@@ -4,54 +4,63 @@ export function queryData(payload) {
   return client.post("/data-access/query", payload);
 }
 
-export function listMongoDatabases(clusterId) {
+function buildRouteParams(clusterId, route = {}) {
+  const params = {
+    cluster_id: clusterId,
+  };
+  if (route.route_mode) {
+    params.route_mode = route.route_mode;
+  }
+  if (route.instance_id) {
+    params.instance_id = route.instance_id;
+  }
+  return params;
+}
+
+export function listMongoDatabases(clusterId, route = {}) {
   return client.get("/data-access/mongodb/databases", {
-    params: {
-      cluster_id: clusterId,
-    },
+    params: buildRouteParams(clusterId, route),
   });
 }
 
-export function listMongoCollections(clusterId, database) {
+export function listMongoCollections(clusterId, database, route = {}) {
   return client.get("/data-access/mongodb/collections", {
     params: {
-      cluster_id: clusterId,
+      ...buildRouteParams(clusterId, route),
       database,
     },
   });
 }
 
-export function describeMongoCollection(clusterId, database, collection) {
+export function describeMongoCollection(clusterId, database, collection, route = {}) {
   return client.get("/data-access/mongodb/collection-info", {
     params: {
-      cluster_id: clusterId,
+      ...buildRouteParams(clusterId, route),
       database,
       collection,
     },
   });
 }
 
-export function listMysqlDatabases(clusterId) {
+export function listMysqlDatabases(clusterId, route = {}) {
   return client.get("/data-access/mysql/databases", {
-    params: {
-      cluster_id: clusterId,
-    },
+    params: buildRouteParams(clusterId, route),
   });
 }
 
-export function listMysqlObjects(clusterId, database) {
+export function listMysqlObjects(clusterId, database, route = {}) {
   return client.get("/data-access/mysql/objects", {
     params: {
-      cluster_id: clusterId,
+      ...buildRouteParams(clusterId, route),
       database,
     },
   });
 }
 
-export function listMysqlTableColumns(clusterId, database, table) {
+export function listMysqlTableColumns(clusterId, database, table, route = {}) {
   return client.get("/data-access/mysql/columns", {
     params: {
-      cluster_id: clusterId,
+      ...buildRouteParams(clusterId, route),
       database,
       table,
     },

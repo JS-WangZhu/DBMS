@@ -204,6 +204,13 @@ def _resolve_cluster_instance(payload):
         instance = DatabaseInstance.query.get(instance_id)
         if not instance:
             return None, None, "instance not found"
+        if cluster_id:
+            try:
+                requested_cluster_id = int(cluster_id)
+            except (TypeError, ValueError):
+                return None, None, "cluster_id invalid"
+            if requested_cluster_id != int(instance.cluster_id or 0):
+                return None, None, "instance does not belong to cluster"
         cluster_id = instance.cluster_id
     else:
         instance = None
@@ -290,6 +297,12 @@ def _resolve_database_name(payload, db_type: str):
     return (payload.get("database") or "").strip() or None
 
 
+def _route_args_from_request():
+    route_mode = (request.args.get("route_mode") or "auto").strip().lower()
+    instance_id = _safe_int(request.args.get("instance_id"), 0)
+    return route_mode, (instance_id if instance_id > 0 else None)
+
+
 def _execute(db_type: str, instance, payload, timeout_seconds, for_change: bool, execution_id=None):
     if db_type == "mysql":
         sql = payload.get("sql") or ""
@@ -342,7 +355,8 @@ def list_databases_for_mongodb():
         return error_response("cluster not found", code=400)
     if not require_cluster_permission(cluster.id, "query"):
         return error_response("permission denied", code=403)
-    chosen = pick_instance("mongodb", cluster.id, None, for_change=False)
+    route_mode, instance_id = _route_args_from_request()
+    chosen = pick_instance("mongodb", cluster.id, instance_id, for_change=False, route_mode=route_mode)
     if not chosen:
         return error_response("no available instance", code=400)
     try:
@@ -366,7 +380,8 @@ def list_collections_for_mongodb():
         return error_response("cluster not found", code=400)
     if not require_cluster_permission(cluster.id, "query"):
         return error_response("permission denied", code=403)
-    chosen = pick_instance("mongodb", cluster.id, None, for_change=False)
+    route_mode, instance_id = _route_args_from_request()
+    chosen = pick_instance("mongodb", cluster.id, instance_id, for_change=False, route_mode=route_mode)
     if not chosen:
         return error_response("no available instance", code=400)
     seed_nodes = _cluster_seed_nodes("mongodb", chosen.cluster_id)
@@ -394,7 +409,8 @@ def describe_collection_for_mongodb():
         return error_response("cluster not found", code=400)
     if not require_cluster_permission(cluster.id, "query"):
         return error_response("permission denied", code=403)
-    chosen = pick_instance("mongodb", cluster.id, None, for_change=False)
+    route_mode, instance_id = _route_args_from_request()
+    chosen = pick_instance("mongodb", cluster.id, instance_id, for_change=False, route_mode=route_mode)
     if not chosen:
         return error_response("no available instance", code=400)
     seed_nodes = _cluster_seed_nodes("mongodb", chosen.cluster_id)
@@ -418,7 +434,8 @@ def list_databases_for_mysql():
         return error_response("cluster not found", code=400)
     if not require_cluster_permission(cluster.id, "query"):
         return error_response("permission denied", code=403)
-    chosen = pick_instance("mysql", cluster.id, None, for_change=False)
+    route_mode, instance_id = _route_args_from_request()
+    chosen = pick_instance("mysql", cluster.id, instance_id, for_change=False, route_mode=route_mode)
     if not chosen:
         return error_response("no available instance", code=400)
     try:
@@ -442,7 +459,8 @@ def list_objects_for_mysql():
         return error_response("cluster not found", code=400)
     if not require_cluster_permission(cluster.id, "query"):
         return error_response("permission denied", code=403)
-    chosen = pick_instance("mysql", cluster.id, None, for_change=False)
+    route_mode, instance_id = _route_args_from_request()
+    chosen = pick_instance("mysql", cluster.id, instance_id, for_change=False, route_mode=route_mode)
     if not chosen:
         return error_response("no available instance", code=400)
     try:
@@ -469,7 +487,8 @@ def list_columns_for_mysql():
         return error_response("cluster not found", code=400)
     if not require_cluster_permission(cluster.id, "query"):
         return error_response("permission denied", code=403)
-    chosen = pick_instance("mysql", cluster.id, None, for_change=False)
+    route_mode, instance_id = _route_args_from_request()
+    chosen = pick_instance("mysql", cluster.id, instance_id, for_change=False, route_mode=route_mode)
     if not chosen:
         return error_response("no available instance", code=400)
     try:
@@ -497,6 +516,8 @@ def query_data():
     cluster, instance, err = _resolve_cluster_instance(payload)
     if err:
         return error_response(err, code=400)
+    if instance and instance.db_type != db_type:
+        return error_response("instance db_type mismatch", code=400)
     scope_err = _validate_scope(payload, cluster)
     if scope_err:
         return error_response(scope_err, code=400)
@@ -505,7 +526,8 @@ def query_data():
 
     timeout_seconds = _safe_int(payload.get("timeout_seconds"), 600)
     timeout_seconds = max(1, min(timeout_seconds, 600))
-    chosen = pick_instance(db_type, cluster.id, None, for_change=False)
+    route_mode = str(payload.get("route_mode") or "auto").strip().lower()
+    chosen = pick_instance(db_type, cluster.id, payload.get("instance_id"), for_change=False, route_mode=route_mode)
     if not chosen:
         chosen = instance
     if not chosen:
@@ -562,6 +584,8 @@ def change_data():
     cluster, instance, err = _resolve_cluster_instance(payload)
     if err:
         return error_response(err, code=400)
+    if instance and instance.db_type != db_type:
+        return error_response("instance db_type mismatch", code=400)
     scope_err = _validate_scope(payload, cluster)
     if scope_err:
         return error_response(scope_err, code=400)
@@ -571,7 +595,8 @@ def change_data():
     timeout_seconds = _safe_int(payload.get("timeout_seconds"), 86400)
     if timeout_seconds < 0:
         timeout_seconds = 0
-    chosen = pick_instance(db_type, cluster.id, None, for_change=True)
+    route_mode = str(payload.get("route_mode") or "auto").strip().lower()
+    chosen = pick_instance(db_type, cluster.id, payload.get("instance_id"), for_change=True, route_mode=route_mode)
     if not chosen:
         chosen = instance
     if not chosen:

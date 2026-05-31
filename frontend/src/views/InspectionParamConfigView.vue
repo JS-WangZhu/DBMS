@@ -168,6 +168,11 @@
                 <el-input-number v-model="form.thresholds.redis_memory_usage_pct" :min="1" :max="100" controls-position="right" style="width: 180px" />
               </el-form-item>
             </el-col>
+            <el-col :xs="24" :sm="12">
+              <el-form-item label="连接数使用率（%）">
+                <el-input-number v-model="form.thresholds.redis_connection_usage_pct" :min="1" :max="100" controls-position="right" style="width: 180px" />
+              </el-form-item>
+            </el-col>
           </el-row>
         </div>
 
@@ -223,6 +228,7 @@ const form = reactive({
     mongodb_repl_lag_seconds: 60,
     mongodb_cache_used_pct: 90,
     redis_memory_usage_pct: 90,
+    redis_connection_usage_pct: 90,
     host_cpu_usage_pct: 90,
     host_memory_usage_pct: 90,
     host_data_disk_usage_pct: 90,

@@ -18,8 +18,28 @@ class DatabaseCluster(db.Model, TimestampMixin):
     ha_domain = db.Column(db.String(255), nullable=True)
     ha_status_json = db.Column(db.JSON, nullable=True)
     ha_switch_enabled = db.Column(db.Boolean, nullable=False, default=False)
+    data_access_route_json = db.Column(db.JSON, nullable=True)
 
     instances = db.relationship("DatabaseInstance", back_populates="cluster")
+
+    def _data_access_route(self) -> dict:
+        source = self.data_access_route_json if isinstance(self.data_access_route_json, dict) else {}
+
+        def normalize(key):
+            item = source.get(key) if isinstance(source.get(key), dict) else {}
+            mode = str(item.get("mode") or "auto").strip().lower()
+            if mode not in {"auto", "manual"}:
+                mode = "auto"
+            instance_id = item.get("instance_id")
+            try:
+                instance_id = int(instance_id) if instance_id not in (None, "") else None
+            except (TypeError, ValueError):
+                instance_id = None
+            if mode != "manual":
+                instance_id = None
+            return {"mode": mode, "instance_id": instance_id}
+
+        return {"query": normalize("query"), "change": normalize("change")}
 
     def to_dict(self) -> dict:
         business_line = self.business_line or self.namespace
@@ -34,6 +54,7 @@ class DatabaseCluster(db.Model, TimestampMixin):
             "ha_domain": self.ha_domain,
             "ha_status_json": self.ha_status_json,
             "ha_switch_enabled": self.ha_switch_enabled,
+            "data_access_route_json": self._data_access_route(),
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
