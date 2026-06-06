@@ -5,9 +5,11 @@ from app.extensions import db, scheduler
 from app.models.db_asset import DatabaseCluster
 from app.models.notify_target import BackupNotifyTarget
 from app.services.audit import log_audit
+from app.services.redis_cache import get_json
 from app.services.inspection_service import (
     get_or_create_inspection_config,
     inspection_overview,
+    refresh_inspection_config_cache,
     run_inspection_cycle,
     update_inspection_config,
 )
@@ -66,6 +68,9 @@ def run_now():
 @bp.get("/config")
 @require_menu_permission("inspection_param_config")
 def get_config():
+    cached = get_json("dbms:config:inspection")
+    if isinstance(cached, dict):
+        return ok_response(data=cached)
     cfg = get_or_create_inspection_config()
     return ok_response(data=cfg.to_dict())
 
@@ -79,6 +84,7 @@ def update_config():
     if err:
         return error_response(err, code=400)
     db.session.commit()
+    refresh_inspection_config_cache(cfg)
     if current_app.config.get("ENABLE_SCHEDULER"):
         sync_inspection_job(scheduler=scheduler, app=current_app)
     log_audit(user_id=None, action="inspection.config.update", target_type="inspection_config", target_id=str(cfg.id), detail=payload)

@@ -4,6 +4,7 @@ from app.api.routes.common import require_menu_permission
 from app.extensions import db
 from app.models.data_query_op import DataQueryOperationConfig
 from app.services.audit import log_audit
+from app.services.redis_cache import delete as redis_delete, get_json, set_json
 from app.utils.response import error_response, ok_response
 
 
@@ -11,9 +12,11 @@ bp = Blueprint("data_query_ops", __name__, url_prefix="/data-query-ops")
 
 
 SUPPORTED_DB_TYPES = {"mysql", "mongodb", "redis"}
+LIST_CACHE_KEY = "dbms:config:data_query_ops:list"
 
 
 def _invalidate_cache():
+    redis_delete(LIST_CACHE_KEY)
     try:
         from app.services import data_access
 
@@ -25,6 +28,9 @@ def _invalidate_cache():
 @bp.get("")
 @require_menu_permission("data_query_op_config")
 def list_ops():
+    cached = get_json(LIST_CACHE_KEY)
+    if isinstance(cached, dict):
+        return ok_response(data=cached)
     rows = (
         DataQueryOperationConfig.query
         .order_by(
@@ -38,7 +44,9 @@ def list_ops():
     for row in rows:
         data = row.to_dict()
         groups.setdefault(row.db_type, []).append(data)
-    return ok_response(data={"groups": groups, "items": [row.to_dict() for row in rows]})
+    data = {"groups": groups, "items": [row.to_dict() for row in rows]}
+    set_json(LIST_CACHE_KEY, data)
+    return ok_response(data=data)
 
 
 @bp.post("")

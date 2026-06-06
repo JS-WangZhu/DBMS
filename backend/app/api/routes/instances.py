@@ -6,13 +6,15 @@ from app.models.db_asset import DatabaseInstance
 from app.models.monitor_snapshot import snapshot_model_for_instance
 from app.services.audit import log_audit
 from app.services.dns_resolver import resolve_and_update_instance
-from app.services.instance_status_config import get_or_create_instance_status_config, update_instance_status_config
+from app.services.instance_status_config import get_or_create_instance_status_config, refresh_instance_status_config_cache, update_instance_status_config
+from app.services.redis_cache import get_json
 from app.services.instance_service import (
     create_instance as create_instance_by_type,
+    invalidate_instance_list_cache,
     list_instances as list_instances_by_type,
     update_instance as update_instance_entity,
 )
-from app.tasks.scheduler import sync_monitor_collect_job
+from app.tasks.scheduler import sync_cache_warm_job, sync_monitor_collect_job
 from app.utils.response import error_response, ok_response
 
 bp = Blueprint("instances", __name__, url_prefix="/instances")
@@ -26,12 +28,15 @@ def list_instances():
 
     parsed_enabled = None if enabled is None else (enabled.lower() == "true")
     items = list_instances_by_type(db_type=db_type, enabled=parsed_enabled)
-    return ok_response(data=[item.to_dict() for item in items])
+    return ok_response(data=[item if isinstance(item, dict) else item.to_dict() for item in items])
 
 
 @bp.get("/status-config")
 @active_user_required
 def get_status_config():
+    cached = get_json("dbms:config:instance_status")
+    if isinstance(cached, dict):
+        return ok_response(data=cached)
     cfg = get_or_create_instance_status_config()
     return ok_response(data=cfg.to_dict())
 
@@ -45,8 +50,10 @@ def update_status_config():
     if err:
         return error_response(err, code=400)
     db.session.commit()
+    refresh_instance_status_config_cache(cfg)
     if current_app.config.get("ENABLE_SCHEDULER"):
         sync_monitor_collect_job(scheduler=scheduler, app=current_app)
+        sync_cache_warm_job(scheduler=scheduler, app=current_app)
     log_audit(user_id=None, action="instance.status_config.update", target_type="instance_status_config", target_id=str(cfg.id), detail=payload)
     return ok_response(data=cfg.to_dict())
 
@@ -66,6 +73,7 @@ def create_instance():
     if err:
         return error_response(err, code=400)
 
+    invalidate_instance_list_cache()
     log_audit(user_id=None, action="instance.create", target_type="instance", target_id=str(instance.id), detail=payload)
     return ok_response(data=instance.to_dict(), code=201)
 
@@ -80,6 +88,7 @@ def update_instance(instance_id):
         update_instance_entity(instance, payload)
     except ValueError as exc:
         return error_response(str(exc), code=400)
+    invalidate_instance_list_cache()
     log_audit(user_id=None, action="instance.update", target_type="instance", target_id=str(instance.id), detail=payload)
 
     return ok_response(data=instance.to_dict())
@@ -99,6 +108,7 @@ def delete_instance(instance_id):
         db.session.rollback()
         return error_response(f"delete instance failed: {exc}", code=500)
 
+    invalidate_instance_list_cache()
     log_audit(user_id=None, action="instance.delete", target_type="instance", target_id=str(instance.id), detail=detail)
     return ok_response(message="deleted")
 
@@ -109,6 +119,7 @@ def resolve_instance(instance_id):
     instance = DatabaseInstance.query.get_or_404(instance_id)
     changed, old_ip, new_ip = resolve_and_update_instance(instance)
     db.session.commit()
+    invalidate_instance_list_cache()
 
     log_audit(
         user_id=None,

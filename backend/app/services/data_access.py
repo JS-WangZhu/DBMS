@@ -7,6 +7,7 @@ from typing import Optional
 from app.models.db_asset import DatabaseCluster, DatabaseInstance
 from app.services.collectors import collect_instance_metrics
 from app.services.monitor_snapshot_service import latest_snapshot_for_instance
+from app.services.redis_cache import KEY_QUERY_OPS, delete as redis_delete, get_json, set_json
 from app.utils.crypto import decrypt_secret
 
 QUERY_ROW_LIMIT = 1000
@@ -50,6 +51,13 @@ _REDIS_QUERY_FALLBACK = {
 
 def _load_query_ops_from_db():
     """从数据库读取启用的允许操作，返回按 db_type 分组的小写关键字 set。"""
+    cached = get_json(KEY_QUERY_OPS)
+    if isinstance(cached, dict):
+        return {
+            "mysql": set(cached.get("mysql") or []),
+            "mongodb": set(cached.get("mongodb") or []),
+            "redis": set(cached.get("redis") or []),
+        }
     try:
         from app.models.data_query_op import DataQueryOperationConfig
 
@@ -61,6 +69,7 @@ def _load_query_ops_from_db():
         if not row.op_key:
             continue
         groups.setdefault(row.db_type, set()).add(row.op_key.strip().lower())
+    set_json(KEY_QUERY_OPS, {key: sorted(values) for key, values in groups.items()})
     return groups
 
 
@@ -93,6 +102,7 @@ def invalidate_query_ops_cache():
     with _QUERY_OPS_LOCK:
         _QUERY_OPS_CACHE["data"] = None
         _QUERY_OPS_CACHE["ts"] = 0.0
+    redis_delete(KEY_QUERY_OPS)
 
 
 def register_execution(execution_id: str, user_id: Optional[int], db_type: str):

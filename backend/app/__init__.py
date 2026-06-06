@@ -1,4 +1,5 @@
 import os
+import threading
 
 from dotenv import load_dotenv
 from flask import Flask
@@ -37,7 +38,7 @@ def create_app(config_object=None):
             )
 
     if app.config.get("ENABLE_SCHEDULER") and not app.config.get("TESTING"):
-        from app.tasks.scheduler import register_jobs
+        from app.tasks.scheduler import job_warm_redis_cache, register_jobs
 
         scheduler.init_app(app)
         register_jobs(scheduler, app)
@@ -46,5 +47,11 @@ def create_app(config_object=None):
             # Avoid double start in flask debug reloader.
             if os.environ.get("WERKZEUG_RUN_MAIN") == "true" or not app.debug:
                 scheduler.start()
+                threading.Thread(
+                    target=job_warm_redis_cache,
+                    kwargs={"app": app},
+                    name="redis-cache-warm-startup",
+                    daemon=True,
+                ).start()
 
     return app

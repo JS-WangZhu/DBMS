@@ -3,9 +3,39 @@ from sqlalchemy import String, cast, or_
 from app.extensions import db
 from app.models.db_asset import DatabaseCluster, DatabaseInstance
 from app.services.dns_resolver import resolve_and_update_instance, resolve_host
+from app.services.redis_cache import KEY_INSTANCE_LIST_PREFIX, delete_pattern, get_json, set_json
 from app.utils.crypto import encrypt_secret
 
 VALID_DB_TYPES = {"mysql", "mongodb", "redis", "doris"}
+
+
+def _instance_list_cache_key(db_type=None, enabled=None):
+    db_key = str(db_type or "all").strip().lower()
+    enabled_key = "any" if enabled is None else ("true" if enabled else "false")
+    return f"{KEY_INSTANCE_LIST_PREFIX}:{db_key}:{enabled_key}"
+
+
+def invalidate_instance_list_cache():
+    delete_pattern(f"{KEY_INSTANCE_LIST_PREFIX}:*")
+
+
+def _set_instance_list_cache(db_type=None, enabled=None, rows=None):
+    items = [row.to_dict() if not isinstance(row, dict) else row for row in (rows or [])]
+    set_json(_instance_list_cache_key(db_type=db_type, enabled=enabled), items)
+    return items
+
+
+def warm_instance_list_cache():
+    rows = DatabaseInstance.query.order_by(DatabaseInstance.id.desc()).all()
+    _set_instance_list_cache(rows=rows)
+    for enabled in (True, False):
+        _set_instance_list_cache(enabled=enabled, rows=[row for row in rows if bool(row.enabled) is enabled])
+    for db_type in sorted(VALID_DB_TYPES):
+        typed_rows = [row for row in rows if row.db_type == db_type]
+        _set_instance_list_cache(db_type=db_type, rows=typed_rows)
+        for enabled in (True, False):
+            _set_instance_list_cache(db_type=db_type, enabled=enabled, rows=[row for row in typed_rows if bool(row.enabled) is enabled])
+    return len(rows)
 
 
 def _to_bool(value, default=True):
@@ -115,12 +145,18 @@ def _validate_cluster_binding(cluster_id, db_type):
 
 
 def list_instances(db_type=None, enabled=None):
+    cache_key = _instance_list_cache_key(db_type=db_type, enabled=enabled)
+    cached = get_json(cache_key)
+    if isinstance(cached, list):
+        return cached
+
     query = DatabaseInstance.query
     if db_type:
         query = query.filter_by(db_type=db_type)
     if enabled is not None:
         query = query.filter_by(enabled=enabled)
-    return query.order_by(DatabaseInstance.id.desc()).all()
+    rows = query.order_by(DatabaseInstance.id.desc()).all()
+    return _set_instance_list_cache(db_type=db_type, enabled=enabled, rows=rows)
 
 
 def list_instances_paginated(

@@ -9,14 +9,17 @@ from app.extensions import db
 from app.models.backup import BackupLog, BackupPolicy
 from app.models.db_asset import DatabaseCluster, DatabaseInstance
 from app.models.inspection import InspectionConfig
-from app.models.monitor_snapshot import SNAPSHOT_MODEL_BY_DB_TYPE, snapshot_model_for_instance
+from app.models.monitor_snapshot import SNAPSHOT_MODEL_BY_DB_TYPE
 from app.services.backup_agent_client import BackupAgentError, execute_backup_on_agent
 from app.services.backup_executor import run_backup_policy
 from app.services.collectors import collect_instance_metrics
 from app.services.dns_resolver import refresh_all_dns, resolve_host
 from app.services.inspection_service import get_or_create_inspection_config, run_inspection_cycle
+from app.services.instance_service import warm_instance_list_cache
 from app.services.instance_status_config import get_or_create_instance_status_config
+from app.services.monitor_snapshot_service import warm_latest_snapshot_cache
 from app.services.notifier import notify_backup_failure
+from app.services.redis_cache import enqueue_snapshot_flush, set_latest_snapshot
 from app.services.topology_history import (
     extract_mongo_topology,
     extract_mysql_topology,
@@ -81,6 +84,7 @@ def register_jobs(scheduler, app):
     )
 
     sync_monitor_collect_job(scheduler=scheduler, app=app)
+    sync_cache_warm_job(scheduler=scheduler, app=app)
 
     scheduler.add_job(
         id="monitor_snapshot_cleanup_daily",
@@ -95,6 +99,44 @@ def register_jobs(scheduler, app):
     sync_backup_jobs(scheduler=scheduler, app=app)
     sync_inspection_job(scheduler=scheduler, app=app)
     sync_scheduled_task_jobs(scheduler=scheduler, app=app)
+
+
+def sync_cache_warm_job(scheduler, app):
+    app = _resolve_app(app) or app
+    job_id = "redis_cache_warm"
+    if scheduler.get_job(job_id):
+        scheduler.remove_job(job_id)
+
+    with app.app_context():
+        cfg = get_or_create_instance_status_config()
+        interval_seconds = max(10, int(cfg.probe_poll_interval_seconds or 30))
+        scheduler.add_job(
+            id=job_id,
+            func=job_warm_redis_cache,
+            trigger="interval",
+            seconds=interval_seconds,
+            next_run_time=datetime.now(),
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+            kwargs={"app": app},
+        )
+
+
+def job_warm_redis_cache(app):
+    app = _resolve_app(app) or app
+    if app is None:
+        current_app.logger.error("redis cache warm job missing app context")
+        return {"ok": False, "message": "app context missing"}
+    with app.app_context():
+        instance_count = warm_instance_list_cache()
+        snapshot_count = warm_latest_snapshot_cache()
+        current_app.logger.info(
+            "redis cache warm finished: instances=%s snapshots=%s",
+            instance_count,
+            snapshot_count,
+        )
+        return {"ok": True, "instances": instance_count, "snapshots": snapshot_count}
 
 
 def sync_backup_jobs(scheduler, app):
@@ -311,6 +353,26 @@ def _collect_instance_snapshot(instance_id: int, instance_data: dict, password: 
         return instance_id, payload, "error"
 
 
+def _cache_and_flush_monitor_snapshot(instance, payload: dict, running_status: str, collected_at=None):
+    collected_at = collected_at or datetime.now()
+    set_latest_snapshot(
+        db_type=instance.db_type,
+        instance_id=instance.id,
+        metric_type="status",
+        payload_json=payload,
+        collected_at=collected_at,
+        running_status=running_status,
+    )
+    enqueue_snapshot_flush(
+        app=current_app._get_current_object(),
+        db_type=instance.db_type,
+        instance_id=instance.id,
+        metric_type="status",
+        payload_json=payload,
+        collected_at=collected_at,
+    )
+
+
 def _refresh_mysql_cluster_ha(instances, payload_by_instance):
     mysql_clusters = DatabaseCluster.query.filter_by(db_type="mysql").all()
     if not mysql_clusters:
@@ -458,15 +520,7 @@ def job_monitor_collect(app):
                     payload = {"ok": False, "error": f"decrypt failed: {exc}", "collected_at": datetime.now().isoformat()}
                     instance.running_status = "error"
                     fail_count += 1
-                    snapshot_model = snapshot_model_for_instance(instance)
-                    db.session.add(
-                        snapshot_model(
-                            instance_id=instance.id,
-                            metric_type="status",
-                            payload_json=payload,
-                            collected_at=datetime.now(),
-                        )
-                    )
+                    _cache_and_flush_monitor_snapshot(instance, payload, "error")
                     continue
 
                 instance_data = {
@@ -515,15 +569,7 @@ def job_monitor_collect(app):
                             ok_count += 1
                         else:
                             fail_count += 1
-                        snapshot_model = snapshot_model_for_instance(instance)
-                        db.session.add(
-                            snapshot_model(
-                                instance_id=instance.id,
-                                metric_type="status",
-                                payload_json=payload,
-                                collected_at=datetime.now(),
-                            )
-                        )
+                        _cache_and_flush_monitor_snapshot(instance, payload, running_status)
                 except FuturesTimeoutError:
                     current_app.logger.warning(
                         "monitor_collect tick timeout: not all instances finished within %ss",
@@ -538,26 +584,20 @@ def job_monitor_collect(app):
                     if not instance:
                         continue
                     instance.running_status = "error"
-                    payload_by_instance[instance_id] = {"ok": False, "error": f"collect timeout (>{collect_timeout_seconds}s)"}
                     fail_count += 1
                     current_app.logger.warning("monitor_collect timeout: instance_id=%s", instance_id)
-                    snapshot_model = snapshot_model_for_instance(instance)
-                    db.session.add(
-                        snapshot_model(
-                            instance_id=instance.id,
-                            metric_type="status",
-                            payload_json={
-                                "ok": False,
-                                "error": f"collect timeout (>{collect_timeout_seconds}s)",
-                                "collected_at": datetime.now().isoformat(),
-                            },
-                            collected_at=datetime.now(),
-                        )
-                    )
+                    timeout_payload = {
+                        "ok": False,
+                        "error": f"collect timeout (>{collect_timeout_seconds}s)",
+                        "collected_at": datetime.now().isoformat(),
+                    }
+                    payload_by_instance[instance_id] = timeout_payload
+                    _cache_and_flush_monitor_snapshot(instance, timeout_payload, "error")
 
             _refresh_mysql_cluster_ha(instances, payload_by_instance)
             _refresh_cluster_topology_history(instances, payload_by_instance)
             db.session.commit()
+            warm_instance_list_cache()
             current_app.logger.info(
                 "monitor_collect tick: total=%s ok=%s fail=%s",
                 len(instances),
@@ -569,7 +609,7 @@ def job_monitor_collect(app):
             current_app.logger.exception(f"monitor_collect tick failed: {exc}")
 
 
-def job_monitor_snapshot_cleanup(app, retain_days: int = 3):
+def job_monitor_snapshot_cleanup(app, retain_days: int = 2):
     app = _resolve_app(app) or app
     if app is None:
         current_app.logger.error("monitor snapshot cleanup job missing app context")

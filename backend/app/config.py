@@ -45,6 +45,11 @@ class Config:
     SCHEDULER_TIMEZONE = os.getenv("SCHEDULER_TIMEZONE", "Asia/Shanghai")
     MONITOR_COLLECT_WORKERS = int(os.getenv("MONITOR_COLLECT_WORKERS", "8"))
 
+    REDIS_HOST = os.getenv("REDIS_HOST", "127.0.0.1")
+    REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
+    REDIS_DB = int(os.getenv("REDIS_DB", "0"))
+    REDIS_PASSWORD = os.getenv("REDIS_PASSWORD", "")
+
     # Generated from SECRET_KEY when empty
     FERNET_KEY = os.getenv("FERNET_KEY", "")
 

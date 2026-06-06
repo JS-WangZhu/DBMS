@@ -1,6 +1,6 @@
 ﻿from datetime import datetime
 
-from flask import Blueprint, request
+from flask import Blueprint, current_app, request
 
 from app.api.routes.common import active_user_required
 from app.extensions import db
@@ -8,6 +8,8 @@ from app.models.db_asset import DatabaseInstance
 from app.models.monitor_snapshot import snapshot_model_for_instance
 from app.services.monitor_snapshot_service import latest_snapshot_for_instance, latest_snapshots_by_instance_ids
 from app.services.collectors import collect_instance_metrics
+from app.services.instance_service import list_instances as list_instances_by_type
+from app.services.redis_cache import enqueue_snapshot_flush, set_latest_snapshot
 from app.utils.crypto import decrypt_secret
 from app.utils.response import error_response, ok_response
 
@@ -38,14 +40,29 @@ def collect_now(instance_id):
     payload.setdefault("collected_at", datetime.now().isoformat())
 
     instance.running_status = "running" if payload.get("ok") and payload.get("ping_ok") else "error"
-    snapshot_model = snapshot_model_for_instance(instance)
-    snapshot = snapshot_model(instance_id=instance.id, metric_type="status", payload_json=payload)
-    db.session.add(snapshot)
+    collected_at = datetime.now()
+    set_latest_snapshot(
+        db_type=instance.db_type,
+        instance_id=instance.id,
+        metric_type="status",
+        payload_json=payload,
+        collected_at=collected_at,
+        running_status=instance.running_status,
+    )
+    enqueue_snapshot_flush(
+        app=current_app._get_current_object(),
+        db_type=instance.db_type,
+        instance_id=instance.id,
+        metric_type="status",
+        payload_json=payload,
+        collected_at=collected_at,
+    )
     db.session.commit()
 
     if not payload.get("ok"):
         return error_response(payload.get("error", "collect failed"), code=502)
-    return ok_response(data=snapshot.to_dict())
+    snapshot = latest_snapshot_for_instance(instance_id=instance.id, db_type=instance.db_type, metric_type="status")
+    return ok_response(data=snapshot.to_dict() if snapshot else {})
 
 
 @bp.get("/latest/<int:instance_id>")
@@ -148,20 +165,31 @@ def get_instances_health():
     if not instance_ids:
         return ok_response(data={})
 
-    rows = (
-        DatabaseInstance.query
-        .filter(DatabaseInstance.id.in_(instance_ids), DatabaseInstance.db_type == db_type)
-        .all()
-    )
+    requested_ids = set(instance_ids)
+    rows = [
+        item
+        for item in list_instances_by_type(db_type=db_type)
+        if int(item["id"] if isinstance(item, dict) else item.id) in requested_ids
+    ]
     if not rows:
         return ok_response(data={})
 
-    status_by_id = {row.id: (row.running_status or "unknown") for row in rows}
-    latest_snapshot_by_id = latest_snapshots_by_instance_ids(db_type=db_type, instance_ids=[row.id for row in rows], metric_type="status")
+    def _row_id(row):
+        return int(row["id"] if isinstance(row, dict) else row.id)
+
+    def _row_status(row):
+        if isinstance(row, dict):
+            return row.get("running_status") or "unknown"
+        return row.running_status or "unknown"
+
+    row_ids = [_row_id(row) for row in rows]
+    status_by_id = {_row_id(row): _row_status(row) for row in rows}
+    latest_snapshot_by_id = latest_snapshots_by_instance_ids(db_type=db_type, instance_ids=row_ids, metric_type="status")
 
     snapshot_payload_by_id = {}
     for row in rows:
-        snapshot = latest_snapshot_by_id.get(row.id)
+        row_id = _row_id(row)
+        snapshot = latest_snapshot_by_id.get(row_id)
         if not snapshot:
             continue
         payload_json = snapshot.payload_json if isinstance(snapshot.payload_json, dict) else {}
@@ -171,8 +199,8 @@ def get_instances_health():
         elif ping_ok is False:
             running_status = "unknown"
         else:
-            running_status = status_by_id.get(row.id, "unknown")
-        snapshot_payload_by_id[row.id] = {
+            running_status = status_by_id.get(row_id, "unknown")
+        snapshot_payload_by_id[row_id] = {
             "running_status": running_status,
             "collected_at": snapshot.collected_at.isoformat() if snapshot.collected_at else None,
             "payload_json": payload_json,
@@ -180,10 +208,10 @@ def get_instances_health():
 
     result = {}
     for row in rows:
-        result[row.id] = snapshot_payload_by_id.get(row.id) or {
-            "running_status": status_by_id.get(row.id, "unknown"),
+        row_id = _row_id(row)
+        result[row_id] = snapshot_payload_by_id.get(row_id) or {
+            "running_status": status_by_id.get(row_id, "unknown"),
             "collected_at": None,
             "payload_json": {},
         }
     return ok_response(data=result)
-

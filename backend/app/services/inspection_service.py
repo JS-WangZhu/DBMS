@@ -12,6 +12,13 @@ from app.models.monitor_snapshot import snapshot_model_for_instance
 from app.services.collectors import collect_instance_metrics
 from app.services.monitor_snapshot_service import latest_payload_by_instance_ids
 from app.services.notifier import notify_with_targets
+from app.services.redis_cache import (
+    KEY_INSPECTION_SUMMARY,
+    enqueue_snapshot_flush,
+    get_json,
+    set_json,
+    set_latest_snapshot,
+)
 from app.utils.crypto import decrypt_secret
 
 DEFAULT_THRESHOLDS = {
@@ -26,11 +33,21 @@ DEFAULT_THRESHOLDS = {
     "host_data_disk_usage_pct": 90,
 }
 _INSPECTION_LOCK = threading.Lock()
+INSPECTION_CONFIG_CACHE_KEY = "dbms:config:inspection"
+
+
+def _chunks(items, size: int):
+    size = max(1, int(size or 1))
+    for index in range(0, len(items), size):
+        yield items[index:index + size]
 
 
 def get_or_create_inspection_config():
+    cached = get_json(INSPECTION_CONFIG_CACHE_KEY)
     cfg = InspectionConfig.query.first()
     if cfg:
+        if not isinstance(cached, dict):
+            set_json(INSPECTION_CONFIG_CACHE_KEY, cfg.to_dict())
         return cfg
     cfg = InspectionConfig(
         enabled=True,
@@ -44,7 +61,12 @@ def get_or_create_inspection_config():
     )
     db.session.add(cfg)
     db.session.commit()
+    set_json(INSPECTION_CONFIG_CACHE_KEY, cfg.to_dict())
     return cfg
+
+
+def refresh_inspection_config_cache(cfg: InspectionConfig):
+    set_json(INSPECTION_CONFIG_CACHE_KEY, cfg.to_dict())
 
 
 def update_inspection_config(cfg: InspectionConfig, payload: dict):
@@ -341,11 +363,14 @@ def run_inspection_cycle(trigger: str = "manual", force: bool = False):
 
         max_workers = max(1, min(int(current_app.config.get("INSPECTION_COLLECT_WORKERS", 8)), max(1, len(work_items))))
         timeout_seconds = max(3, int(cfg.collect_timeout_seconds or 8))
-        future_map = {}
-        completed = set()
-        if work_items:
-            with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="inspection-collect") as pool:
-                for instance_id, instance_data, password in work_items:
+        batch_count = 0
+        for batch in _chunks(work_items, max_workers):
+            batch_count += 1
+            future_map = {}
+            completed = set()
+            pool = ThreadPoolExecutor(max_workers=max(1, len(batch)), thread_name_prefix="inspection-collect")
+            try:
+                for instance_id, instance_data, password in batch:
                     future = pool.submit(_collect_instance, instance_id, instance_data, password)
                     future_map[future] = instance_id
                 try:
@@ -359,31 +384,51 @@ def run_inspection_cycle(trigger: str = "manual", force: bool = False):
                         instance.running_status = running_status
                         issue_map[instance_id] = _extract_issues(instance, payload, thresholds)
                 except FuturesTimeoutError:
-                    current_app.logger.warning("inspection cycle timeout: %ss", timeout_seconds)
+                    current_app.logger.warning(
+                        "inspection batch timeout: %ss batch=%s instances=%s workers=%s",
+                        timeout_seconds,
+                        batch_count,
+                        len(batch),
+                        max_workers,
+                    )
 
-        pending = set(future_map.keys()) - completed
-        for future in pending:
-            instance_id = future_map[future]
-            future.cancel()
-            instance = instance_map.get(instance_id)
-            if not instance:
-                continue
-            payload = {"ok": False, "error": f"collect timeout (>{timeout_seconds}s)", "collected_at": datetime.now().isoformat()}
-            payload_by_instance[instance_id] = payload
-            issue_map[instance_id] = _extract_issues(instance, payload, thresholds)
-            instance.running_status = "error"
+                pending = set(future_map.keys()) - completed
+                for future in pending:
+                    instance_id = future_map[future]
+                    future.cancel()
+                    instance = instance_map.get(instance_id)
+                    if not instance:
+                        continue
+                    payload = {
+                        "ok": False,
+                        "error": f"collect timeout (>{timeout_seconds}s per instance)",
+                        "collected_at": datetime.now().isoformat(),
+                    }
+                    payload_by_instance[instance_id] = payload
+                    issue_map[instance_id] = _extract_issues(instance, payload, thresholds)
+                    instance.running_status = "error"
+            finally:
+                pool.shutdown(wait=False)
 
         now = datetime.now()
+        app_obj = current_app._get_current_object()
         for instance in instances:
             payload = payload_by_instance.get(instance.id) or {"ok": False, "error": "collect missing", "collected_at": now.isoformat()}
-            snapshot_model = snapshot_model_for_instance(instance)
-            db.session.add(
-                snapshot_model(
-                    instance_id=instance.id,
-                    metric_type="inspection",
-                    payload_json=payload,
-                    collected_at=now,
-                )
+            set_latest_snapshot(
+                db_type=instance.db_type,
+                instance_id=instance.id,
+                metric_type="inspection",
+                payload_json=payload,
+                collected_at=now,
+                running_status=instance.running_status or None,
+            )
+            enqueue_snapshot_flush(
+                app=app_obj,
+                db_type=instance.db_type,
+                instance_id=instance.id,
+                metric_type="inspection",
+                payload_json=payload,
+                collected_at=now,
             )
 
         alerts = InspectionAlert.query.filter(InspectionAlert.instance_id.in_(list(instance_map.keys()))).all() if instance_map else []
@@ -477,6 +522,9 @@ def run_inspection_cycle(trigger: str = "manual", force: bool = False):
             "recovered_alerts": recovered_alerts,
             "sent_alerts": sent_alerts,
             "sent_recoveries": sent_recoveries,
+            "collect_workers": max_workers,
+            "collect_timeout_seconds": timeout_seconds,
+            "collect_batches": batch_count,
             "started_at": started_at.isoformat(),
             "finished_at": now.isoformat(),
             "duration_ms": int((now - started_at).total_seconds() * 1000),
@@ -484,6 +532,8 @@ def run_inspection_cycle(trigger: str = "manual", force: bool = False):
         cfg.last_run_at = now
         cfg.last_run_summary_json = summary
         db.session.commit()
+        set_json(KEY_INSPECTION_SUMMARY, summary)
+        refresh_inspection_config_cache(cfg)
         return {"ok": True, "data": summary}
     except Exception as exc:
         db.session.rollback()
