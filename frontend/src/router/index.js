@@ -3,6 +3,7 @@ import { createRouter, createWebHistory } from "vue-router";
 import MainLayout from "../layouts/MainLayout.vue";
 import AIAnalysisView from "../views/AIAnalysisView.vue";
 import AIModelConfigView from "../views/AIModelConfigView.vue";
+import AliyunDnsToolView from "../views/AliyunDnsToolView.vue";
 import BackupAgentView from "../views/BackupAgentView.vue";
 import BackupKeyManageView from "../views/BackupKeyManageView.vue";
 import BackupMongoPolicyView from "../views/BackupMongoPolicyView.vue";
@@ -16,6 +17,7 @@ import DashboardView from "../views/DashboardView.vue";
 import DataChangeView from "../views/DataChangeView.vue";
 import DataAccessHistoryView from "../views/DataAccessHistoryView.vue";
 import DataQueryOpConfigView from "../views/DataQueryOpConfigView.vue";
+import DomainConfigManageView from "../views/DomainConfigManageView.vue";
 import HAConfigView from "../views/HAConfigView.vue";
 import DataQueryView from "../views/DataQueryView.vue";
 import InstanceManageView from "../views/InstanceManageView.vue";
@@ -89,6 +91,7 @@ const routes = [
       { path: "/data-access/history", component: DataAccessHistoryView, meta: { title: "历史记录" } },
       { path: "/tasks/schedules", component: TaskScheduleView, meta: { title: "调度管理" } },
       { path: "/tasks/results", component: TaskResultView, meta: { title: "结果查询" } },
+      { path: "/tools/aliyun-dns", component: AliyunDnsToolView, meta: { title: "阿里云域名工具" } },
       { path: "/users/info", component: UsersView, meta: { title: "用户信息" } },
       { path: "/users/role-groups", component: UserRoleGroupView, meta: { title: "角色组管理" } },
       { path: "/users/permissions", component: UserPermissionView, meta: { title: "用户权限管理" } },
@@ -97,6 +100,7 @@ const routes = [
       { path: "/config/instance-status", component: InstanceStatusConfigView, meta: { title: "实例状态检测管理" } },
       { path: "/config/inspection", component: InspectionParamConfigView, meta: { title: "巡检参数管理" } },
       { path: "/config/data-query-ops", component: DataQueryOpConfigView, meta: { title: "数据查询操作配置" } },
+      { path: "/config/domain", component: DomainConfigManageView, meta: { title: "域名配置管理" } },
       { path: "/config/mcp-platform", component: McpPlatformView, meta: { title: "MCP开放平台" } },
       { path: "/config/sso", component: SsoConfigView, meta: { title: "SSO登录管理" } },
     ],

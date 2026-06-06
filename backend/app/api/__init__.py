@@ -1,6 +1,7 @@
 from flask import Blueprint
 
 from app.api.routes.ai_routes import bp as ai_bp
+from app.api.routes.aliyun_dns import bp as aliyun_dns_bp
 from app.api.routes.auth import bp as auth_bp
 from app.api.routes.backups import bp as backups_bp
 from app.api.routes.backup_agents import bp as backup_agents_bp
@@ -58,6 +59,7 @@ def register_blueprints(app):
     api_v1.register_blueprint(sso_config_bp)
     api_v1.register_blueprint(task_management_bp)
     api_v1.register_blueprint(ai_bp)
+    api_v1.register_blueprint(aliyun_dns_bp)
     api_v1.register_blueprint(doc_bp)
     api_v1.register_blueprint(external_bp)
 

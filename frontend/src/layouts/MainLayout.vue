@@ -10,7 +10,7 @@
 
         <el-sub-menu v-if="hasAnyMenu(['mysql_instances','mysql_clusters','mysql_connections','mongodb_instances','mongodb_clusters','mongodb_connections','redis_instances','redis_clusters','redis_connections','doris_instances','doris_clusters','inspection_manage'])" index="service-manage">
           <template #title>
-            <el-icon><Setting /></el-icon>
+            <el-icon><Menu /></el-icon>
             <span>服务管理</span>
           </template>
 
@@ -24,11 +24,11 @@
               <span>实例管理</span>
             </el-menu-item>
             <el-menu-item v-if="hasMenu('mysql_clusters')" index="/databases/mysql/clusters">
-              <el-icon><Grid /></el-icon>
+              <el-icon><Share /></el-icon>
               <span>集群管理</span>
             </el-menu-item>
             <el-menu-item v-if="hasMenu('mysql_connections')" index="/databases/mysql/connections">
-              <el-icon><Link /></el-icon>
+              <el-icon><Connection /></el-icon>
               <span>连接管理</span>
             </el-menu-item>
           </el-sub-menu>
@@ -43,7 +43,7 @@
               <span>实例管理</span>
             </el-menu-item>
             <el-menu-item v-if="hasMenu('mongodb_clusters')" index="/databases/mongodb/clusters">
-              <el-icon><Grid /></el-icon>
+              <el-icon><FolderOpened /></el-icon>
               <span>集群管理</span>
             </el-menu-item>
             <el-menu-item v-if="hasMenu('mongodb_connections')" index="/databases/mongodb/connections">
@@ -62,11 +62,11 @@
               <span>实例管理</span>
             </el-menu-item>
             <el-menu-item v-if="hasMenu('redis_clusters')" index="/databases/redis/clusters">
-              <el-icon><Grid /></el-icon>
+              <el-icon><Coin /></el-icon>
               <span>集群管理</span>
             </el-menu-item>
             <el-menu-item v-if="hasMenu('redis_connections')" index="/databases/redis/connections">
-              <el-icon><Link /></el-icon>
+              <el-icon><Promotion /></el-icon>
               <span>连接管理</span>
             </el-menu-item>
           </el-sub-menu>
@@ -81,18 +81,18 @@
               <span>实例管理</span>
             </el-menu-item>
             <el-menu-item v-if="hasMenu('doris_clusters')" index="/databases/doris/clusters">
-              <el-icon><Grid /></el-icon>
+              <el-icon><Histogram /></el-icon>
               <span>集群管理</span>
             </el-menu-item>
           </el-sub-menu>
         </el-sub-menu>
           <el-menu-item v-if="hasMenu('inspection_manage')" index="/service/inspection">
-            <el-icon><Bell /></el-icon>
+            <el-icon><CircleCheck /></el-icon>
             <span>巡检管理</span>
           </el-menu-item>
         <el-sub-menu v-if="hasAnyMenu(['data_query','data_change','data_history'])" index="data-access">
           <template #title>
-            <el-icon><Search /></el-icon>
+            <el-icon><View /></el-icon>
             <span>数据访问</span>
           </template>
           <el-menu-item v-if="hasMenu('data_query')" index="/data-access/query">
@@ -100,7 +100,7 @@
             <span>数据查询</span>
           </el-menu-item>
           <el-menu-item v-if="hasMenu('data_change')" index="/data-access/change">
-            <el-icon><Edit /></el-icon>
+            <el-icon><EditPen /></el-icon>
             <span>数据变更</span>
           </el-menu-item>
           <!-- <el-menu-item v-if="hasMenu('ai_analysis')" index="/data-access/ai-analysis">
@@ -108,14 +108,14 @@
             <span>智能分析</span>
           </el-menu-item> -->
           <el-menu-item v-if="hasMenu('data_history')" index="/data-access/history">
-            <el-icon><Timer /></el-icon>
+            <el-icon><Clock /></el-icon>
             <span>历史记录</span>
           </el-menu-item>
         </el-sub-menu>
 
         <el-sub-menu v-if="hasAnyMenu(['task_schedule','task_results'])" index="task-management">
           <template #title>
-            <el-icon><Timer /></el-icon>
+            <el-icon><Calendar /></el-icon>
             <span>任务管理</span>
           </template>
           <el-menu-item v-if="hasMenu('task_schedule')" index="/tasks/schedules">
@@ -123,8 +123,19 @@
             <span>调度管理</span>
           </el-menu-item>
           <el-menu-item v-if="hasMenu('task_results')" index="/tasks/results">
-            <el-icon><DocumentCopy /></el-icon>
+            <el-icon><Tickets /></el-icon>
             <span>结果查询</span>
+          </el-menu-item>
+        </el-sub-menu>
+
+        <el-sub-menu v-if="hasAnyMenu(['aliyun_dns_tool'])" index="quick-tools">
+          <template #title>
+            <el-icon><Aim /></el-icon>
+            <span>快捷工具</span>
+          </template>
+          <el-menu-item v-if="hasMenu('aliyun_dns_tool')" index="/tools/aliyun-dns">
+            <el-icon><Position /></el-icon>
+            <span>阿里云域名工具</span>
           </el-menu-item>
         </el-sub-menu>
 
@@ -139,7 +150,7 @@
           </el-menu-item>
           <el-sub-menu v-if="hasAnyMenu(['backup_mysql_policies','backup_mongo_policies'])" index="backup-policies">
             <template #title>
-              <el-icon><Cpu /></el-icon>
+              <el-icon><PieChart /></el-icon>
               <span>策略管理</span>
             </template>
             <el-menu-item v-if="hasMenu('backup_mysql_policies')" index="/backups/mysql-policies">
@@ -152,12 +163,12 @@
             </el-menu-item>
           </el-sub-menu>
           <el-menu-item v-if="hasMenu('backup_records')" index="/backups/records">
-            <el-icon><DocumentCopy /></el-icon>
+            <el-icon><Files /></el-icon>
             <span>备份记录</span>
           </el-menu-item>
           <el-sub-menu v-if="hasAnyMenu(['backup_tool_configs','backup_agents','backup_s3_storage','backup_keys'])" index="backup-config">
             <template #title>
-              <el-icon><Operation /></el-icon>
+              <el-icon><SwitchButton /></el-icon>
               <span>备份配置</span>
             </template>
             <el-menu-item v-if="hasMenu('backup_tool_configs')" index="/backups/tool-configs">
@@ -198,17 +209,17 @@
           </el-menu-item>
         </el-sub-menu>
 
-        <el-sub-menu v-if="hasAnyMenu(['ai_model_config', 'ha_config', 'instance_status_config', 'inspection_param_config', 'data_query_op_config', 'backup_notify_targets', 'mcp_platform', 'sso_config'])" index="config">
+        <el-sub-menu v-if="hasAnyMenu(['ai_model_config', 'ha_config', 'instance_status_config', 'inspection_param_config', 'data_query_op_config', 'backup_notify_targets', 'domain_config', 'mcp_platform', 'sso_config'])" index="config">
           <template #title>
             <el-icon><Management /></el-icon>
             <span>配置管理</span>
           </template>
           <el-menu-item v-if="hasMenu('ai_model_config')" index="/config/ai-models">
-            <el-icon><Monitor /></el-icon>
+            <el-icon><TrendCharts /></el-icon>
             <span>AI模型管理</span>
           </el-menu-item>
           <el-menu-item v-if="hasMenu('ha_config')" index="/config/ha">
-            <el-icon><Setting /></el-icon>
+            <el-icon><Lightning /></el-icon>
             <span>高可用配置管理</span>
           </el-menu-item>
           <el-menu-item v-if="hasMenu('instance_status_config')" index="/config/instance-status">
@@ -216,19 +227,23 @@
             <span>实例状态检测管理</span>
           </el-menu-item>
           <el-menu-item v-if="hasMenu('inspection_param_config')" index="/config/inspection">
-            <el-icon><Operation /></el-icon>
+            <el-icon><Setting /></el-icon>
             <span>巡检参数管理</span>
           </el-menu-item>
           <el-menu-item v-if="hasMenu('data_query_op_config')" index="/config/data-query-ops">
-            <el-icon><Operation /></el-icon>
+            <el-icon><DataAnalysis /></el-icon>
             <span>数据查询操作配置</span>
           </el-menu-item>
           <el-menu-item v-if="hasMenu('backup_notify_targets')" index="/backups/notify-targets">
             <el-icon><Bell /></el-icon>
             <span>通知地址管理</span>
           </el-menu-item>
+          <el-menu-item v-if="hasMenu('domain_config')" index="/config/domain">
+            <el-icon><Location /></el-icon>
+            <span>域名配置管理</span>
+          </el-menu-item>
           <el-menu-item v-if="hasMenu('mcp_platform')" index="/config/mcp-platform">
-            <el-icon><Connection /></el-icon>
+            <el-icon><SetUp /></el-icon>
             <span>MCP开放平台</span>
           </el-menu-item>
           <el-menu-item v-if="hasMenu('sso_config')" index="/config/sso">
@@ -281,33 +296,47 @@ import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import {
   Avatar,
+  Aim,
   Bell,
   Box,
+  Calendar,
+  Clock,
+  CircleCheck,
   Coin,
   Collection,
   Connection,
   Cpu,
   DataAnalysis,
-  DocumentCopy,
-  Edit,
+  EditPen,
   Files,
-  Grid,
+  FolderOpened,
+  Histogram,
   Key,
   Lightning,
   Link,
-  List,
   Lock,
   Management,
+  Menu,
   Monitor,
   Notebook,
   Odometer,
   Operation,
+  PieChart,
+  Promotion,
+  Position,
+  SetUp,
   Search,
+  Share,
   Setting,
+  Tickets,
+  Location,
+  TrendCharts,
+  SwitchButton,
   Timer,
   Tools,
   User,
   UserFilled,
+  View,
 } from "@element-plus/icons-vue";
 import MysqlIcon from "../components/icons/MysqlIcon.vue";
 import MongoIcon from "../components/icons/MongoIcon.vue";
@@ -369,6 +398,7 @@ const routePermissionMap = {
   "/data-access/ai-analysis": "ai_analysis",
   "/tasks/schedules": "task_schedule",
   "/tasks/results": "task_results",
+  "/tools/aliyun-dns": "aliyun_dns_tool",
   "/backups/mysql-policies": "backup_mysql_policies",
   "/backups/mongo-policies": "backup_mongo_policies",
   "/backups/records": "backup_records",
@@ -385,6 +415,7 @@ const routePermissionMap = {
   "/config/instance-status": "instance_status_config",
   "/config/inspection": "inspection_param_config",
   "/config/data-query-ops": "data_query_op_config",
+  "/config/domain": "domain_config",
   "/config/mcp-platform": "mcp_platform",
   "/config/sso": "sso_config",
 };

@@ -156,10 +156,13 @@ def _run_async(app, task_id, trigger_type, retry_of_id):
 def list_results():
     query = ScheduledTaskRun.query.join(ScheduledTask)
     task_id = _safe_int(request.args.get("task_id"))
+    task_name = (request.args.get("task_name") or "").strip()
     status = (request.args.get("status") or "").strip()
     task_type = (request.args.get("task_type") or "").strip()
     if task_id:
         query = query.filter(ScheduledTaskRun.task_id == task_id)
+    if task_name:
+        query = query.filter(ScheduledTask.name.ilike(f"%{task_name}%"))
     if status:
         query = query.filter(ScheduledTaskRun.status == status)
     if task_type:

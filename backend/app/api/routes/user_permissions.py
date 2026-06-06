@@ -21,6 +21,8 @@ from app.utils.response import error_response, ok_response
 bp = Blueprint("user_permissions", __name__, url_prefix="/users/permissions")
 
 MENU_CATALOG = [
+    {"key": "aliyun_dns_tool", "label": "阿里云域名工具"},
+    {"key": "domain_config", "label": "域名配置管理"},
     {"key": "dashboard", "label": "总览"},
     {"key": "mysql_instances", "label": "MySQL 实例管理"},
     {"key": "mysql_clusters", "label": "MySQL 集群管理"},

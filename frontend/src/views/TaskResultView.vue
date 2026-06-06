@@ -9,6 +9,15 @@
       </template>
 
       <div class="toolbar">
+        <el-input
+          v-model="filters.task_name"
+          clearable
+          placeholder="任务名称"
+          style="width: 220px"
+          @clear="onFilterChange"
+          @change="onFilterChange"
+        />
+        <el-button type="primary" @click="onFilterChange">搜索</el-button>
         <el-select v-model="filters.task_type" clearable placeholder="任务类型" style="width: 160px" @change="onFilterChange">
           <el-option label="Shell脚本" value="shell" />
           <el-option label="Python脚本" value="python" />
@@ -94,7 +103,7 @@ const rows = ref([]);
 const selectedRows = ref([]);
 const detail = ref(null);
 const detailVisible = ref(false);
-const filters = reactive({ task_type: "", status: "" });
+const filters = reactive({ task_name: "", task_type: "", status: "" });
 const pager = reactive({ page: 1, page_size: 20, total: 0 });
 
 function taskTypeText(type) {
@@ -128,6 +137,7 @@ async function loadData() {
   loading.value = true;
   try {
     const params = { page: pager.page, page_size: pager.page_size };
+    if (filters.task_name) params.task_name = filters.task_name;
     if (filters.task_type) params.task_type = filters.task_type;
     if (filters.status) params.status = filters.status;
     const { data } = await listTaskResults(params);
@@ -184,7 +194,7 @@ onMounted(loadData);
 <style scoped>
 .page { padding: 20px; }
 .header-row { display: flex; justify-content: space-between; align-items: center; }
-.toolbar { display: flex; gap: 10px; margin-bottom: 12px; }
+.toolbar { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 12px; }
 .pagination-wrap { margin-top: 12px; display: flex; justify-content: flex-end; }
 pre { white-space: pre-wrap; word-break: break-word; background: #f6f8fa; padding: 12px; border-radius: 6px; }
 </style>
