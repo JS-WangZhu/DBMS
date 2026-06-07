@@ -128,8 +128,12 @@ async function loadData() {
 async function runNow() {
   running.value = true;
   try {
-    await runInspectionNow();
-    ElMessage.success("巡检任务已执行");
+    const { data } = await runInspectionNow();
+    if (data?.data?.already_running) {
+      ElMessage.warning(data.message || "巡检正在执行中，请稍后查看结果");
+    } else {
+      ElMessage.success("巡检任务已执行");
+    }
     pager.page = 1;
     await loadData();
   } catch (error) {

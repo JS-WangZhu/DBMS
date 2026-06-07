@@ -60,6 +60,9 @@ def get_overview():
 def run_now():
     result = run_inspection_cycle(trigger="manual", force=True)
     if not result.get("ok"):
+        if result.get("code") == 409:
+            data = {**result, "already_running": True}
+            return ok_response(data=data, message="巡检正在执行中，请稍后查看结果", code=202)
         return error_response(result.get("message") or "inspection run failed", code=result.get("code") or 500, data=result)
     log_audit(user_id=None, action="inspection.run.manual", target_type="inspection", target_id="global", detail=result.get("data"))
     return ok_response(data=result.get("data"), code=202)

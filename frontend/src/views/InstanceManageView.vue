@@ -18,6 +18,7 @@
           </el-button>
           <el-input v-model="keyword" clearable placeholder="关键字搜索" class="keyword-input" size="small" />
           <el-button v-if="isAdmin" type="primary" size="small" @click="openCreateDialog">新增{{ dbLabel }}实例</el-button>
+          <el-button size="small" :icon="Download" @click="exportRows">导出</el-button>
           <el-button size="small" @click="reloadAll(true)">刷新</el-button>
         </div>
       </div>
@@ -36,11 +37,13 @@
         @row-click="onRowClick"
         @row-mouse-enter="onRowMouseEnter"
         @row-mouse-leave="onRowMouseLeave"
+        @filter-change="onTableFilterChange"
       >
         <el-table-column prop="id" label="ID" min-width="50" />
         <el-table-column prop="name" label="实例名" min-width="120" class-name="name-col" />
         <el-table-column
           label="所属集群"
+          column-key="cluster_id"
           class-name="cluster-col"
           min-width="100"
           show-overflow-tooltip
@@ -70,6 +73,7 @@
         <el-table-column
           prop="port"
           label="端口"
+          column-key="port"
           min-width="70"
           :filters="portFilters"
           :filter-method="filterByPort"
@@ -77,6 +81,7 @@
         />
         <el-table-column
           label="运行情况"
+          column-key="running"
           min-width="78"
           :filters="runningFilters"
           :filter-method="filterByRunning"
@@ -143,7 +148,23 @@
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column label="CPU" min-width="50">
+        <el-table-column min-width="70">
+          <template #header>
+            <span class="metric-header">
+              CPU
+              <el-popover placement="bottom" width="170" trigger="click">
+                <div class="metric-filter-panel">
+                  <span>大于</span>
+                  <el-input-number v-model="metricFilters.cpu" :min="0" :max="100" :precision="1" size="small" controls-position="right" />
+                  <span>%</span>
+                  <el-button text size="small" @click="clearMetricFilter('cpu')">清空</el-button>
+                </div>
+                <template #reference>
+                  <el-button class="metric-filter-btn" text :type="metricFilters.cpu !== null ? 'primary' : 'default'" :icon="Filter" />
+                </template>
+              </el-popover>
+            </span>
+          </template>
           <template #default="scope">
             <el-tag v-if="hostCpuText(scope.row) !== '-'" size="small" :class="usageTagClass(hostCpuValue(scope.row))">
               {{ hostCpuText(scope.row) }}
@@ -151,7 +172,23 @@
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column label="内存" min-width="50">
+        <el-table-column min-width="70">
+          <template #header>
+            <span class="metric-header">
+              内存
+              <el-popover placement="bottom" width="170" trigger="click">
+                <div class="metric-filter-panel">
+                  <span>大于</span>
+                  <el-input-number v-model="metricFilters.memory" :min="0" :max="100" :precision="1" size="small" controls-position="right" />
+                  <span>%</span>
+                  <el-button text size="small" @click="clearMetricFilter('memory')">清空</el-button>
+                </div>
+                <template #reference>
+                  <el-button class="metric-filter-btn" text :type="metricFilters.memory !== null ? 'primary' : 'default'" :icon="Filter" />
+                </template>
+              </el-popover>
+            </span>
+          </template>
           <template #default="scope">
             <el-tag v-if="hostMemoryText(scope.row) !== '-'" size="small" :class="usageTagClass(hostMemoryValue(scope.row))">
               {{ hostMemoryText(scope.row) }}
@@ -159,7 +196,23 @@
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column label="数据盘" min-width="50">
+        <el-table-column min-width="78">
+          <template #header>
+            <span class="metric-header">
+              数据盘
+              <el-popover placement="bottom" width="170" trigger="click">
+                <div class="metric-filter-panel">
+                  <span>大于</span>
+                  <el-input-number v-model="metricFilters.disk" :min="0" :max="100" :precision="1" size="small" controls-position="right" />
+                  <span>%</span>
+                  <el-button text size="small" @click="clearMetricFilter('disk')">清空</el-button>
+                </div>
+                <template #reference>
+                  <el-button class="metric-filter-btn" text :type="metricFilters.disk !== null ? 'primary' : 'default'" :icon="Filter" />
+                </template>
+              </el-popover>
+            </span>
+          </template>
           <template #default="scope">
             <el-tag v-if="hostDiskText(scope.row) !== '-'" size="small" :class="usageTagClass(hostDiskValue(scope.row))">
               {{ hostDiskText(scope.row) }}
@@ -169,6 +222,7 @@
         </el-table-column>
         <el-table-column
           label="物理机地址"
+          column-key="physical_address"
           width="100"
           class-name="physical-col"
           show-overflow-tooltip
@@ -183,6 +237,7 @@
         <template v-if="dbType === 'mysql'">
           <el-table-column
             label="版本"
+            column-key="mysql_version"
             min-width="50"
             :filters="mysqlVersionFilters"
             :filter-method="filterByMysqlVersion"
@@ -194,6 +249,7 @@
           </el-table-column>
           <el-table-column
             label="只读状态"
+            column-key="readonly"
             min-width="78"
             :filters="readonlyFilters"
             :filter-method="filterByReadonly"
@@ -207,6 +263,7 @@
           </el-table-column>
           <el-table-column
             label="主从角色"
+            column-key="role"
             min-width="78"
             :filters="roleFilters"
             :filter-method="filterByRole"
@@ -346,7 +403,7 @@
 import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, reactive, ref, watch } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { useRoute } from "vue-router";
-import { Coin, Files, Lightning, DataAnalysis } from "@element-plus/icons-vue";
+import { Coin, Files, Lightning, DataAnalysis, Download, Filter } from "@element-plus/icons-vue";
 
 import { collectClusterHealth, listClusters } from "../api/modules/clusters";
   import { createDorisInstance, dorisFeStatus, listDorisInstances } from "../api/modules/doris";
@@ -459,6 +516,20 @@ const pagerSnapshotBeforeCluster = reactive({
 });
 const isClusterSnapshotActive = ref(false);
 const editingExtraBase = ref({});
+const tableFilters = reactive({
+  cluster_id: [],
+  port: [],
+  running: [],
+  physical_address: [],
+  mysql_version: [],
+  readonly: [],
+  role: [],
+});
+const metricFilters = reactive({
+  cpu: null,
+  memory: null,
+  disk: null,
+});
 
 const form = reactive({
   name: "",
@@ -501,7 +572,7 @@ const filteredClusters = computed(() => {
 
 const dialogTitle = computed(() => (editingInstanceId.value ? `编辑${dbLabel.value}实例` : `新增${dbLabel.value}实例`));
 
-const displayRows = computed(() => {
+const filteredRows = computed(() => {
   let result = rows.value;
 
   if (selectedBusinessLine.value) {
@@ -526,7 +597,18 @@ const displayRows = computed(() => {
     result = result.filter((row) => row.cluster_id === selectedClusterId.value);
   }
 
+  result = applyTableFilters(result);
+  result = applyMetricFilters(result);
   return result;
+});
+
+const displayRows = computed(() => {
+  const result = filteredRows.value;
+  if (!showPagination.value) {
+    return result;
+  }
+  const start = (pager.page - 1) * pager.page_size;
+  return result.slice(start, start + pager.page_size);
 });
 
 const showPagination = computed(() => !selectedClusterId.value);
@@ -597,6 +679,135 @@ const roleFilters = computed(() => {
   }
   return buildFilterOptions(rows.value, (row) => mysqlRole(row), (value) => roleText(value), "未知");
 });
+
+function selectedFilterValues(key) {
+  return Array.isArray(tableFilters[key]) ? tableFilters[key] : [];
+}
+
+function matchesSelectedFilter(key, row, matcher) {
+  const selected = selectedFilterValues(key);
+  if (!selected.length) {
+    return true;
+  }
+  return selected.some((value) => matcher(value, row));
+}
+
+function applyTableFilters(list) {
+  return list.filter((row) => (
+    matchesSelectedFilter("cluster_id", row, filterByCluster)
+    && matchesSelectedFilter("port", row, filterByPort)
+    && matchesSelectedFilter("running", row, filterByRunning)
+    && matchesSelectedFilter("physical_address", row, filterByPhysicalAddress)
+    && matchesSelectedFilter("mysql_version", row, filterByMysqlVersion)
+    && matchesSelectedFilter("readonly", row, filterByReadonly)
+    && matchesSelectedFilter("role", row, filterByRole)
+  ));
+}
+
+function matchesGreaterThan(value, threshold) {
+  if (threshold === null || threshold === undefined || threshold === "") {
+    return true;
+  }
+  const current = Number(value);
+  const target = Number(threshold);
+  return Number.isFinite(current) && Number.isFinite(target) && current > target;
+}
+
+function applyMetricFilters(list) {
+  return list.filter((row) => (
+    matchesGreaterThan(hostCpuValue(row), metricFilters.cpu)
+    && matchesGreaterThan(hostMemoryValue(row), metricFilters.memory)
+    && matchesGreaterThan(hostDiskValue(row), metricFilters.disk)
+  ));
+}
+
+function onTableFilterChange(filters) {
+  Object.entries(filters || {}).forEach(([key, value]) => {
+    if (Object.prototype.hasOwnProperty.call(tableFilters, key)) {
+      tableFilters[key] = Array.isArray(value) ? value : [];
+    }
+  });
+  pager.page = 1;
+  pager.total = filteredRows.value.length;
+}
+
+function clearMetricFilter(key) {
+  if (Object.prototype.hasOwnProperty.call(metricFilters, key)) {
+    metricFilters[key] = null;
+    pager.page = 1;
+    pager.total = filteredRows.value.length;
+  }
+}
+
+function resetAllFilters() {
+  Object.keys(tableFilters).forEach((key) => {
+    tableFilters[key] = [];
+  });
+  Object.keys(metricFilters).forEach((key) => {
+    metricFilters[key] = null;
+  });
+}
+
+function csvCell(value) {
+  const text = value === null || value === undefined ? "" : String(value);
+  return `"${text.replace(/"/g, '""')}"`;
+}
+
+function exportRows() {
+  const source = filteredRows.value;
+  if (!source.length) {
+    ElMessage.warning("当前筛选条件下没有可导出的实例");
+    return;
+  }
+  const columns = [
+    ["ID", (row) => row.id],
+    ["实例名", (row) => row.name],
+    ["所属集群", (row) => resolveClusterName(row.cluster_id)],
+    ["域名", (row) => rowDomain(row)],
+    ["地址", (row) => rowAddress(row)],
+    ["端口", (row) => row.port],
+    ["运行情况", (row) => runningText(rowRunningStatus(row))],
+    ["CPU", (row) => hostCpuText(row)],
+    ["内存", (row) => hostMemoryText(row)],
+    ["数据盘", (row) => hostDiskText(row)],
+    ["物理机地址", (row) => rowPhysicalAddress(row)],
+    ["版本", (row) => rowVersion(row)],
+    ["心跳时间", (row) => lastCheckText(row)],
+  ];
+  if (dbType.value === "mysql") {
+    columns.splice(
+      7,
+      0,
+      ["应用连接", (row) => appConnText(row)],
+      ["只读状态", (row) => readonlyText(mysqlStatus(row).effective_read_only)],
+      ["主从角色", (row) => roleText(mysqlRole(row))],
+      ["复制延迟", (row) => (shouldHideReplicationDetails(row) ? "-" : (mysqlStatus(row).seconds_behind_master ?? "-"))],
+    );
+  } else if (dbType.value === "mongodb") {
+    columns.splice(7, 0, ["主从角色", (row) => mongoRoleText(mongoRole(row))]);
+  } else if (dbType.value === "redis") {
+    columns.splice(
+      7,
+      0,
+      ["主从角色", (row) => redisRoleText(redisRole(row))],
+      ["高可用模式", (row) => redisHaModeText(redisHaMode(row))],
+      ["复制源信息", (row) => redisReplicationSource(row)],
+      ["实例内存使用率", (row) => redisContainerMemoryText(row)],
+    );
+  }
+  const csv = [
+    columns.map(([label]) => csvCell(label)).join(","),
+    ...source.map((row) => columns.map(([, getter]) => csvCell(getter(row))).join(",")),
+  ].join("\r\n");
+  const blob = new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  const timestamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+  link.href = url;
+  link.download = `${dbType.value}-instances-${timestamp}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
+}
 
 function filterByCluster(value, row) {
   if (value === "__empty__") {
@@ -1676,8 +1887,10 @@ async function loadInstances() {
   loading.value = true;
   try {
     const baseParams = {
-      keyword: selectedClusterId.value ? undefined : keyword.value.trim() || undefined,
+      keyword: keyword.value.trim() || undefined,
       cluster_id: selectedClusterId.value || undefined,
+      business_line: selectedClusterId.value ? undefined : selectedBusinessLine.value || undefined,
+      environment: selectedClusterId.value ? undefined : selectedEnvironment.value || undefined,
     };
 
     if (selectedClusterId.value) {
@@ -1686,35 +1899,10 @@ async function loadInstances() {
         pagerSnapshotBeforeCluster.page_size = pager.page_size;
         isClusterSnapshotActive.value = true;
       }
-      const merged = [];
-      let page = 1;
-      let total = 0;
-      const pageSize = 200;
-      const maxPages = 200;
-      while (page <= maxPages) {
-        const { data } = await pageCfg.value.listFn({
-          ...baseParams,
-          page,
-          page_size: pageSize,
-        });
-        const payload = data?.data;
-        if (Array.isArray(payload)) {
-          rows.value = payload;
-          pager.total = payload.length;
-          pager.page = 1;
-          return;
-        }
-        const items = payload?.items || [];
-        total = Number(payload?.total || 0);
-        merged.push(...items);
-        if (!items.length || merged.length >= total) {
-          break;
-        }
-        page += 1;
-      }
+      const merged = await loadAllInstancePages(baseParams);
       rows.value = merged;
-      pager.total = merged.length;
       pager.page = 1;
+      pager.total = filteredRows.value.length;
       return;
     }
 
@@ -1724,26 +1912,43 @@ async function loadInstances() {
       isClusterSnapshotActive.value = false;
     }
 
-    const { data } = await pageCfg.value.listFn({
-      ...baseParams,
-      page: pager.page,
-      page_size: pager.page_size,
-    });
-    const payload = data?.data;
-    if (Array.isArray(payload)) {
-      rows.value = payload;
-      pager.total = payload.length;
-      return;
+    rows.value = await loadAllInstancePages(baseParams);
+    pager.total = filteredRows.value.length;
+    if (pager.page > Math.max(1, Math.ceil(pager.total / pager.page_size))) {
+      pager.page = 1;
     }
-    rows.value = payload?.items || [];
-    pager.total = Number(payload?.total || 0);
-    pager.page = Number(payload?.page || pager.page);
-    pager.page_size = Number(payload?.page_size || pager.page_size);
   } catch (error) {
     ElMessage.error(error.response?.data?.message || "加载实例失败");
   } finally {
     loading.value = false;
   }
+}
+
+async function loadAllInstancePages(params = {}) {
+  const merged = [];
+  let page = 1;
+  let total = 0;
+  const pageSize = 200;
+  const maxPages = 200;
+  while (page <= maxPages) {
+    const { data } = await pageCfg.value.listFn({
+      ...params,
+      page,
+      page_size: pageSize,
+    });
+    const payload = data?.data;
+    if (Array.isArray(payload)) {
+      return payload;
+    }
+    const items = payload?.items || [];
+    total = Number(payload?.total || 0);
+    merged.push(...items);
+    if (!items.length || merged.length >= total) {
+      break;
+    }
+    page += 1;
+  }
+  return merged;
 }
 
 function resetPager() {
@@ -1754,14 +1959,12 @@ function resetPager() {
 
 async function onPageChange(page) {
   pager.page = Number(page) || 1;
-  await loadInstances();
   await runHealthCheck(true);
 }
 
 async function onPageSizeChange(size) {
   pager.page_size = Number(size) || 20;
   pager.page = 1;
-  await loadInstances();
   await runHealthCheck(true);
 }
 
@@ -2276,6 +2479,7 @@ watch(
     selectedEnvironment.value = null;
     selectedClusterId.value = null;
     keyword.value = "";
+    resetAllFilters();
     resetPager();
     resetForm();
     lastHealthFetchAt.value = 0;
@@ -2293,6 +2497,17 @@ watch(
       await loadInstances();
       await runHealthCheck(true);
     }, 300);
+  },
+);
+
+watch(
+  () => filteredRows.value.length,
+  (total) => {
+    pager.total = total;
+    const maxPage = Math.max(1, Math.ceil(total / pager.page_size));
+    if (pager.page > maxPage) {
+      pager.page = maxPage;
+    }
   },
 );
 </script>
@@ -2317,6 +2532,32 @@ watch(
 
 .keyword-input {
   width: 180px;
+}
+
+.metric-header {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  white-space: nowrap;
+}
+
+.metric-filter-btn {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+}
+
+.metric-filter-panel {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.metric-filter-panel .el-button {
+  grid-column: 1 / -1;
+  justify-self: end;
+  padding: 0;
 }
 
 .interval-select {

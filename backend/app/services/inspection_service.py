@@ -2,6 +2,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as
 from datetime import datetime, timedelta
 import threading
 from types import SimpleNamespace
+from urllib.parse import quote, quote_plus
 
 from flask import current_app
 
@@ -149,16 +150,59 @@ def _safe_int(value):
         return None
 
 
+def _mask_secret_value(secret):
+    text = str(secret or "")
+    if not text:
+        return text
+    if len(text) <= 2:
+        return "*" * len(text)
+    if len(text) <= 4:
+        return f"{text[:1]}{'*' * (len(text) - 2)}{text[-1:]}"
+    return f"{text[:2]}{'*' * (len(text) - 4)}{text[-2:]}"
+
+
+def mask_sensitive_text(text, secrets=None):
+    output = str(text or "")
+    for secret in secrets or []:
+        secret_text = str(secret or "")
+        if not secret_text:
+            continue
+        masked = _mask_secret_value(secret_text)
+        variants = {
+            secret_text,
+            quote(secret_text, safe=""),
+            quote_plus(secret_text, safe=""),
+        }
+        for variant in variants:
+            if variant:
+                output = output.replace(variant, masked)
+    return output
+
+
+def _sanitize_payload_for_secrets(value, secrets=None):
+    if isinstance(value, str):
+        return mask_sensitive_text(value, secrets=secrets)
+    if isinstance(value, list):
+        return [_sanitize_payload_for_secrets(item, secrets=secrets) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_sanitize_payload_for_secrets(item, secrets=secrets) for item in value)
+    if isinstance(value, dict):
+        return {key: _sanitize_payload_for_secrets(item, secrets=secrets) for key, item in value.items()}
+    return value
+
+
 def _collect_instance(instance_id: int, instance_data: dict, password: str):
     try:
         data = collect_instance_metrics(instance=SimpleNamespace(**instance_data), password=password) or {}
         payload = dict(data)
+        payload = _sanitize_payload_for_secrets(payload, secrets=[password])
         payload.setdefault("ok", False)
         payload.setdefault("collected_at", datetime.now().isoformat())
         running_status = "running" if payload.get("ok") and payload.get("ping_ok", True) else "error"
         return instance_id, payload, running_status
     except Exception as exc:
-        payload = {"ok": False, "error": f"collect failed: {exc}", "collected_at": datetime.now().isoformat()}
+        error = mask_sensitive_text(f"collect failed: {exc}", secrets=[password])
+        payload = {"ok": False, "error": error, "collected_at": datetime.now().isoformat()}
         return instance_id, payload, "error"
 
 
