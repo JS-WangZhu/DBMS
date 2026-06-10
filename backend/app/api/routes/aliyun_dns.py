@@ -56,23 +56,33 @@ def _config_for_domain(config_id, domain):
     return config, None
 
 
-def _record_payload(payload, require_domain=False):
+def _record_payload(payload, require_domain=False, allow_status_only=False):
     domain = (payload.get("domain") or "").strip().lower()
     rr = (payload.get("rr") or payload.get("RR") or "").strip()
     record_type = (payload.get("type") or payload.get("Type") or "").strip().upper()
     value = (payload.get("value") or payload.get("Value") or "").strip()
-    ttl = payload.get("ttl", payload.get("TTL", 600))
+    ttl = payload.get("ttl", payload.get("TTL"))
     line = (payload.get("line") or payload.get("Line") or "").strip()
     priority = payload.get("priority", payload.get("Priority"))
+    status = (payload.get("status") or payload.get("Status") or "").strip()
 
     if require_domain and not domain:
         return None, "domain is required"
+    if status and status not in {"Enable", "Disable"}:
+        return None, "status must be Enable or Disable"
+
+    record_field_keys = {"rr", "RR", "type", "Type", "value", "Value", "ttl", "TTL", "line", "Line", "priority", "Priority"}
+    has_record_fields = any(key in payload for key in record_field_keys)
+    if allow_status_only and status and not has_record_fields:
+        return {"domain": domain, "params": {}, "status": status}, None
+
     if not rr:
         return None, "rr is required"
     if not record_type:
         return None, "type is required"
     if not value:
         return None, "value is required"
+    ttl = 600 if ttl is None else ttl
     try:
         ttl = int(ttl)
     except (TypeError, ValueError):
@@ -86,7 +96,7 @@ def _record_payload(payload, require_domain=False):
             params["Priority"] = int(priority)
         except (TypeError, ValueError):
             return None, "priority must be an integer"
-    return {"domain": domain, "params": params}, None
+    return {"domain": domain, "params": params, "status": status}, None
 
 
 @bp.get("/configs")
@@ -229,18 +239,27 @@ def create_record():
 @admin_required
 def update_record(record_id):
     payload = request.get_json(silent=True) or {}
-    record, message = _record_payload(payload, require_domain=True)
+    record, message = _record_payload(payload, require_domain=True, allow_status_only=True)
     if message:
         return error_response(message, code=400)
     config, err = _config_for_domain(payload.get("config_id"), record["domain"])
     if err:
         return err
-    params = {"RecordId": record_id, **record["params"]}
+    params = {"RecordId": record_id, **record["params"]} if record["params"] else {}
     try:
-        data = call_alidns_api(config, "UpdateDomainRecord", params)
+        data = {}
+        if params:
+            data = call_alidns_api(config, "UpdateDomainRecord", params)
+        if record["status"]:
+            status_params = {"RecordId": record_id, "Status": record["status"]}
+            status_data = call_alidns_api(config, "SetDomainRecordStatus", status_params)
+            data = {"record": data, "status": status_data} if params else status_data
     except RuntimeError as exc:
         return error_response(str(exc), code=502)
-    log_audit(user_id=None, action="aliyun_dns.record.update", target_type="dns_record", target_id=record_id, detail=params)
+    detail = dict(params)
+    if record["status"]:
+        detail["Status"] = record["status"]
+    log_audit(user_id=None, action="aliyun_dns.record.update", target_type="dns_record", target_id=record_id, detail=detail)
     return ok_response(data=data)
 
 

@@ -123,3 +123,128 @@ def test_aliyun_dns_record_actions_send_expected_parameters(client, monkeypatch)
         ),
         ("DeleteDomainRecord", {"RecordId": "old-id"}),
     ]
+
+
+def test_aliyun_dns_records_query_sends_value_keyword(client, monkeypatch):
+    headers = _admin_headers(client)
+    with client.application.app_context():
+        db.session.add(
+            AliyunDomainConfig(
+                name="prod",
+                access_key="ak",
+                secret_key="sk",
+                domains=["example.com"],
+                enabled=True,
+            )
+        )
+        db.session.commit()
+
+    calls = []
+
+    def fake_call(config, action, params):
+        calls.append((action, params))
+        return {"DomainRecords": {"Record": []}, "TotalCount": 0}
+
+    monkeypatch.setattr("app.api.routes.aliyun_dns.call_alidns_api", fake_call)
+
+    resp = client.get(
+        "/api/v1/aliyun-dns/records?config_id=1&domain=example.com&rr_keyword=www&value_keyword=192.0.2",
+        headers=headers,
+    )
+
+    assert resp.status_code == 200
+    assert calls == [
+        (
+            "DescribeDomainRecords",
+            {
+                "DomainName": "example.com",
+                "PageNumber": 1,
+                "PageSize": 20,
+                "RRKeyWord": "www",
+                "TypeKeyWord": "",
+                "ValueKeyWord": "192.0.2",
+            },
+        )
+    ]
+
+
+def test_aliyun_dns_update_record_can_change_status(client, monkeypatch):
+    headers = _admin_headers(client)
+    with client.application.app_context():
+        db.session.add(
+            AliyunDomainConfig(
+                name="prod",
+                access_key="ak",
+                secret_key="sk",
+                domains=["example.com"],
+                enabled=True,
+            )
+        )
+        db.session.commit()
+
+    calls = []
+
+    def fake_call(config, action, params):
+        calls.append((action, params))
+        return {"RequestId": "req", "RecordId": params.get("RecordId")}
+
+    monkeypatch.setattr("app.api.routes.aliyun_dns.call_alidns_api", fake_call)
+
+    resp = client.patch(
+        "/api/v1/aliyun-dns/records/old-id",
+        json={
+            "config_id": 1,
+            "domain": "example.com",
+            "rr": "@",
+            "type": "A",
+            "value": "192.0.2.10",
+            "ttl": 600,
+            "status": "Disable",
+        },
+        headers=headers,
+    )
+
+    assert resp.status_code == 200
+    assert calls == [
+        (
+            "UpdateDomainRecord",
+            {"RecordId": "old-id", "RR": "@", "Type": "A", "Value": "192.0.2.10", "TTL": 600},
+        ),
+        ("SetDomainRecordStatus", {"RecordId": "old-id", "Status": "Disable"}),
+    ]
+
+
+def test_aliyun_dns_update_record_can_change_status_only(client, monkeypatch):
+    headers = _admin_headers(client)
+    with client.application.app_context():
+        db.session.add(
+            AliyunDomainConfig(
+                name="prod",
+                access_key="ak",
+                secret_key="sk",
+                domains=["example.com"],
+                enabled=True,
+            )
+        )
+        db.session.commit()
+
+    calls = []
+
+    def fake_call(config, action, params):
+        calls.append((action, params))
+        return {"RequestId": "req", "RecordId": params.get("RecordId")}
+
+    monkeypatch.setattr("app.api.routes.aliyun_dns.call_alidns_api", fake_call)
+
+    resp = client.patch(
+        "/api/v1/aliyun-dns/records/old-id",
+        json={
+            "config_id": 1,
+            "domain": "example.com",
+            "status": "Disable",
+        },
+        headers=headers,
+    )
+
+    assert resp.status_code == 200
+    assert calls == [("SetDomainRecordStatus", {"RecordId": "old-id", "Status": "Disable"})]

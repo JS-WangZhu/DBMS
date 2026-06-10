@@ -12,6 +12,7 @@
               <el-option v-for="domain in domainOptions" :key="domain" :label="domain" :value="domain" />
             </el-select>
             <el-input v-model="rrKeyword" clearable placeholder="主机记录关键字" style="width: 160px" @keyup.enter="loadRecords" />
+            <el-input v-model="valueKeyword" clearable placeholder="解析地址关键字" style="width: 170px" @keyup.enter="loadRecords" />
             <el-button @click="loadRecords">查询</el-button>
             <el-button type="primary" @click="openCreateDialog">新增解析</el-button>
           </div>
@@ -25,7 +26,13 @@
         <el-table-column prop="Value" label="记录值" min-width="220" show-overflow-tooltip />
         <el-table-column prop="TTL" label="TTL" width="90" />
         <el-table-column prop="Line" label="线路" width="120" />
-        <el-table-column prop="Status" label="状态" width="90" />
+        <el-table-column label="状态" width="90">
+          <template #default="scope">
+            <el-tag :type="isRecordEnabled(scope.row) ? 'success' : 'info'">
+              {{ isRecordEnabled(scope.row) ? "启用" : "关闭" }}
+            </el-tag>
+          </template>
+        </el-table-column>
         <el-table-column label="操作" width="180">
           <template #default="scope">
             <el-button link type="primary" @click="openEditDialog(scope.row)">编辑</el-button>
@@ -63,6 +70,13 @@
         <el-form-item label="MX优先级" v-if="form.type === 'MX'">
           <el-input-number v-model="form.priority" :min="1" :max="99" style="width: 100%" />
         </el-form-item>
+        <el-form-item v-if="editingRecordId" label="状态">
+          <el-switch
+            v-model="form.enabled"
+            active-text="启用"
+            inactive-text="关闭"
+          />
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
@@ -89,11 +103,13 @@ const configs = ref([]);
 const selectedConfigId = ref(null);
 const selectedDomain = ref("");
 const rrKeyword = ref("");
+const valueKeyword = ref("");
 const records = ref([]);
 const loading = ref(false);
 const saving = ref(false);
 const dialogVisible = ref(false);
 const editingRecordId = ref("");
+const editingOriginal = ref(null);
 const page = ref(1);
 const pageSize = ref(20);
 const total = ref(0);
@@ -106,6 +122,7 @@ const form = reactive({
   ttl: 600,
   line: "",
   priority: null,
+  enabled: true,
 });
 
 const currentConfig = computed(() => configs.value.find((item) => item.id === selectedConfigId.value));
@@ -118,6 +135,7 @@ function resetRecordForm() {
   form.ttl = 600;
   form.line = "";
   form.priority = null;
+  form.enabled = true;
 }
 
 async function loadConfigs() {
@@ -149,6 +167,7 @@ async function loadRecords() {
       config_id: selectedConfigId.value,
       domain: selectedDomain.value,
       rr_keyword: rrKeyword.value.trim() || undefined,
+      value_keyword: valueKeyword.value.trim() || undefined,
       page: page.value,
       page_size: pageSize.value,
     });
@@ -178,19 +197,46 @@ function openCreateDialog() {
     return;
   }
   editingRecordId.value = "";
+  editingOriginal.value = null;
   resetRecordForm();
   dialogVisible.value = true;
 }
 
 function openEditDialog(row) {
   editingRecordId.value = row.RecordId;
+  editingOriginal.value = row;
   form.rr = row.RR || "";
   form.type = row.Type || "A";
   form.value = row.Value || "";
   form.ttl = Number(row.TTL || 600);
   form.line = row.Line || "";
   form.priority = row.Priority || null;
+  form.enabled = isRecordEnabled(row);
   dialogVisible.value = true;
+}
+
+function recordStatusValue(row) {
+  return String(row?.Status || "").toUpperCase();
+}
+
+function isRecordEnabled(row) {
+  return recordStatusValue(row) !== "DISABLE";
+}
+
+function recordFieldsChanged(row) {
+  if (!row) {
+    return true;
+  }
+  const currentPriority = form.type === "MX" ? form.priority ?? null : null;
+  const originalPriority = row.Type === "MX" ? row.Priority ?? null : null;
+  return (
+    form.rr !== (row.RR || "") ||
+    form.type !== (row.Type || "A") ||
+    form.value !== (row.Value || "") ||
+    Number(form.ttl || 600) !== Number(row.TTL || 600) ||
+    (form.line || "") !== (row.Line || "") ||
+    currentPriority !== originalPriority
+  );
 }
 
 async function saveRecord(keepOpen = false) {
@@ -200,7 +246,7 @@ async function saveRecord(keepOpen = false) {
   }
   saving.value = true;
   try {
-    const payload = {
+    const fullPayload = {
       config_id: selectedConfigId.value,
       domain: selectedDomain.value,
       rr: form.rr,
@@ -209,12 +255,27 @@ async function saveRecord(keepOpen = false) {
       ttl: form.ttl,
       line: form.line,
       priority: form.type === "MX" ? form.priority : undefined,
+      status: editingRecordId.value ? (form.enabled ? "Enable" : "Disable") : undefined,
     };
     if (editingRecordId.value) {
+      const statusChanged = form.enabled !== isRecordEnabled(editingOriginal.value);
+      const fieldsChanged = recordFieldsChanged(editingOriginal.value);
+      if (!fieldsChanged && !statusChanged) {
+        ElMessage.info("没有变更");
+        dialogVisible.value = false;
+        return;
+      }
+      const payload = !fieldsChanged && statusChanged
+        ? {
+            config_id: selectedConfigId.value,
+            domain: selectedDomain.value,
+            status: form.enabled ? "Enable" : "Disable",
+          }
+        : fullPayload;
       await updateAliyunDnsRecord(editingRecordId.value, payload);
       ElMessage.success("解析已修改");
     } else {
-      await createAliyunDnsRecord(payload);
+      await createAliyunDnsRecord(fullPayload);
       ElMessage.success("解析已新增");
     }
     if (!keepOpen) {
