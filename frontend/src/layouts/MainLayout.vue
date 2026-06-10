@@ -264,10 +264,20 @@
       </el-header>
       <el-main class="main-area">
         <div class="tabs-wrap">
-          <el-tabs v-model="activeTabId" type="card" draggable @tab-change="onTabChange" @tab-remove="removeTab" @tab-dragend="onTabDragend">
+          <el-tabs v-model="activeTabId" type="card" @tab-change="onTabChange" @tab-remove="removeTab">
             <el-tab-pane v-for="tab in tabs" :key="tab.id" :name="tab.id" :closable="tabs.length > 1">
               <template #label>
-                <span @contextmenu.prevent="onTabRightClick($event, tab)">{{ tab.title }}</span>
+                <span
+                  class="tab-label"
+                  draggable="true"
+                  @dragstart="onTabDragStart($event, tab)"
+                  @dragover.prevent
+                  @drop.prevent="onTabDrop(tab)"
+                  @dragend="onTabDragEnd"
+                  @contextmenu.prevent="onTabRightClick($event, tab)"
+                >
+                  {{ tab.title }}
+                </span>
               </template>
             </el-tab-pane>
           </el-tabs>
@@ -357,6 +367,7 @@ const contextMenu = ref({
   y: 0,
   targetTab: null,
 });
+const draggingTabId = ref("");
 
 const username = computed(() => {
   try {
@@ -622,8 +633,30 @@ function onDocumentClick() {
   contextMenu.value.visible = false;
 }
 
-function onTabDragend() {
-  // el-tabs 自带拖拽排序
+function onTabDragStart(event, tab) {
+  draggingTabId.value = tab.id;
+  event.dataTransfer.effectAllowed = "move";
+  event.dataTransfer.setData("text/plain", tab.id);
+}
+
+function onTabDrop(targetTab) {
+  const sourceId = draggingTabId.value;
+  if (!sourceId || sourceId === targetTab.id) {
+    return;
+  }
+
+  const sourceIndex = tabs.value.findIndex((item) => item.id === sourceId);
+  const targetIndex = tabs.value.findIndex((item) => item.id === targetTab.id);
+  if (sourceIndex < 0 || targetIndex < 0) {
+    return;
+  }
+
+  const [sourceTab] = tabs.value.splice(sourceIndex, 1);
+  tabs.value.splice(targetIndex, 0, sourceTab);
+}
+
+function onTabDragEnd() {
+  draggingTabId.value = "";
 }
 
 watch(
@@ -780,18 +813,23 @@ function logout() {
 
 .tabs-wrap {
   position: relative;
-  padding: 8px 12px;
-  margin: 10px 12px 6px;
+  padding: 6px 12px 0;
+  margin: 0 0 14px;
   border: none;
-  border-radius: 14px;
+  border-radius: 0;
   background: #ffffff;
-  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.06), 0 1px 3px rgba(15, 23, 42, 0.04);
+  box-shadow: none;
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
 }
 
 .tabs-wrap::after {
   content: none;
+}
+
+.main-area > .el-card,
+.main-area > div:not(.tabs-wrap) {
+  margin-top: 0;
 }
 
 :deep(.tabs-wrap .el-tabs__header) {
@@ -813,31 +851,58 @@ function logout() {
   overflow: visible;
 }
 
+:deep(.tabs-wrap .el-tabs__nav-wrap.is-scrollable) {
+  padding: 0 30px;
+}
+
+:deep(.tabs-wrap .el-tabs__nav-prev),
+:deep(.tabs-wrap .el-tabs__nav-next) {
+  width: 28px;
+  height: 32px;
+  line-height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  top: 0;
+  color: #64748b;
+  border: 1px solid #e6ebf2;
+  border-top-color: #d8e0ea;
+  background: #ffffff;
+  box-shadow: inset 0 1px 0 #d8e0ea, 0 2px 8px rgba(15, 23, 42, 0.08);
+}
+
+:deep(.tabs-wrap .el-tabs__nav-prev) {
+  left: 0;
+}
+
+:deep(.tabs-wrap .el-tabs__nav-next) {
+  right: 0;
+}
+
 :deep(.tabs-wrap .el-tabs--card > .el-tabs__header .el-tabs__item) {
   position: relative;
-  height: 34px;
-  line-height: 34px;
-  padding: 0 18px !important;
-  color: #475569;
-  font-weight: 500;
-  background: transparent;
-  border: none !important;
-  border-radius: 10px !important;
+  height: 32px;
+  line-height: 32px;
+  min-width: 92px;
+  max-width: 190px;
+  padding: 0 22px 0 18px !important;
+  color: #111827;
+  font-size: 14px;
+  font-weight: 400;
+  background: #ffffff;
+  border: 1px solid #e6ebf2 !important;
+  border-top-color: #d8e0ea !important;
+  border-radius: 0 !important;
   margin-right: 4px;
-  transition: color 0.2s ease, background-color 0.22s ease, box-shadow 0.25s ease, transform 0.15s ease;
+  box-shadow: inset 0 1px 0 #d8e0ea, 0 2px 8px rgba(15, 23, 42, 0.08);
+  transition: color 0.18s ease, background-color 0.18s ease, box-shadow 0.18s ease;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 :deep(.tabs-wrap .el-tabs--card > .el-tabs__header .el-tabs__item::after) {
-  content: "";
-  position: absolute;
-  right: -3px;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 1px;
-  height: 14px;
-  background: rgba(148, 163, 184, 0.35);
-  transition: opacity 0.2s ease;
-  pointer-events: none;
+  content: none;
 }
 
 :deep(.tabs-wrap .el-tabs--card > .el-tabs__header .el-tabs__item:last-child::after),
@@ -849,25 +914,25 @@ function logout() {
 }
 
 :deep(.tabs-wrap .el-tabs--card > .el-tabs__header .el-tabs__item:hover) {
-  color: #1e6fff;
-  background: rgba(45, 127, 249, 0.06);
-  transform: none;
+  color: #1677ff;
+  background: #fbfdff;
+  border-top-color: #ccd6e3 !important;
+  box-shadow: inset 0 1px 0 #ccd6e3, 0 3px 10px rgba(15, 23, 42, 0.10);
 }
 
 :deep(.tabs-wrap .el-tabs--card > .el-tabs__header .el-tabs__item:active) {
-  transform: scale(0.97);
-  transition-duration: 0.08s;
+  transform: none;
 }
 
 :deep(.tabs-wrap .el-tabs--card > .el-tabs__header .el-tabs__item.is-active) {
-  color: #1e6fff;
-  background: rgba(45, 127, 249, 0.10);
-  border: none !important;
-  border-radius: 10px !important;
-  box-shadow: none;
-  font-weight: 600;
-  transform: none;
-  z-index: 1;
+  color: #1677ff;
+  background: #ffffff;
+  border-color: #dfe7f1 !important;
+  border-top-color: #ccd6e3 !important;
+  border-radius: 0 !important;
+  box-shadow: inset 0 1px 0 #ccd6e3, 0 3px 12px rgba(22, 119, 255, 0.14);
+  font-weight: 700;
+  z-index: 2;
 }
 
 :deep(.tabs-wrap .el-tabs--card > .el-tabs__header .el-tabs__item.is-active::before) {
@@ -875,30 +940,42 @@ function logout() {
   position: absolute;
   left: 12px;
   right: 12px;
-  bottom: 4px;
+  bottom: 0;
   height: 2px;
-  border-radius: 2px;
-  background: linear-gradient(90deg, #2d7ff9 0%, #38bdf8 100%);
+  border-radius: 0;
+  background: #1677ff;
   pointer-events: none;
 }
 
 :deep(.tabs-wrap .el-tabs--card > .el-tabs__header .el-tabs__item:first-child) {
-  border-left: none !important;
+  border-left: 1px solid #e6ebf2 !important;
 }
 
 :deep(.tabs-wrap .el-tabs--card > .el-tabs__header .el-tabs__item:first-child.is-active) {
-  border-left: none !important;
+  border-left: 1px solid #dfe7f1 !important;
+}
+
+:deep(.tabs-wrap .tab-label) {
+  display: inline-block;
+  max-width: 100%;
+  cursor: grab;
+  user-select: none;
+}
+
+:deep(.tabs-wrap .tab-label:active) {
+  cursor: grabbing;
 }
 
 :deep(.tabs-wrap .el-tabs__item .is-icon-close) {
-  color: #94a3b8;
+  color: #8c8c8c;
   transition: background 0.15s ease, color 0.15s ease, transform 0.15s ease;
   border-radius: 50%;
   margin-left: 6px;
+  font-size: 12px;
 }
 
 :deep(.tabs-wrap .el-tabs__item.is-active .is-icon-close) {
-  color: #2d7ff9;
+  color: #1677ff;
 }
 
 :deep(.tabs-wrap .el-tabs__item .is-icon-close:hover) {

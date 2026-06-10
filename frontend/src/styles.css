@@ -100,10 +100,15 @@ body {
 
 /* ========== Cards ========== */
 .el-card {
-  border-radius: var(--radius-md);
+  border-radius: 0;
   border-color: var(--border-soft);
   box-shadow: var(--shadow-sm);
   transition: box-shadow 0.25s ease, transform 0.25s ease;
+}
+
+.el-card__header,
+.el-card__body {
+  border-radius: 0;
 }
 
 .el-card:hover {
