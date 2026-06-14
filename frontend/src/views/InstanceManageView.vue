@@ -409,7 +409,7 @@ import { collectClusterHealth, listClusters } from "../api/modules/clusters";
   import { createDorisInstance, dorisFeStatus, listDorisInstances } from "../api/modules/doris";
   import { deleteInstance, getInstanceStatusConfig, updateInstance as updateInstanceById } from "../api/modules/instances";
   import { createMongoInstance, listMongoInstances, mongoReplicaStatus } from "../api/modules/mongodb";
-  import { getInstanceHealth } from "../api/modules/monitoring";
+  import { getInstanceHealth, getInstancesHealth } from "../api/modules/monitoring";
   import { createMysqlInstance, listMysqlInstances, mysqlInstanceDetail, mysqlReplication } from "../api/modules/mysql";
   import { createRedisInstance, listRedisInstances, redisClusterHealth } from "../api/modules/redis";
   import { formatBeijingTime, parseBeijingTimeMs } from "../utils/time";
@@ -2017,37 +2017,39 @@ async function loadHealthStatusFromDb(force = false) {
     return;
   }
   lastHealthFetchAt.value = Date.now();
-  const tasks = rows.value.map(row => getInstanceHealth(row.id));
-  const results = await Promise.allSettled(tasks);
-  results.forEach((result, index) => {
-    const row = rows.value[index];
-    if (!row) return;
-    if (result.status === "fulfilled") {
-      const payload = result.value?.data?.data || {};
-      if (dbType.value === "mysql") {
-        mysqlStatusMap[row.id] = {
-          ...(payload.payload_json || {}),
-          running_status: payload.running_status || "unknown",
-          collected_at: payload.collected_at || null,
-        };
-      } else {
-        const incomingPayload = payload?.payload_json && typeof payload.payload_json === "object" ? payload.payload_json : {};
-        const previousPayload = commonHealthMap[row.id]?.payload_json && typeof commonHealthMap[row.id]?.payload_json === "object"
-          ? commonHealthMap[row.id].payload_json
-          : {};
-        const mergedPayload = {
-          ...previousPayload,
-          ...incomingPayload,
-        };
-        const usePayload = dbType.value === "redis" ? mergedPayload : incomingPayload;
-        commonHealthMap[row.id] = {
-          running_status: payload.running_status || "unknown",
-          collected_at: payload.collected_at,
-          payload_json: usePayload,
-        };
-      }
-      lastCheckAtMap[row.id] = payload.collected_at;
+  const healthRows = displayRows.value.length ? displayRows.value : rows.value;
+  const instanceIds = healthRows.map((row) => row.id).filter((id) => id !== null && id !== undefined);
+  if (!instanceIds.length) {
+    return;
+  }
+
+  const { data } = await getInstancesHealth(dbType.value, instanceIds);
+  const healthById = data?.data || {};
+  healthRows.forEach((row) => {
+    const payload = healthById[row.id] || healthById[String(row.id)] || {};
+    if (dbType.value === "mysql") {
+      mysqlStatusMap[row.id] = {
+        ...(payload.payload_json || {}),
+        running_status: payload.running_status || "unknown",
+        collected_at: payload.collected_at || null,
+      };
+    } else {
+      const incomingPayload = payload?.payload_json && typeof payload.payload_json === "object" ? payload.payload_json : {};
+      const previousPayload = commonHealthMap[row.id]?.payload_json && typeof commonHealthMap[row.id]?.payload_json === "object"
+        ? commonHealthMap[row.id].payload_json
+        : {};
+      const mergedPayload = {
+        ...previousPayload,
+        ...incomingPayload,
+      };
+      const usePayload = dbType.value === "redis" ? mergedPayload : incomingPayload;
+      commonHealthMap[row.id] = {
+        running_status: payload.running_status || "unknown",
+        collected_at: payload.collected_at,
+        payload_json: usePayload,
+      };
     }
+    lastCheckAtMap[row.id] = payload.collected_at;
   });
 }
 

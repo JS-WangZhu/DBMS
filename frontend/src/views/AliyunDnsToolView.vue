@@ -255,7 +255,6 @@ async function saveRecord(keepOpen = false) {
       ttl: form.ttl,
       line: form.line,
       priority: form.type === "MX" ? form.priority : undefined,
-      status: editingRecordId.value ? (form.enabled ? "Enable" : "Disable") : undefined,
     };
     if (editingRecordId.value) {
       const statusChanged = form.enabled !== isRecordEnabled(editingOriginal.value);
@@ -272,6 +271,9 @@ async function saveRecord(keepOpen = false) {
             status: form.enabled ? "Enable" : "Disable",
           }
         : fullPayload;
+      if (fieldsChanged && statusChanged) {
+        payload.status = form.enabled ? "Enable" : "Disable";
+      }
       await updateAliyunDnsRecord(editingRecordId.value, payload);
       ElMessage.success("解析已修改");
     } else {

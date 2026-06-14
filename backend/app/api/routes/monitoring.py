@@ -5,7 +5,7 @@ from flask import Blueprint, current_app, request
 from app.api.routes.common import active_user_required
 from app.extensions import db
 from app.models.db_asset import DatabaseInstance
-from app.models.monitor_snapshot import snapshot_model_for_instance
+from app.models.monitor_snapshot import snapshot_model_for_db, snapshot_model_for_instance
 from app.services.monitor_snapshot_service import latest_snapshot_for_instance, latest_snapshots_by_instance_ids
 from app.services.collectors import collect_instance_metrics
 from app.services.instance_service import list_instances as list_instances_by_type
@@ -186,24 +186,49 @@ def get_instances_health():
     status_by_id = {_row_id(row): _row_status(row) for row in rows}
     latest_snapshot_by_id = latest_snapshots_by_instance_ids(db_type=db_type, instance_ids=row_ids, metric_type="status")
 
+    last_success_by_id = {}
+    snapshot_model = snapshot_model_for_db(db_type)
+    if snapshot_model:
+        recent_snapshots = (
+            snapshot_model.query
+            .filter(snapshot_model.instance_id.in_(row_ids), snapshot_model.metric_type == "status")
+            .order_by(snapshot_model.instance_id.asc(), snapshot_model.collected_at.desc(), snapshot_model.id.desc())
+            .limit(max(1, len(row_ids)) * 240)
+            .all()
+        )
+        for snap in recent_snapshots:
+            if snap.instance_id in last_success_by_id:
+                continue
+            if not _snapshot_failed(snap.payload_json or {}):
+                last_success_by_id[snap.instance_id] = snap
+
     snapshot_payload_by_id = {}
+    now = datetime.now()
     for row in rows:
         row_id = _row_id(row)
         snapshot = latest_snapshot_by_id.get(row_id)
         if not snapshot:
             continue
         payload_json = snapshot.payload_json if isinstance(snapshot.payload_json, dict) else {}
+        latest_failed = _snapshot_failed(payload_json)
+        last_success_snapshot = last_success_by_id.get(row_id)
+        base = last_success_snapshot.collected_at if last_success_snapshot else snapshot.collected_at
+        seconds_since_base = int((now - base).total_seconds()) if base else None
+        stale_failed = bool(latest_failed and seconds_since_base is not None and seconds_since_base > FAIL_THRESHOLD_SECONDS)
         ping_ok = payload_json.get("ping_ok")
         if ping_ok is True:
             running_status = "running"
-        elif ping_ok is False:
-            running_status = "unknown"
+        elif stale_failed:
+            running_status = "error"
         else:
-            running_status = status_by_id.get(row_id, "unknown")
+            running_status = "unknown"
         snapshot_payload_by_id[row_id] = {
             "running_status": running_status,
             "collected_at": snapshot.collected_at.isoformat() if snapshot.collected_at else None,
             "payload_json": payload_json,
+            "latest_failed": latest_failed,
+            "stale_failed": stale_failed,
+            "seconds_since_base": seconds_since_base,
         }
 
     result = {}
@@ -213,5 +238,8 @@ def get_instances_health():
             "running_status": status_by_id.get(row_id, "unknown"),
             "collected_at": None,
             "payload_json": {},
+            "latest_failed": False,
+            "stale_failed": False,
+            "seconds_since_base": None,
         }
     return ok_response(data=result)
