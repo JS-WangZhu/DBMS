@@ -124,7 +124,7 @@ def _cluster_data(cluster):
         "business_line": cluster.business_line or cluster.namespace,
         "environment": cluster.environment,
         "ha_domain": cluster.ha_domain,
-        "ha_switch_enabled": bool(cluster.ha_switch_enabled),
+        "ha_mode": cluster.to_dict()["ha_mode"],
     }
 
 

@@ -25,6 +25,7 @@ from app.utils.crypto import decrypt_secret
 from app.utils.response import error_response, ok_response
 
 bp = Blueprint("clusters", __name__, url_prefix="/clusters")
+MYSQL_HA_MODES = {"none", "orc", "dbms"}
 
 # 统一使用北京时间（UTC+8）输出给前端，避免服务器本地时区导致偏差。
 _BEIJING_TZ = timezone(timedelta(hours=8))
@@ -128,10 +129,21 @@ def _build_sse_payload(data: dict):
     return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
-def _ensure_ha_switch_enabled(cluster: DatabaseCluster):
-    if not getattr(cluster, "ha_switch_enabled", False):
-        raise RuntimeError("当前集群未启用高可用切换")
+def _normalize_ha_mode(value, db_type: str):
+    if db_type != "mysql":
+        return "none"
+    mode = str(value or "none").strip().lower()
+    if mode not in MYSQL_HA_MODES:
+        raise ValueError("ha_mode must be none, orc or dbms")
+    return mode
 
+
+def _ensure_dbms_ha_management(cluster: DatabaseCluster):
+    mode = str(getattr(cluster, "ha_mode", None) or "none").strip().lower()
+    if mode == "orc":
+        raise RuntimeError("cluster is managed by Orchestrator; DBMS HA intervention is not allowed")
+    if mode != "dbms":
+        raise RuntimeError("cluster is not enabled for DBMS HA management")
 
 def _get_ha_notify_config(result: dict):
     script_result = result.get("switch_script") or {}
@@ -394,6 +406,10 @@ def create_cluster():
         return error_response("name and db_type are required", code=400)
     if db_type not in {"mysql", "redis", "doris", "mongodb"}:
         return error_response("invalid db_type", code=400)
+    try:
+        ha_mode = _normalize_ha_mode(payload.get("ha_mode"), db_type)
+    except ValueError as exc:
+        return error_response(str(exc), code=400)
 
     effective_business_line = business_line or namespace or ""
     cluster = DatabaseCluster(
@@ -404,6 +420,7 @@ def create_cluster():
         db_type=db_type,
         description=description,
         ha_domain=ha_domain,
+        ha_mode=ha_mode,
         data_access_route_json=data_access_route,
     )
     db.session.add(cluster)
@@ -434,8 +451,11 @@ def update_cluster(cluster_id):
         cluster.description = payload["description"]
     if "ha_domain" in payload:
         cluster.ha_domain = (payload.get("ha_domain") or "").strip() or None
-    if "ha_switch_enabled" in payload:
-        cluster.ha_switch_enabled = bool(payload.get("ha_switch_enabled"))
+    if "ha_mode" in payload:
+        try:
+            cluster.ha_mode = _normalize_ha_mode(payload.get("ha_mode"), cluster.db_type)
+        except ValueError as exc:
+            return error_response(str(exc), code=400)
     if "data_access_route_json" in payload:
         cluster.data_access_route_json = _normalize_data_access_route(payload.get("data_access_route_json"))
 
@@ -633,8 +653,6 @@ def cluster_ha_topology(cluster_id):
     cluster = DatabaseCluster.query.get_or_404(cluster_id)
     if cluster.db_type != "mysql":
         return error_response("ha topology only supports mysql cluster", code=400)
-    if not cluster.ha_switch_enabled:
-        return error_response("当前集群未启用高可用切换", code=400)
     if not require_cluster_permission(cluster.id, "query"):
         return error_response("permission denied", code=403)
     try:
@@ -715,7 +733,7 @@ def cluster_ha_switch(cluster_id):
     if cluster.db_type != "mysql":
         return error_response("ha switch only supports mysql cluster", code=400)
     try:
-        _ensure_ha_switch_enabled(cluster)
+        _ensure_dbms_ha_management(cluster)
     except RuntimeError as exc:
         return error_response(str(exc), code=400)
     if not require_cluster_permission(cluster.id, "change"):
@@ -767,7 +785,7 @@ def cluster_ha_switch_stream(cluster_id):
     if cluster.db_type != "mysql":
         return error_response("ha switch only supports mysql cluster", code=400)
     try:
-        _ensure_ha_switch_enabled(cluster)
+        _ensure_dbms_ha_management(cluster)
     except RuntimeError as exc:
         return error_response(str(exc), code=400)
     if not require_cluster_permission(cluster.id, "change"):

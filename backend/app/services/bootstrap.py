@@ -52,8 +52,8 @@ def ensure_backup_extra_columns():
         statements.append("ALTER TABLE db_clusters ADD COLUMN ha_domain VARCHAR(255) NULL")
     if table_columns["db_clusters"] and "ha_status_json" not in table_columns["db_clusters"]:
         statements.append("ALTER TABLE db_clusters ADD COLUMN ha_status_json JSON NULL")
-    if table_columns["db_clusters"] and "ha_switch_enabled" not in table_columns["db_clusters"]:
-        statements.append("ALTER TABLE db_clusters ADD COLUMN ha_switch_enabled BOOLEAN NOT NULL DEFAULT FALSE")
+    if table_columns["db_clusters"] and "ha_mode" not in table_columns["db_clusters"]:
+        statements.append("ALTER TABLE db_clusters ADD COLUMN ha_mode VARCHAR(16) NOT NULL DEFAULT 'none'")
     if table_columns["db_clusters"] and "data_access_route_json" not in table_columns["db_clusters"]:
         statements.append("ALTER TABLE db_clusters ADD COLUMN data_access_route_json JSON NULL")
 

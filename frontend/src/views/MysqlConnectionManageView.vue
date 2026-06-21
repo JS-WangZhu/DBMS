@@ -28,6 +28,11 @@
       <el-table-column prop="environment" label="环境" min-width="120" />
       <el-table-column prop="name" label="集群" min-width="140" />
       <el-table-column prop="ha_domain" label="高可用域名" min-width="180" show-overflow-tooltip />
+      <el-table-column :label="'HA管理模式'" width="120">
+        <template #default="scope">
+          <el-tag :type="haModeTagType(scope.row.ha_mode)">{{ haModeLabel(scope.row.ha_mode) }}</el-tag>
+        </template>
+      </el-table-column>
       <el-table-column label="解析IP" min-width="130">
         <template #default="scope">{{ scope.row.ha_status_json?.resolved_ip || "-" }}</template>
       </el-table-column>
@@ -53,7 +58,10 @@
       <el-table-column label="操作" width="320" fixed="right">
         <template #default="scope">
           <el-button link type="primary" @click="openEdit(scope.row)">编辑</el-button>
-          <el-button link type="success" :disabled="!scope.row.ha_switch_enabled" @click="openSwitchDialog(scope.row)">高可用切换</el-button>
+          <el-button v-if="normalizeHaMode(scope.row.ha_mode) === 'dbms'" link type="success" @click="openSwitchDialog(scope.row)">{{ '高可用切换' }}</el-button>
+          <el-tooltip v-else :content="haModeHint(scope.row.ha_mode)" placement="top">
+            <span><el-button link type="info" disabled>{{ '高可用切换' }}</el-button></span>
+          </el-tooltip>
           <el-button link type="warning" @click="doCheck(scope.row)">校验</el-button>
           <el-button link type="success" @click="openTopologyHistoryDialog(scope.row)">拓扑变更历史</el-button>
         </template>
@@ -89,13 +97,13 @@
     <el-dialog v-model="switchDialogVisible" title="高可用主从切换" width="1600px" top="2vh">
       <div v-loading="topologyLoading" class="switch-dialog-body">
         <el-descriptions :column="3" border>
-          <el-descriptions-item label="项目">{{ topologyCluster?.business_line || topologyCluster?.namespace || "-" }}</el-descriptions-item>
-          <el-descriptions-item label="环境">{{ topologyCluster?.environment || "-" }}</el-descriptions-item>
-          <el-descriptions-item label="集群">{{ topologyCluster?.name || "-" }}</el-descriptions-item>
-          <el-descriptions-item label="高可用域名">{{ topologyData.ha_domain || "-" }}</el-descriptions-item>
-          <el-descriptions-item label="HA切换">
-            <el-tag :type="topologyCluster?.ha_switch_enabled ? 'success' : 'info'">
-              {{ topologyCluster?.ha_switch_enabled ? "已启用" : "未启用" }}
+          <el-descriptions-item :label="'项目'">{{ topologyCluster?.business_line || topologyCluster?.namespace || "-" }}</el-descriptions-item>
+          <el-descriptions-item :label="'环境'">{{ topologyCluster?.environment || "-" }}</el-descriptions-item>
+          <el-descriptions-item :label="'集群'">{{ topologyCluster?.name || "-" }}</el-descriptions-item>
+          <el-descriptions-item :label="'高可用域名'">{{ topologyData.ha_domain || "-" }}</el-descriptions-item>
+          <el-descriptions-item :label="'HA管理模式'">
+            <el-tag :type="haModeTagType(topologyCluster?.ha_mode)">
+              {{ haModeLabel(topologyCluster?.ha_mode) }}
             </el-tag>
           </el-descriptions-item>
           <el-descriptions-item label="当前主库">{{ topologyData.current_master_instance_name || "-" }}</el-descriptions-item>
@@ -161,9 +169,9 @@
           :closable="false"
         />
         <el-alert
-          v-if="!topologyCluster?.ha_switch_enabled"
-          title="当前集群未启用高可用切换，请先到集群管理中开启。"
-          type="error"
+          v-if="normalizeHaMode(topologyCluster?.ha_mode) !== 'dbms'"
+          :title="haModeHint(topologyCluster?.ha_mode)"
+          type="warning"
           show-icon
           :closable="false"
         />
@@ -517,11 +525,30 @@ const currentTargetValue = computed({
 
 const failureSwitchBlockedReason = computed(() => getFailureSwitchBlockedReason(topologyData.nodes || [], topologyData.current_master_instance_id));
 
+function normalizeHaMode(value) {
+  return ["none", "orc", "dbms"].includes(value) ? value : "none";
+}
+
+function haModeLabel(value) {
+  return { none: "无", orc: "ORC 托管", dbms: "DBMS 托管" }[normalizeHaMode(value)];
+}
+
+function haModeTagType(value) {
+  return { none: "info", orc: "warning", dbms: "success" }[normalizeHaMode(value)];
+}
+
+function haModeHint(value) {
+  const mode = normalizeHaMode(value);
+  if (mode === "orc") return "该集群由 Orchestrator 托管，DBMS 不进行切换干预";
+  if (mode === "none") return "该集群未配置 DBMS HA 管理";
+  return "";
+}
+
 const switchActionDisabled = computed(() => {
   if (topologyLoading.value || switchSubmitting.value) {
     return true;
   }
-  if (!topologyCluster.value?.ha_switch_enabled) {
+  if (normalizeHaMode(topologyCluster.value?.ha_mode) !== "dbms") {
     return true;
   }
   if (switchForm.switch_type === "repair") {
@@ -778,6 +805,10 @@ async function fetchTopology(clusterId) {
 }
 
 async function openSwitchDialog(row) {
+  if (normalizeHaMode(row?.ha_mode) !== "dbms") {
+    ElMessage.warning(haModeHint(row?.ha_mode));
+    return;
+  }
   topologyCluster.value = row;
   switchDialogVisible.value = true;
   historyDialogVisible.value = false;
@@ -888,6 +919,10 @@ function mysqlRoleTagType(role) {
 
 async function submitHaSwitch() {
   if (!topologyCluster.value) {
+    return;
+  }
+  if (normalizeHaMode(topologyCluster.value.ha_mode) !== "dbms") {
+    ElMessage.warning(haModeHint(topologyCluster.value.ha_mode));
     return;
   }
   if (switchForm.switch_type === "repair" && !switchForm.target_instance_ids.length) {

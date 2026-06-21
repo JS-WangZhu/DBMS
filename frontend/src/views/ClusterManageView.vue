@@ -38,10 +38,10 @@
       />
       <el-table-column prop="name" label="集群名称" min-width="180" />
       <el-table-column prop="ha_domain" label="高可用域名" min-width="180" show-overflow-tooltip />
-      <el-table-column v-if="dbType === 'mysql'" label="HA切换" width="100">
+      <el-table-column v-if="dbType === 'mysql'" :label="'HA管理模式'" width="120">
         <template #default="scope">
-          <el-tag :type="scope.row.ha_switch_enabled ? 'success' : 'info'">
-            {{ scope.row.ha_switch_enabled ? "已启用" : "未启用" }}
+          <el-tag :type="haModeTagType(scope.row.ha_mode)">
+            {{ haModeLabel(scope.row.ha_mode) }}
           </el-tag>
         </template>
       </el-table-column>
@@ -87,8 +87,10 @@
         <el-form-item label="环境"><el-input v-model.trim="form.environment" placeholder="可选，如：prod/test" /></el-form-item>
         <el-form-item label="集群名称"><el-input v-model.trim="form.name" /></el-form-item>
         <el-form-item label="高可用域名"><el-input v-model.trim="form.ha_domain" placeholder="可填域名或IP" /></el-form-item>
-        <el-form-item v-if="dbType === 'mysql'" label="启用HA切换">
-          <el-switch v-model="form.ha_switch_enabled" />
+        <el-form-item v-if="dbType === 'mysql'" :label="'HA管理模式'">
+          <el-select v-model="form.ha_mode" style="width: 100%">
+            <el-option v-for="item in haModeOptions" :key="item.value" :label="item.label" :value="item.value" />
+          </el-select>
         </el-form-item>
         <template v-if="dbType === 'mysql'">
           <el-form-item label="查询路由">
@@ -187,7 +189,7 @@ const form = reactive({
   environment: "",
   name: "",
   ha_domain: "",
-  ha_switch_enabled: false,
+  ha_mode: "none",
   data_access_route_json: {
     query: { mode: "auto", instance_id: null },
     change: { mode: "auto", instance_id: null },
@@ -199,6 +201,23 @@ const routeModeOptions = [
   { label: "自动", value: "auto" },
   { label: "手动", value: "manual" },
 ];
+const haModeOptions = [
+  { label: "无", value: "none" },
+  { label: "ORC", value: "orc" },
+  { label: "DBMS", value: "dbms" },
+];
+
+function normalizeHaMode(value) {
+  return ["none", "orc", "dbms"].includes(value) ? value : "none";
+}
+
+function haModeLabel(value) {
+  return { none: "无", orc: "ORC 托管", dbms: "DBMS 托管" }[normalizeHaMode(value)];
+}
+
+function haModeTagType(value) {
+  return { none: "info", orc: "warning", dbms: "success" }[normalizeHaMode(value)];
+}
 
 const dialogTitle = computed(() => (editingClusterId.value ? `编辑${dbLabel.value}集群` : `新建${dbLabel.value}集群`));
 
@@ -340,7 +359,7 @@ function resetForm() {
   form.environment = filters.environment || "";
   form.name = "";
   form.ha_domain = "";
-  form.ha_switch_enabled = false;
+  form.ha_mode = "none";
   form.data_access_route_json = normalizeRouteConfig(null);
   form.description = "";
 }
@@ -356,7 +375,7 @@ function openEditDialog(row) {
   form.environment = row.environment || "";
   form.name = row.name || "";
   form.ha_domain = row.ha_domain || "";
-  form.ha_switch_enabled = !!row.ha_switch_enabled;
+  form.ha_mode = normalizeHaMode(row.ha_mode);
   form.data_access_route_json = normalizeRouteConfig(row.data_access_route_json);
   form.description = row.description || "";
   dialogVisible.value = true;
@@ -409,7 +428,7 @@ async function onSubmit() {
     environment: (form.environment || "").trim(),
     name: (form.name || "").trim(),
     ha_domain: (form.ha_domain || "").trim(),
-    ha_switch_enabled: !!form.ha_switch_enabled,
+    ha_mode: dbType.value === "mysql" ? normalizeHaMode(form.ha_mode) : "none",
     data_access_route_json: normalizeRouteConfig(form.data_access_route_json),
     description: (form.description || "").trim(),
   };
@@ -443,7 +462,7 @@ async function onSubmit() {
         environment: payload.environment,
         name: payload.name,
         ha_domain: payload.ha_domain,
-        ha_switch_enabled: payload.ha_switch_enabled,
+        ha_mode: payload.ha_mode,
         data_access_route_json: payload.data_access_route_json,
         db_type: dbType.value,
         description: payload.description,
