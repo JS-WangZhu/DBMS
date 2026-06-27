@@ -29,6 +29,9 @@ import McpPlatformView from "../views/McpPlatformView.vue";
 import MysqlConnectionManageView from "../views/MysqlConnectionManageView.vue";
 import MongoConnectionManageView from "../views/MongoConnectionManageView.vue";
 import RedisConnectionManageView from "../views/RedisConnectionManageView.vue";
+import DatabaseApplyView from "../views/DatabaseApplyView.vue";
+import DatabaseRecycleView from "../views/DatabaseRecycleView.vue";
+import DatabaseApplicationHistoryView from "../views/DatabaseApplicationHistoryView.vue";
 import S3StorageConfigView from "../views/S3StorageConfigView.vue";
 import SsoCallbackView from "../views/SsoCallbackView.vue";
 import SsoConfigView from "../views/SsoConfigView.vue";
@@ -55,6 +58,10 @@ const routes = [
     children: [
       { path: "", redirect: "/dashboard" },
       { path: "/dashboard", component: DashboardView, meta: { title: "总览" } },
+
+      { path: "/resources/database-apply", component: DatabaseApplyView, meta: { title: "数据库申请" } },
+      { path: "/resources/database-recycle", component: DatabaseRecycleView, meta: { title: "数据库回收" } },
+      { path: "/resources/application-history", component: DatabaseApplicationHistoryView, meta: { title: "申请流水" } },
 
       { path: "/databases/mysql", redirect: "/databases/mysql/instances" },
       { path: "/databases/mysql/clusters", component: ClusterManageView, meta: { title: "MySQL 集群管理", dbType: "mysql", dbLabel: "MySQL" } },

@@ -260,6 +260,7 @@ function buildMenuTree(catalog, disabled) {
   const leafMap = new Map((catalog || []).map((item) => [item.key, { key: item.key, label: item.label, disabled }]));
   const rootNodes = [
     { key: "dashboard", label: "总览", children: ["dashboard"] },
+    { key: "resource_management", label: "资源管理", children: ["database_apply", "database_recycle", "application_history"] },
     { key: "service_manage", label: "服务管理", children: [
       { key: "mysql", label: "MySQL", children: ["mysql_instances", "mysql_clusters", "mysql_connections"] },
       { key: "mongodb", label: "MongoDB", children: ["mongodb_instances", "mongodb_clusters"] },

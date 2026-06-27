@@ -8,6 +8,22 @@
           <span>总览</span>
         </el-menu-item>
 
+        <el-sub-menu v-if="hasAnyMenu(['database_apply','database_recycle','application_history'])" index="resource-management">
+          <template #title>
+            <el-icon><Briefcase /></el-icon>
+            <span>资源管理</span>
+          </template>
+          <el-menu-item v-if="hasMenu('database_apply')" index="/resources/database-apply">
+            <el-icon><CirclePlus /></el-icon><span>数据库申请</span>
+          </el-menu-item>
+          <el-menu-item v-if="hasMenu('database_recycle')" index="/resources/database-recycle">
+            <el-icon><Delete /></el-icon><span>数据库回收</span>
+          </el-menu-item>
+          <el-menu-item v-if="hasMenu('application_history')" index="/resources/application-history">
+            <el-icon><Document /></el-icon><span>申请流水</span>
+          </el-menu-item>
+        </el-sub-menu>
+
         <el-sub-menu v-if="hasAnyMenu(['mysql_instances','mysql_clusters','mysql_connections','mongodb_instances','mongodb_clusters','mongodb_connections','redis_instances','redis_clusters','redis_connections','doris_instances','doris_clusters','inspection_manage'])" index="service-manage">
           <template #title>
             <el-icon><Menu /></el-icon>
@@ -309,14 +325,18 @@ import {
   Aim,
   Bell,
   Box,
+  Briefcase,
   Calendar,
   Clock,
   CircleCheck,
+  CirclePlus,
   Coin,
   Collection,
   Connection,
   Cpu,
   DataAnalysis,
+  Delete,
+  Document,
   EditPen,
   Files,
   FolderOpened,
@@ -391,6 +411,9 @@ const menuKeys = ref([]);
 const permissionsLoaded = ref(false);
 const routePermissionMap = {
   "/dashboard": "dashboard",
+  "/resources/database-apply": "database_apply",
+  "/resources/database-recycle": "database_recycle",
+  "/resources/application-history": "application_history",
   "/databases/mysql/instances": "mysql_instances",
   "/databases/mysql/clusters": "mysql_clusters",
   "/databases/mysql/connections": "mysql_connections",
