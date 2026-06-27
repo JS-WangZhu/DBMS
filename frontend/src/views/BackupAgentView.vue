@@ -3,7 +3,7 @@
     <el-card>
       <template #header>
         <div class="header-row">
-          <span>备份 Agent 管理</span>
+          <span>Agent管理</span>
           <div class="header-actions">
             <el-button type="primary" @click="openCreateDialog">新增 Agent</el-button>
             <el-button @click="loadAgents">刷新</el-button>
@@ -50,7 +50,7 @@
     <el-dialog v-model="dialogVisible" :title="editingId ? '编辑 Agent' : '新增 Agent'" width="560px">
       <el-form :model="form" label-width="100px">
         <el-form-item label="名称" required>
-          <el-input v-model="form.name" placeholder="如: DC1 机房备份 Agent" />
+          <el-input v-model="form.name" placeholder="如：DC1 机房 Agent" />
         </el-form-item>
         <el-form-item label="URL" required>
           <el-input v-model="form.url" placeholder="http://192.168.1.100:5001" />
@@ -65,7 +65,7 @@
         </el-form-item>
         <el-form-item label="设为默认">
           <el-switch v-model="form.is_default" />
-          <div class="hint-text">设为默认后，未指定 Agent 的策略将使用此 Agent</div>
+          <div class="hint-text">设为默认 Agent，供需要 Agent 能力的功能优先使用</div>
         </el-form-item>
         <el-form-item label="启用">
           <el-switch v-model="form.enabled" />

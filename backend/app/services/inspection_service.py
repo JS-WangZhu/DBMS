@@ -4,9 +4,11 @@ import threading
 from types import SimpleNamespace
 from urllib.parse import quote, quote_plus
 
+import requests
 from flask import current_app
 
 from app.extensions import db
+from app.models.backup_agent import AgentInspectionStatus, BackupAgent
 from app.models.db_asset import DatabaseCluster, DatabaseInstance
 from app.models.inspection import InspectionAlert, InspectionConfig
 from app.models.monitor_snapshot import snapshot_model_for_instance
@@ -207,6 +209,48 @@ def _collect_instance(instance_id: int, instance_data: dict, password: str):
 
 
 # 最近 N 分钟的指标均值窗口，用于减少 CPU 瞬时峰值误报
+def _collect_agent(agent: BackupAgent, timeout_seconds: int):
+    checked_at = datetime.now()
+    headers = {"X-Agent-API-Key": agent.api_key} if agent.api_key else {}
+    try:
+        response = requests.get(
+            f"{agent.url.rstrip('/')}/api/agent/health",
+            headers=headers,
+            timeout=timeout_seconds,
+        )
+        try:
+            body = response.json()
+        except Exception:
+            body = {}
+        data = body.get("data") if isinstance(body, dict) and isinstance(body.get("data"), dict) else body
+        data = data if isinstance(data, dict) else {}
+        reported_status = str(data.get("status") or "").strip().lower()
+        healthy = response.status_code < 400 and (
+            reported_status in {"healthy", "ok", "running"}
+            or (isinstance(body, dict) and body.get("ok") is True)
+        )
+        status = "normal" if healthy else "abnormal"
+        message = "Agent 运行正常" if healthy else (
+            data.get("message") or f"Agent 健康检查异常（HTTP {response.status_code}）"
+        )
+        payload = {
+            "ok": healthy,
+            "http_status": response.status_code,
+            "health": data,
+            "collected_at": checked_at.isoformat(),
+        }
+    except requests.exceptions.Timeout:
+        status, message = "abnormal", "Agent 健康检查超时"
+        payload = {"ok": False, "error": "request timeout", "collected_at": checked_at.isoformat()}
+    except requests.exceptions.ConnectionError:
+        status, message = "abnormal", "Agent 无法连接"
+        payload = {"ok": False, "error": "cannot connect", "collected_at": checked_at.isoformat()}
+    except Exception as exc:
+        status, message = "abnormal", mask_sensitive_text(f"Agent 健康检查失败: {exc}", [agent.api_key])
+        payload = {"ok": False, "error": message, "collected_at": checked_at.isoformat()}
+    return status, message, payload, checked_at
+
+
 CPU_AVERAGE_WINDOW_MINUTES = 10
 
 
@@ -375,6 +419,7 @@ def run_inspection_cycle(trigger: str = "manual", force: bool = False):
 
         thresholds = _thresholds_from_config(cfg)
         instances = DatabaseInstance.query.filter_by(enabled=True).all()
+        agents = BackupAgent.query.filter_by(enabled=True).all()
         instance_map = {item.id: item for item in instances}
         cluster_ids = sorted({item.cluster_id for item in instances if item.cluster_id})
         cluster_map = {
@@ -407,6 +452,20 @@ def run_inspection_cycle(trigger: str = "manual", force: bool = False):
 
         max_workers = max(1, min(int(current_app.config.get("INSPECTION_COLLECT_WORKERS", 8)), max(1, len(work_items))))
         timeout_seconds = max(3, int(cfg.collect_timeout_seconds or 8))
+        agent_abnormal = 0
+        for agent in agents:
+            agent_status, message, payload, checked_at = _collect_agent(agent, timeout_seconds)
+            row = AgentInspectionStatus.query.filter_by(agent_id=agent.id).first()
+            if not row:
+                row = AgentInspectionStatus(agent_id=agent.id)
+                db.session.add(row)
+            row.status = agent_status
+            row.message = message
+            row.payload_json = payload
+            row.checked_at = checked_at
+            if agent_status == "abnormal":
+                agent_abnormal += 1
+
         batch_count = 0
         for batch in _chunks(work_items, max_workers):
             batch_count += 1
@@ -556,11 +615,14 @@ def run_inspection_cycle(trigger: str = "manual", force: bool = False):
                     alert.recovery_notified_at = now
 
         abnormal_instances = sum(1 for item in issue_map.values() if item)
-        issue_total = sum(len(item) for item in issue_map.values())
+        issue_total = sum(len(item) for item in issue_map.values()) + agent_abnormal
         summary = {
             "trigger": trigger,
-            "inspected_total": len(instances),
+            "inspected_total": len(instances) + len(agents),
+            "inspected_instances": len(instances),
+            "inspected_agents": len(agents),
             "abnormal_instances": abnormal_instances,
+            "abnormal_agents": agent_abnormal,
             "issue_total": issue_total,
             "new_alerts": new_alerts,
             "recovered_alerts": recovered_alerts,
@@ -606,31 +668,23 @@ def inspection_overview(
     page = max(page, 1)
     page_size = max(1, min(page_size, 100))
 
-    instances_query = DatabaseInstance.query.filter_by(enabled=True)
-    if db_type:
-        instances_query = instances_query.filter_by(db_type=db_type)
-    if cluster_id:
-        instances_query = instances_query.filter_by(cluster_id=cluster_id)
-    if allowed_cluster_ids is not None:
-        ids = [int(item) for item in (allowed_cluster_ids or []) if item is not None]
-        if not ids:
-            return {
-                "items": [],
-                "page": page,
-                "page_size": page_size,
-                "total": 0,
-                "summary": {"total": 0, "abnormal": 0, "normal": 0},
-            }
-        instances_query = instances_query.filter(DatabaseInstance.cluster_id.in_(ids))
-    instances = instances_query.order_by(DatabaseInstance.id.desc()).all()
-    if not instances:
-        return {
-            "items": [],
-            "page": page,
-            "page_size": page_size,
-            "total": 0,
-            "summary": {"total": 0, "abnormal": 0, "normal": 0},
-        }
+    include_instances = db_type != "agent"
+    include_agents = not db_type or db_type == "agent"
+    instances = []
+    if include_instances:
+        instances_query = DatabaseInstance.query.filter_by(enabled=True)
+        if db_type:
+            instances_query = instances_query.filter_by(db_type=db_type)
+        if cluster_id:
+            instances_query = instances_query.filter_by(cluster_id=cluster_id)
+        if allowed_cluster_ids is not None:
+            ids = [int(item) for item in (allowed_cluster_ids or []) if item is not None]
+            if ids:
+                instances_query = instances_query.filter(DatabaseInstance.cluster_id.in_(ids))
+            else:
+                instances_query = None
+        if instances_query is not None:
+            instances = instances_query.order_by(DatabaseInstance.id.desc()).all()
 
     cluster_ids = sorted({item.cluster_id for item in instances if item.cluster_id})
     cluster_map = {
@@ -643,56 +697,82 @@ def inspection_overview(
         .filter(InspectionAlert.instance_id.in_(instance_ids), InspectionAlert.status == "open")
         .order_by(InspectionAlert.id.desc())
         .all()
-    )
+    ) if instance_ids else []
     alerts_by_instance = {}
     for row in open_alerts:
         alerts_by_instance.setdefault(row.instance_id, []).append(row)
 
     payload_by_instance = {}
-    for t in {"mysql", "mongodb", "redis", "doris"}:
-        ids = [item.id for item in instances if item.db_type == t]
+    for item_type in {"mysql", "mongodb", "redis", "doris"}:
+        ids = [item.id for item in instances if item.db_type == item_type]
         if ids:
-            payload_by_instance.update(latest_payload_by_instance_ids(db_type=t, instance_ids=ids, metric_type="inspection"))
+            payload_by_instance.update(latest_payload_by_instance_ids(db_type=item_type, instance_ids=ids, metric_type="inspection"))
 
     items = []
     for instance in instances:
         payload = payload_by_instance.get(instance.id) or {}
         issues = alerts_by_instance.get(instance.id) or []
         item_status = "abnormal" if issues else "normal"
-        if status in {"abnormal", "normal"} and item_status != status:
-            continue
         cluster = cluster_map.get(instance.cluster_id)
-        items.append(
-            {
-                "instance_id": instance.id,
-                "instance_name": instance.name,
-                "db_type": instance.db_type,
-                "cluster_id": instance.cluster_id,
-                "cluster_name": cluster.name if cluster else None,
-                "business_line": (cluster.business_line or cluster.namespace) if cluster else None,
-                "environment": cluster.environment if cluster else None,
+        items.append({
+            "asset_type": "database",
+            "instance_id": instance.id,
+            "instance_name": instance.name,
+            "db_type": instance.db_type,
+            "cluster_id": instance.cluster_id,
+            "cluster_name": cluster.name if cluster else None,
+            "business_line": (cluster.business_line or cluster.namespace) if cluster else None,
+            "environment": cluster.environment if cluster else None,
+            "inspection_status": item_status,
+            "issues": [row.to_dict() for row in issues],
+            "issue_count": len(issues),
+            "payload_json": payload,
+            "collected_at": payload.get("collected_at"),
+        })
+
+    if include_agents and not cluster_id:
+        agents = BackupAgent.query.filter_by(enabled=True).order_by(BackupAgent.id.desc()).all()
+        status_rows = AgentInspectionStatus.query.filter(
+            AgentInspectionStatus.agent_id.in_([item.id for item in agents])
+        ).all() if agents else []
+        status_map = {row.agent_id: row for row in status_rows}
+        for agent in agents:
+            agent_status = status_map.get(agent.id)
+            item_status = agent_status.status if agent_status else "abnormal"
+            message = agent_status.message if agent_status else "尚未执行 Agent 状态巡检"
+            issues = [] if item_status == "normal" else [{
+                "issue_key": "agent_health",
+                "issue_name": "Agent 状态异常",
+                "message": message,
+                "severity": "critical",
+            }]
+            items.append({
+                "asset_type": "agent",
+                "agent_id": agent.id,
+                "instance_id": None,
+                "instance_name": agent.name,
+                "db_type": "agent",
+                "cluster_id": None,
+                "cluster_name": agent.url,
+                "business_line": None,
+                "environment": None,
                 "inspection_status": item_status,
-                "issues": [row.to_dict() for row in issues],
+                "issues": issues,
                 "issue_count": len(issues),
-                "payload_json": payload,
-                "collected_at": payload.get("collected_at"),
-            }
-        )
+                "payload_json": agent_status.payload_json if agent_status else {},
+                "collected_at": agent_status.checked_at.isoformat() if agent_status and agent_status.checked_at else None,
+            })
+
+    if status in {"abnormal", "normal"}:
+        items = [item for item in items if item["inspection_status"] == status]
     abnormal = sum(1 for item in items if item["inspection_status"] == "abnormal")
     total = len(items)
-    total = len(items)
     start = (page - 1) * page_size
-    end = start + page_size
-    paged_items = items[start:end]
-
+    paged_items = items[start:start + page_size]
     return {
         "items": paged_items,
         "page": page,
         "page_size": page_size,
         "total": total,
-        "summary": {
-            "total": total,
-            "abnormal": abnormal,
-            "normal": total - abnormal,
-        },
+        "summary": {"total": total, "abnormal": abnormal, "normal": total - abnormal},
     }

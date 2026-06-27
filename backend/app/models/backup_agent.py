@@ -28,3 +28,23 @@ class BackupAgent(db.Model, TimestampMixin):
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
+
+
+class AgentInspectionStatus(db.Model, TimestampMixin):
+    __tablename__ = "agent_inspection_statuses"
+
+    id = db.Column(db.Integer, primary_key=True)
+    agent_id = db.Column(db.Integer, nullable=False, unique=True, index=True)
+    status = db.Column(db.String(32), nullable=False, default="unknown", index=True)
+    message = db.Column(db.String(512), nullable=True)
+    payload_json = db.Column(db.JSON, nullable=True)
+    checked_at = db.Column(db.DateTime, nullable=True)
+
+    def to_dict(self) -> dict:
+        return {
+            "agent_id": self.agent_id,
+            "status": self.status,
+            "message": self.message,
+            "payload_json": self.payload_json or {},
+            "checked_at": self.checked_at.isoformat() if self.checked_at else None,
+        }

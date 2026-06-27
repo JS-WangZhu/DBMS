@@ -17,6 +17,7 @@
           <el-option label="MongoDB" value="mongodb" />
           <el-option label="Redis" value="redis" />
           <el-option label="Doris" value="doris" />
+          <el-option label="Agent" value="agent" />
         </el-select>
         <el-select v-model="filters.status" clearable placeholder="巡检状态" style="width: 160px" @change="onFilterChange">
           <el-option label="异常" value="abnormal" />
@@ -31,14 +32,16 @@
       </div>
 
       <el-table :data="rows" stripe v-loading="loading">
-        <el-table-column prop="db_type" label="类型" width="100" />
+        <el-table-column label="类型" width="100">
+          <template #default="{ row }">{{ row.db_type === "agent" ? "Agent" : row.db_type }}</template>
+        </el-table-column>
         <el-table-column label="业务/环境" min-width="180">
           <template #default="{ row }">
             {{ row.business_line || "-" }}/{{ row.environment || "-" }}
           </template>
         </el-table-column>
-        <el-table-column prop="cluster_name" label="集群" min-width="180" show-overflow-tooltip />
-        <el-table-column prop="instance_name" label="实例" min-width="200" show-overflow-tooltip />
+        <el-table-column prop="cluster_name" label="集群/地址" min-width="180" show-overflow-tooltip />
+        <el-table-column prop="instance_name" label="实例/Agent" min-width="200" show-overflow-tooltip />
         <el-table-column label="状态" width="90">
           <template #default="{ row }">
             <el-tag :type="row.inspection_status === 'abnormal' ? 'danger' : 'success'">

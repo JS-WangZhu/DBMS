@@ -566,7 +566,7 @@ async function openToolConfigDialog() {
 const router = useRouter();
 
 function openAgentDialog() {
-  router.push("/backups/agents");
+  router.push("/config/agents");
 }
 
 function openToolConfigCreate() {

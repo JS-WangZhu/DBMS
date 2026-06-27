@@ -95,6 +95,18 @@ def register_jobs(scheduler, app):
         kwargs={"app": app},
     )
 
+    with app.app_context():
+        task_result_cleanup_trigger = _trigger_from_expr("0 2 * * *")
+    scheduler.add_job(
+        id="task_result_cleanup_daily",
+        func=job_task_result_cleanup,
+        trigger=task_result_cleanup_trigger,
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        kwargs={"app": app, "retain_days": 30},
+    )
+
     sync_backup_jobs(scheduler=scheduler, app=app)
     sync_inspection_job(scheduler=scheduler, app=app)
     sync_scheduled_task_jobs(scheduler=scheduler, app=app)
@@ -582,3 +594,26 @@ def job_monitor_snapshot_cleanup(app, retain_days: int = 2):
         except Exception as exc:
             db.session.rollback()
             current_app.logger.exception(f"monitor snapshot cleanup failed: {exc}")
+
+
+def job_task_result_cleanup(app, retain_days: int = 30):
+    from app.services.task_result_cleanup import cleanup_expired_task_results
+
+    app = _resolve_app(app) or app
+    if app is None:
+        current_app.logger.error("task result cleanup job missing app context")
+        return {"ok": False, "message": "app context missing"}
+    with app.app_context():
+        try:
+            result = cleanup_expired_task_results(retain_days=retain_days)
+            current_app.logger.info(
+                "task result cleanup finished: cutoff=%s backup_deleted=%s task_deleted=%s",
+                result["cutoff"],
+                result["backup_results_deleted"],
+                result["task_results_deleted"],
+            )
+            return {"ok": True, **result}
+        except Exception as exc:
+            db.session.rollback()
+            current_app.logger.exception("task result cleanup failed: %s", exc)
+            return {"ok": False, "message": str(exc)}

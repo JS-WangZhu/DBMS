@@ -2,7 +2,7 @@ from app.models.ai_config import AIModelConfig
 from app.models.aliyun_dns import AliyunDomainConfig
 from app.models.audit_log import AuditLog
 from app.models.backup import BackupLog, BackupPolicy
-from app.models.backup_agent import BackupAgent
+from app.models.backup_agent import AgentInspectionStatus, BackupAgent
 from app.models.backup_tool_config import BackupToolConfig
 from app.models.backup_key import BackupKey
 from app.models.data_query_op import DataQueryOperationConfig
@@ -38,6 +38,7 @@ __all__ = [
     "BackupLog",
     "BackupPolicy",
     "BackupAgent",
+    "AgentInspectionStatus",
     "BackupToolConfig",
     "BackupKey",
     "BackupNotifyTarget",

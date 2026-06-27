@@ -40,10 +40,6 @@ def get_overview():
     allowed = None
     if user and user.role != "admin":
         allowed = list_allowed_cluster_ids("query") or []
-        if cluster_id and cluster_id not in allowed:
-            return ok_response(data={"items": [], "page": page, "page_size": page_size, "total": 0, "summary": {"total": 0, "abnormal": 0, "normal": 0}})
-        if not cluster_id and not allowed:
-            return ok_response(data={"items": [], "page": page, "page_size": page_size, "total": 0, "summary": {"total": 0, "abnormal": 0, "normal": 0}})
     data = inspection_overview(
         db_type=db_type,
         cluster_id=cluster_id,

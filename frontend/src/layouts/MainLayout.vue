@@ -139,7 +139,7 @@
           </el-menu-item>
         </el-sub-menu>
 
-        <el-sub-menu v-if="hasAnyMenu(['backup_mysql_policies','backup_mongo_policies','backup_records','backup_tool_configs','backup_agents','backup_s3_storage','backup_keys','backup_overview'])" index="backup">
+        <el-sub-menu v-if="hasAnyMenu(['backup_mysql_policies','backup_mongo_policies','backup_records','backup_tool_configs','backup_s3_storage','backup_keys','backup_overview'])" index="backup">
           <template #title>
             <el-icon><Collection /></el-icon>
             <span>备份管理</span>
@@ -166,7 +166,7 @@
             <el-icon><Files /></el-icon>
             <span>备份记录</span>
           </el-menu-item>
-          <el-sub-menu v-if="hasAnyMenu(['backup_tool_configs','backup_agents','backup_s3_storage','backup_keys'])" index="backup-config">
+          <el-sub-menu v-if="hasAnyMenu(['backup_tool_configs','backup_s3_storage','backup_keys'])" index="backup-config">
             <template #title>
               <el-icon><SwitchButton /></el-icon>
               <span>备份配置</span>
@@ -174,10 +174,6 @@
             <el-menu-item v-if="hasMenu('backup_tool_configs')" index="/backups/tool-configs">
               <el-icon><Tools /></el-icon>
               <span>备份工具管理</span>
-            </el-menu-item>
-            <el-menu-item v-if="hasMenu('backup_agents')" index="/backups/agents">
-              <el-icon><Monitor /></el-icon>
-              <span>备份Agent管理</span>
             </el-menu-item>
             <el-menu-item v-if="hasMenu('backup_s3_storage')" index="/backups/s3-storage">
               <el-icon><Box /></el-icon>
@@ -209,11 +205,15 @@
           </el-menu-item>
         </el-sub-menu>
 
-        <el-sub-menu v-if="hasAnyMenu(['ai_model_config', 'ha_config', 'instance_status_config', 'inspection_param_config', 'data_query_op_config', 'backup_notify_targets', 'domain_config', 'mcp_platform', 'sso_config'])" index="config">
+        <el-sub-menu v-if="hasAnyMenu(['ai_model_config', 'ha_config', 'instance_status_config', 'inspection_param_config', 'data_query_op_config', 'backup_notify_targets', 'backup_agents', 'domain_config', 'mcp_platform', 'sso_config'])" index="config">
           <template #title>
             <el-icon><Management /></el-icon>
             <span>配置管理</span>
           </template>
+          <el-menu-item v-if="hasMenu('backup_agents')" index="/config/agents">
+            <el-icon><Monitor /></el-icon>
+            <span>Agent管理</span>
+          </el-menu-item>
           <el-menu-item v-if="hasMenu('ai_model_config')" index="/config/ai-models">
             <el-icon><TrendCharts /></el-icon>
             <span>AI模型管理</span>
@@ -414,7 +414,7 @@ const routePermissionMap = {
   "/backups/mongo-policies": "backup_mongo_policies",
   "/backups/records": "backup_records",
   "/backups/tool-configs": "backup_tool_configs",
-  "/backups/agents": "backup_agents",
+  "/config/agents": "backup_agents",
   "/backups/notify-targets": "backup_notify_targets",
   "/backups/s3-storage": "backup_s3_storage",
   "/backups/keys": "backup_keys",
