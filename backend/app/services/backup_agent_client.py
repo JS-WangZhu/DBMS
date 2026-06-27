@@ -152,7 +152,12 @@ def _build_payload_from_policy(policy: BackupPolicy, instance: DatabaseInstance)
     }
 
 
-def execute_backup_on_agent(policy_id: int, agent_id: int = None, dry_run: bool = False) -> dict:
+def execute_backup_on_agent(
+    policy_id: int,
+    agent_id: int = None,
+    dry_run: bool = False,
+    task_id: str = None,
+) -> dict:
     """
     Call remote agent to execute backup
 
@@ -187,6 +192,8 @@ def execute_backup_on_agent(policy_id: int, agent_id: int = None, dry_run: bool 
     
     payload = _build_payload_from_policy(policy, instance)
     payload["dry_run"] = dry_run
+    if task_id:
+        payload["task_id"] = task_id
 
     headers = {
         "Content-Type": "application/json",
@@ -195,7 +202,7 @@ def execute_backup_on_agent(policy_id: int, agent_id: int = None, dry_run: bool 
         headers["X-Agent-API-Key"] = api_key
 
     try:
-        response = requests.post(execute_url, json=payload, headers=headers, timeout=86400)
+        response = requests.post(execute_url, json=payload, headers=headers, timeout=(5, 15))
         try:
             response_data = response.json()
         except Exception:
@@ -224,6 +231,37 @@ def execute_backup_on_agent(policy_id: int, agent_id: int = None, dry_run: bool 
         if isinstance(e, BackupAgentError):
             raise
         raise BackupAgentError(f"Unexpected error: {str(e)}")
+
+
+def get_backup_tasks_on_agent(agent_id: int, task_ids: list) -> dict:
+    """Fetch multiple in-memory task results with one short request."""
+    if not task_ids:
+        return {"tasks": {}, "missing": []}
+    url = get_agent_url(agent_id)
+    api_key = get_agent_api_key(agent_id)
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["X-Agent-API-Key"] = api_key
+    try:
+        response = requests.post(
+            f"{url.rstrip('/')}/api/agent/tasks/status",
+            json={"task_ids": task_ids},
+            headers=headers,
+            timeout=(3, 8),
+        )
+        response_data = response.json()
+        if response.status_code >= 400 or not isinstance(response_data, dict):
+            message = response_data.get("message") if isinstance(response_data, dict) else response.text
+            raise BackupAgentError(f"Agent task query error({response.status_code}): {message}")
+        return response_data.get("data") or {"tasks": {}, "missing": []}
+    except requests.exceptions.ConnectionError as exc:
+        raise BackupAgentError(f"Failed to connect to agent: {exc}")
+    except requests.exceptions.Timeout as exc:
+        raise BackupAgentError(f"Agent task query timeout: {exc}")
+    except BackupAgentError:
+        raise
+    except Exception as exc:
+        raise BackupAgentError(f"Unexpected task query error: {exc}")
 
 
 def check_agent_health(agent_id: int = None) -> dict:

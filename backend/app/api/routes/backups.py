@@ -14,7 +14,8 @@ from app.models.notify_target import BackupNotifyTarget
 from app.models.s3_storage_config import S3StorageConfig
 from app.services.audit import log_audit
 from app.services.backup_executor import run_backup_policy
-from app.services.backup_agent_client import execute_backup_on_agent, BackupAgentError, download_backup_file_from_agent
+from app.services.backup_agent_client import BackupAgentError, download_backup_file_from_agent
+from app.services.remote_backup_service import submit_remote_backup, sync_running_remote_backups
 from app.services.monitor_snapshot_service import latest_payload_by_instance_ids
 from app.services.notifier import test_notify_target, notify_backup_failure
 from app.services.s3_storage import upload_file_to_s3, generate_presigned_download_url
@@ -673,81 +674,16 @@ def _execute_policy_once(policy_id: int, dry_run: bool = False):
         status_code = 200 if result.get("ok") else 500
         return result, status_code
 
-    instance = DatabaseInstance.query.get(policy.target_id)
-    running_log = None
-    if not dry_run:
-        running_log = BackupLog(
-            policy_id=policy.id,
-            started_at=datetime.utcnow(),
-            status="running",
-            extra_json={"remote": True, "agent_id": agent_id, "command": []},
-        )
-        db.session.add(running_log)
-        db.session.commit()
-
-    try:
-        result = execute_backup_on_agent(policy_id=policy_id, agent_id=agent_id, dry_run=dry_run)
-    except BackupAgentError as exc:
-        error_text = str(exc)
-        if running_log:
-            running_log.status = "failed"
-            running_log.finished_at = datetime.utcnow()
-            running_log.error_message = error_text
-            notify_result = notify_backup_failure(policy=policy, instance=instance, error_message=error_text, command=[])
-            extra = dict(running_log.extra_json or {})
-            extra["notify"] = notify_result
-            running_log.extra_json = extra
-            db.session.commit()
-        return {"ok": False, "message": error_text, "error": "agent_error"}, 502
-
-    remote_data = result.get("data") or {}
-    remote_ok = bool(result.get("ok"))
-    status_code = 200 if remote_ok else 500
-    if dry_run:
-        return result, status_code
-
-    compress_method = (policy.extra_json or {}).get("compress_method") if isinstance(policy.extra_json, dict) else None
-    if compress_method not in {"none", "gzip", "zstd"}:
-        compress_method = "gzip" if policy.compress else "none"
-    remote_extra = {
-        "remote": True,
-        "agent_id": agent_id,
-        "command": remote_data.get("command", []),
-        "compress": compress_method != "none",
-        "compress_method": remote_data.get("compress_method") or compress_method,
-        "encrypt": ((policy.extra_json or {}).get("encrypt") if isinstance(policy.extra_json, dict) else None),
-        "s3": {"ok": False, "message": "s3 upload disabled"},
-    }
-    if isinstance(remote_data.get("encrypt"), dict):
-        remote_extra["encrypt"] = remote_data.get("encrypt")
-    if isinstance(remote_data.get("s3"), dict):
-        remote_extra["s3"] = remote_data.get("s3")
-
-    if running_log:
-        running_log.finished_at = datetime.utcnow()
-        running_log.file_path = remote_data.get("output_file")
-        running_log.size_bytes = remote_data.get("file_size")
-        running_log.status = "success" if remote_ok else "failed"
-        running_log.error_message = None if remote_ok else (result.get("message") or remote_data.get("message"))
-        if not remote_ok:
-            notify_result = notify_backup_failure(
-                policy=policy,
-                instance=instance,
-                error_message=running_log.error_message or "remote backup failed",
-                command=remote_data.get("command", []),
-            )
-            remote_extra["notify"] = notify_result
-        running_log.extra_json = remote_extra
-        db.session.commit()
-        remote_data["backup_log_id"] = running_log.id
-
-    result["data"] = remote_data
-    return result, status_code
+    return submit_remote_backup(policy, dry_run=dry_run)
 
 
 @bp.get("/logs")
 @active_user_required
 def list_logs():
+    # User refresh is the reconciliation trigger. Only logs still marked
+    # running are queried; terminal results are never requested again.
+    sync_running_remote_backups()
+
     policy_id = request.args.get("policy_id")
     status = request.args.get("status")
     db_type = request.args.get("db_type")

@@ -6,11 +6,11 @@ from apscheduler.triggers.cron import CronTrigger
 from flask import current_app
 
 from app.extensions import db
-from app.models.backup import BackupLog, BackupPolicy
+from app.models.backup import BackupPolicy
 from app.models.db_asset import DatabaseCluster, DatabaseInstance
 from app.models.inspection import InspectionConfig
 from app.models.monitor_snapshot import SNAPSHOT_MODEL_BY_DB_TYPE
-from app.services.backup_agent_client import BackupAgentError, execute_backup_on_agent
+from app.services.remote_backup_service import submit_remote_backup
 from app.services.backup_executor import run_backup_policy
 from app.services.collectors import collect_instance_metrics
 from app.services.dns_resolver import refresh_all_dns, resolve_host
@@ -18,7 +18,6 @@ from app.services.inspection_service import get_or_create_inspection_config, run
 from app.services.instance_service import warm_instance_list_cache
 from app.services.instance_status_config import get_or_create_instance_status_config
 from app.services.monitor_snapshot_service import warm_latest_snapshot_cache
-from app.services.notifier import notify_backup_failure
 from app.services.redis_cache import enqueue_snapshot_flush, set_latest_snapshot
 from app.services.topology_history import (
     extract_mongo_topology,
@@ -269,62 +268,8 @@ def job_run_backup_policy(app, policy_id: int):
 
         agent_id = policy.backup_agent_id
         if agent_id:
-            log = BackupLog(
-                policy_id=policy.id,
-                started_at=datetime.utcnow(),
-                status="running",
-                extra_json={"remote": True, "agent_id": agent_id},
-            )
-            db.session.add(log)
-            db.session.commit()
-            try:
-                result = execute_backup_on_agent(policy_id=policy_id, agent_id=agent_id, dry_run=False)
-                if not result.get("ok"):
-                    instance = DatabaseInstance.query.get(policy.target_id)
-                    error_message = result.get("message") or ((result.get("data") or {}).get("message")) or "remote backup failed"
-                    notify_backup_failure(policy=policy, instance=instance, error_message=error_message, command=(result.get("data") or {}).get("command", []))
-                    raise BackupAgentError(error_message)
-
-                remote_data = result.get("data") or {}
-                compress_method = (policy.extra_json or {}).get("compress_method") if isinstance(policy.extra_json, dict) else None
-                if compress_method not in {"none", "gzip", "zstd"}:
-                    compress_method = "gzip" if policy.compress else "none"
-                remote_extra = {
-                    "remote": True,
-                    "agent_id": agent_id,
-                    "command": remote_data.get("command", []),
-                    "compress": compress_method != "none",
-                    "compress_method": remote_data.get("compress_method") or compress_method,
-                    "encrypt": ((policy.extra_json or {}).get("encrypt") if isinstance(policy.extra_json, dict) else None),
-                    "s3": {"ok": False, "message": "s3 upload disabled"},
-                }
-                if isinstance(remote_data.get("encrypt"), dict):
-                    remote_extra["encrypt"] = remote_data.get("encrypt")
-                if isinstance(remote_data.get("s3"), dict):
-                    remote_extra["s3"] = remote_data.get("s3")
-
-                log.status = "success"
-                log.finished_at = datetime.utcnow()
-                log.file_path = remote_data.get("output_file")
-                log.size_bytes = remote_data.get("file_size")
-                log.error_message = None
-                log.extra_json = remote_extra
-                db.session.commit()
-
-                remote_data["backup_log_id"] = log.id
-                result["data"] = remote_data
-                app.logger.info(f"Remote backup completed: policy_id={policy_id}, agent_id={agent_id}, result={result}")
-                return result
-            except BackupAgentError as e:
-                instance = DatabaseInstance.query.get(policy.target_id)
-                notify_backup_failure(policy=policy, instance=instance, error_message=str(e), command=[])
-                log.status = "failed"
-                log.finished_at = datetime.utcnow()
-                log.error_message = str(e)
-                log.extra_json = {**(log.extra_json or {}), "remote": True, "agent_id": agent_id}
-                db.session.commit()
-                app.logger.error(f"Remote backup failed: policy_id={policy_id}, agent_id={agent_id}, error={str(e)}")
-                raise
+            result, _status_code = submit_remote_backup(policy, dry_run=False)
+            return result
         return run_backup_policy(policy_id=policy_id, dry_run=False)
 
 

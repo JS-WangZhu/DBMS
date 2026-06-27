@@ -67,8 +67,9 @@ ENABLE_REMOTE_AGENT=true
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/api/agent/health` | Health check |
-| POST | `/api/agent/execute` | Execute backup |
-| GET | `/api/agent/logs/<id>` | Get backup log |
+| POST | `/api/agent/execute` | Submit backup and return `task_id` |
+| GET | `/api/agent/tasks/<task_id>` | Get in-memory task status/result |
+| POST | `/api/agent/tasks/status` | Batch task status/result query |
 | GET | `/api/agent/version` | Get agent version |
 
 ### Execute Backup
@@ -87,3 +88,8 @@ For each data center:
 2. Configure `DATABASE_URL` to point to the shared PostgreSQL database
 3. Ensure `FERNET_KEY` matches the main project
 4. Set `BACKUP_AGENT_URL` in the main project to point to this agent
+
+Backup task state is intentionally process-local memory. Run one agent worker
+per endpoint (the built-in `python manage.py` setup already does this). If a
+multi-worker process manager is used, requests for one endpoint must be pinned
+to the same worker or the task store must be replaced with a shared store.

@@ -6,6 +6,9 @@ import subprocess
 import tempfile
 import struct
 import gzip
+import threading
+import uuid
+from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -18,6 +21,30 @@ bp = Blueprint("agent", __name__, url_prefix="/api/agent")
 AGENT_VERSION = "1.0.0"
 MULTIPART_CHUNK_SIZE = 8 * 1024 * 1024
 logger = logging.getLogger(__name__)
+
+# The server owns the durable BackupLog. The agent only keeps live task state
+# and results in memory, decoupling backup execution from the HTTP connection.
+_backup_tasks = {}
+_backup_tasks_lock = threading.RLock()
+_MAX_BACKUP_TASKS = 1000
+
+
+def _task_snapshot(task):
+    return deepcopy(task)
+
+
+def _prune_backup_tasks():
+    """Bound memory while never evicting a task that is still running."""
+    with _backup_tasks_lock:
+        overflow = len(_backup_tasks) - _MAX_BACKUP_TASKS
+        if overflow <= 0:
+            return
+        terminal = sorted(
+            (item for item in _backup_tasks.values() if item.get("status") in {"success", "failed"}),
+            key=lambda item: item.get("finished_at") or "",
+        )
+        for item in terminal[:overflow]:
+            _backup_tasks.pop(item["task_id"], None)
 
 
 def _verify_api_key():
@@ -440,6 +467,28 @@ def _run_backup(policy: dict, instance: dict, dry_run: bool = False):
         return {"ok": False, "message": str(e)}
 
 
+def _run_backup_task(app, task_id, policy, instance):
+    with app.app_context():
+        with _backup_tasks_lock:
+            task = _backup_tasks.get(task_id)
+            if not task:
+                return
+            task["status"] = "running"
+            task["started_at"] = datetime.utcnow().isoformat() + "Z"
+        try:
+            result = _run_backup(policy, instance, False)
+        except Exception as exc:
+            logger.exception("backup task crashed: task_id=%s", task_id)
+            result = {"ok": False, "message": str(exc)}
+        with _backup_tasks_lock:
+            task = _backup_tasks.get(task_id)
+            if task:
+                task["status"] = "success" if result.get("ok") else "failed"
+                task["result"] = result
+                task["finished_at"] = datetime.utcnow().isoformat() + "Z"
+        _prune_backup_tasks()
+
+
 @bp.route("/health", methods=["GET"])
 def health_check():
     """健康检查接口 - 无数据库依赖"""
@@ -464,14 +513,70 @@ def execute_backup():
         return error_response("instance is required", code=400)
     
     dry_run = payload.get("dry_run", False)
-    
-    result = _run_backup(policy, instance, dry_run)
-    
-    status_code = 200 if result.get("ok") else 500
-    
-    if result.get("ok"):
-        return ok_response(data=result, code=status_code)
-    return error_response(result.get("message", "backup failed"), code=status_code, data=result)
+
+    # Dry runs are cheap and remain synchronous. Real backups are detached from
+    # the request so a connection is never held for the backup duration.
+    if dry_run:
+        result = _run_backup(policy, instance, True)
+        status_code = 200 if result.get("ok") else 500
+        if result.get("ok"):
+            return ok_response(data=result, code=status_code)
+        return error_response(result.get("message", "backup failed"), code=status_code, data=result)
+
+    task_id = str(payload.get("task_id") or uuid.uuid4().hex).strip()
+    if not task_id or len(task_id) > 128:
+        return error_response("invalid task_id", code=400)
+
+    with _backup_tasks_lock:
+        existing = _backup_tasks.get(task_id)
+        if existing:
+            return ok_response(data={"task_id": task_id, "status": existing.get("status")}, code=202)
+        _backup_tasks[task_id] = {
+            "task_id": task_id,
+            "status": "submitted",
+            "submitted_at": datetime.utcnow().isoformat() + "Z",
+            "started_at": None,
+            "finished_at": None,
+            "result": None,
+        }
+
+    app = current_app._get_current_object()
+    worker = threading.Thread(
+        target=_run_backup_task,
+        args=(app, task_id, deepcopy(policy), deepcopy(instance)),
+        daemon=True,
+        name=f"backup-{task_id[:12]}",
+    )
+    worker.start()
+    return ok_response(data={"task_id": task_id, "status": "submitted"}, code=202)
+
+
+@bp.route("/tasks/<task_id>", methods=["GET"])
+@_require_api_key
+def get_backup_task(task_id):
+    with _backup_tasks_lock:
+        task = _backup_tasks.get(task_id)
+        if not task:
+            return error_response("backup task not found", code=404)
+        snapshot = _task_snapshot(task)
+    return ok_response(data=snapshot)
+
+
+@bp.route("/tasks/status", methods=["POST"])
+@_require_api_key
+def get_backup_tasks_status():
+    payload = request.get_json(silent=True) or {}
+    task_ids = payload.get("task_ids") or []
+    if not isinstance(task_ids, list) or len(task_ids) > 500:
+        return error_response("task_ids must be a list with at most 500 items", code=400)
+    with _backup_tasks_lock:
+        tasks = {
+            str(task_id): _task_snapshot(_backup_tasks[str(task_id)])
+            for task_id in task_ids
+            if str(task_id) in _backup_tasks
+        }
+    missing = [str(task_id) for task_id in task_ids if str(task_id) not in tasks]
+    return ok_response(data={"tasks": tasks, "missing": missing})
 
 
 @bp.route("/files/download", methods=["GET"])
