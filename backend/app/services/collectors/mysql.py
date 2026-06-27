@@ -1,8 +1,7 @@
-﻿from datetime import datetime
+from datetime import datetime
 
 from app.services.collectors.node_exporter import collect_node_exporter_metrics
 from app.services.dns_resolver import resolve_host
-
 
 def _to_bool_flag(value):
     if value is None:
@@ -14,7 +13,6 @@ def _to_bool_flag(value):
         return False
     return None
 
-
 def _safe_int(value):
     try:
         if value is None:
@@ -22,7 +20,6 @@ def _safe_int(value):
         return int(value)
     except (TypeError, ValueError):
         return None
-
 
 def collect_mysql_status(instance, password):
     warnings = []
@@ -146,12 +143,45 @@ def collect_mysql_status(instance, password):
                 except Exception:
                     seconds_behind_master = None
 
+            mgr_member_state = None
+            mgr_member_role = None
+            mgr_group_name = None
+            mgr_members = []
+            try:
+                cursor.execute(
+                    "SELECT MEMBER_ID, MEMBER_HOST, MEMBER_PORT, MEMBER_STATE, MEMBER_ROLE "
+                    "FROM performance_schema.replication_group_members"
+                )
+                desc = [item[0] for item in cursor.description]
+                for raw_row in cursor.fetchall() or []:
+                    member = {desc[idx].lower(): raw_row[idx] for idx in range(len(desc))}
+                    member["member_port"] = _safe_int(member.get("member_port"))
+                    mgr_members.append(member)
+                cursor.execute("SELECT @@server_uuid, @@group_replication_group_name")
+                group_row = cursor.fetchone()
+                server_uuid = str(group_row[0] or "").strip() if group_row else ""
+                mgr_group_name = str(group_row[1] or "").strip() if group_row and group_row[1] else None
+                local_member = next(
+                    (item for item in mgr_members if str(item.get("member_id") or "").strip() == server_uuid),
+                    None,
+                )
+                if local_member:
+                    mgr_member_state = str(local_member.get("member_state") or "").strip().upper() or None
+                    mgr_member_role = str(local_member.get("member_role") or "").strip().upper() or None
+                    if mgr_member_role == "PRIMARY":
+                        replication_role = "mgr_primary"
+                    elif mgr_member_role == "SECONDARY":
+                        replication_role = "mgr_secondary"
+            except Exception:
+                # A missing table/variable is the normal non-MGR case.
+                mgr_members = []
+
         if read_only_flag is None and super_read_only_flag is None:
             effective_read_only = None
         else:
             effective_read_only = bool(read_only_flag is True or super_read_only_flag is True)
 
-        if replication_role != "slave":
+        if replication_role not in {"slave", "mgr_primary", "mgr_secondary"}:
             if effective_read_only is True:
                 replication_role = "read_only"
             elif effective_read_only is False:
@@ -190,6 +220,10 @@ def collect_mysql_status(instance, password):
             "super_read_only": super_read_only_flag,
             "effective_read_only": effective_read_only,
             "replication_role": replication_role,
+            "mgr_member_role": mgr_member_role,
+            "mgr_member_state": mgr_member_state,
+            "mgr_group_name": mgr_group_name,
+            "mgr_members": mgr_members,
             "replica_io_running": replica_io_running,
             "replica_sql_running": replica_sql_running,
             "replica_source_host": replica_source_host_value,
@@ -206,5 +240,3 @@ def collect_mysql_status(instance, password):
             conn.close()
         except Exception:
             pass
-
-

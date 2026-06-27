@@ -24,6 +24,7 @@ def ensure_backup_extra_columns():
     table_columns = {}
     for table in [
         "db_clusters",
+        "db_instances",
         "backup_policies",
         "backup_logs",
         "backup_notify_targets",
@@ -40,6 +41,10 @@ def ensure_backup_extra_columns():
             table_columns[table] = set()
 
     statements = []
+    if table_columns["db_instances"] and "access_mode" not in table_columns["db_instances"]:
+        statements.append("ALTER TABLE db_instances ADD COLUMN access_mode VARCHAR(16) NOT NULL DEFAULT 'server'")
+    if table_columns["db_instances"] and "probe_agent_id" not in table_columns["db_instances"]:
+        statements.append("ALTER TABLE db_instances ADD COLUMN probe_agent_id INTEGER NULL")
     if table_columns["db_clusters"] and "namespace" not in table_columns["db_clusters"]:
         statements.append("ALTER TABLE db_clusters ADD COLUMN namespace VARCHAR(64) NOT NULL DEFAULT 'default'")
     if table_columns["db_clusters"] and "business_line" not in table_columns["db_clusters"]:

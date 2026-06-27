@@ -66,6 +66,55 @@ def get_agent_by_id(agent_id: int) -> Optional[BackupAgent]:
     return BackupAgent.query.get(agent_id)
 
 
+def probe_instance_on_agent(instance, password):
+    """Collect an instance snapshot from the agent explicitly bound to the asset."""
+    agent_id = getattr(instance, "probe_agent_id", None)
+    if not agent_id:
+        return {"ok": False, "error": "probe agent is not configured"}
+    try:
+        runtime_settings_supplied = hasattr(instance, "probe_agent_url")
+        url = getattr(instance, "probe_agent_url", None)
+        api_key = getattr(instance, "probe_agent_api_key", None)
+        timeout = getattr(instance, "probe_timeout_seconds", None)
+        if not url:
+            if runtime_settings_supplied:
+                return {"ok": False, "error": "probe agent is unavailable or disabled"}
+            url = get_agent_url(agent_id)
+        if api_key is None:
+            api_key = get_agent_api_key(agent_id)
+        if timeout is None:
+            timeout = float(current_app.config.get("MONITOR_COLLECT_TIMEOUT_SECONDS", 8))
+        response = requests.post(
+            f"{url.rstrip('/')}/api/agent/instances/probe",
+            json={
+                "instance": {
+                    "id": getattr(instance, "id", None),
+                    "db_type": getattr(instance, "db_type", None),
+                    "host_input": getattr(instance, "host_input", None),
+                    "resolved_ip": getattr(instance, "resolved_ip", None),
+                    "port": getattr(instance, "port", None),
+                    "username": getattr(instance, "username", None),
+                    "extra_json": getattr(instance, "extra_json", None),
+                },
+                "password": password or "",
+            },
+            headers={"X-Agent-API-Key": api_key},
+            timeout=float(timeout),
+        )
+        body = response.json() if response.content else {}
+        if response.status_code >= 400:
+            return {"ok": False, "error": body.get("message") or f"agent returned status {response.status_code}"}
+        data = body.get("data") if isinstance(body, dict) else None
+        if not isinstance(data, dict):
+            return {"ok": False, "error": "invalid probe response from agent"}
+        data.setdefault("probe_source", "agent")
+        data.setdefault("probe_agent_id", agent_id)
+        return data
+    except requests.Timeout:
+        return {"ok": False, "error": "agent probe timeout"}
+    except Exception as exc:
+        return {"ok": False, "error": f"agent probe failed: {exc}"}
+
 def _resolve_encrypt_public_key(encrypt_cfg: dict) -> str:
     public_key = (encrypt_cfg.get("public_key") or "").strip()
     if public_key:

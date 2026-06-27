@@ -65,7 +65,7 @@ def _is_mysql_writable_master(payload: dict, has_downstream_replica: bool = Fals
     role = str(payload.get("replication_role") or "").strip().lower()
     return bool(
         payload.get("ping_ok") is True
-        and (role in {"master", "master_slave"} or (role == "slave" and has_downstream_replica))
+        and (role in {"master", "master_slave", "mgr_primary"} or (role == "slave" and has_downstream_replica))
         and payload.get("effective_read_only") is False
     )
 

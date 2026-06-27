@@ -1,4 +1,4 @@
-﻿from app.services.collectors.doris import collect_doris_status
+from app.services.collectors.doris import collect_doris_status
 from app.services.collectors.mongodb import collect_mongodb_status
 from app.services.collectors.mysql import collect_mysql_status
 from app.services.collectors.redisdb import collect_redis_status
@@ -13,6 +13,10 @@ COLLECTOR_MAP = {
 
 
 def collect_instance_metrics(instance, password):
+    if str(getattr(instance, "access_mode", "server") or "server").lower() == "agent":
+        from app.services.backup_agent_client import probe_instance_on_agent
+
+        return probe_instance_on_agent(instance=instance, password=password)
     collector = COLLECTOR_MAP.get(instance.db_type)
     if not collector:
         return {"ok": False, "error": f"collector not found for {instance.db_type}"}

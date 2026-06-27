@@ -338,7 +338,7 @@ def _run_backup(policy: dict, instance: dict, dry_run: bool = False):
     default_tool = "mysqldump" if db_type == "mysql" else "mongodump"
     tool_path = policy.get("tool_path") or current_app.config.get(f"{db_type.upper()}_DUMP_PATH", default_tool)
     
-    storage_path = policy.get("storage_path", "/tmp/backups")
+    storage_path = policy.get("storage_path") or os.environ.get("BACKUP_ROOT", "/tmp/backups")
     os.makedirs(storage_path, exist_ok=True)
     
     if not _ensure_disk_space(storage_path):
@@ -487,6 +487,21 @@ def _run_backup_task(app, task_id, policy, instance):
                 task["result"] = result
                 task["finished_at"] = datetime.utcnow().isoformat() + "Z"
         _prune_backup_tasks()
+
+
+@bp.route("/instances/probe", methods=["POST"])
+@_require_api_key
+def probe_database_instance():
+    from app.services.instance_probe import probe_instance
+
+    payload = request.get_json(silent=True) or {}
+    instance = payload.get("instance")
+    if not isinstance(instance, dict):
+        return error_response("instance is required", code=400)
+    if not instance.get("db_type") or not (instance.get("resolved_ip") or instance.get("host_input")):
+        return error_response("instance db_type and host are required", code=400)
+    result = probe_instance(instance=instance, password=payload.get("password") or "")
+    return ok_response(data=result)
 
 
 @bp.route("/health", methods=["GET"])

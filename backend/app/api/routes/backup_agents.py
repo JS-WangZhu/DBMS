@@ -4,6 +4,7 @@ from flask import Blueprint, request
 from app.api.routes.common import active_user_required, admin_required
 from app.extensions import db
 from app.models.backup_agent import BackupAgent
+from app.models.db_asset import DatabaseInstance
 from app.services.audit import log_audit
 from app.utils.response import error_response, ok_response
 
@@ -137,6 +138,8 @@ def delete_agent(agent_id):
     # 检查是否有策略关联
     if agent.policies.count() > 0:
         return error_response("cannot delete agent with associated policies", code=400)
+    if DatabaseInstance.query.filter_by(probe_agent_id=agent.id).count() > 0:
+        return error_response("cannot delete agent used by database instances", code=400)
 
     db.session.delete(agent)
     db.session.commit()

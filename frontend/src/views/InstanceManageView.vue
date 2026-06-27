@@ -370,6 +370,17 @@
             <el-option v-for="item in clusters" :key="item.id" :label="clusterOptionLabel(item)" :value="item.id" />
           </el-select>
         </el-form-item>
+        <el-form-item label="接入模式">
+          <el-radio-group v-model="form.access_mode">
+            <el-radio-button label="server">Server</el-radio-button>
+            <el-radio-button label="agent">Agent代理</el-radio-button>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item v-if="form.access_mode === 'agent'" label="探测Agent">
+          <el-select v-model="form.probe_agent_id" style="width: 100%" placeholder="请选择 dbms_agent">
+            <el-option v-for="item in probeAgents" :key="item.id" :label="item.name" :value="item.id" />
+          </el-select>
+        </el-form-item>
         <el-form-item label="域名"><el-input v-model.trim="form.host_domain" placeholder="可选，如 db.example.com" /></el-form-item>
         <el-form-item label="地址"><el-input v-model="form.host_input" placeholder="IP或主机地址" /></el-form-item>
         <el-form-item label="物理机地址">
@@ -412,6 +423,7 @@ import { collectClusterHealth, listClusters } from "../api/modules/clusters";
   import { getInstanceHealth, getInstancesHealth } from "../api/modules/monitoring";
   import { createMysqlInstance, listMysqlInstances, mysqlInstanceDetail, mysqlReplication } from "../api/modules/mysql";
   import { createRedisInstance, listRedisInstances, redisClusterHealth } from "../api/modules/redis";
+  import { listBackupAgents } from "../api/modules/backups";
   import { formatBeijingTime, parseBeijingTimeMs } from "../utils/time";
 
 const route = useRoute();
@@ -454,7 +466,7 @@ const CONFIG = {
     listFn: listDorisInstances,
     createFn: createDorisInstance,
     detailFn: dorisFeStatus,
-    instanceDetailFn: null,
+    instanceDetailFn: (instanceId) => getInstanceHealth(instanceId),
     showUsername: true,
   },
 };
@@ -483,6 +495,7 @@ const dialogVisible = ref(false);
 const editingInstanceId = ref(null);
 const rows = ref([]);
 const clusters = ref([]);
+const probeAgents = ref([]);
 const keyword = ref("");
 const healthIntervalSec = ref(0);
 const statusProbePollIntervalSec = ref(30);
@@ -534,6 +547,8 @@ const metricFilters = reactive({
 const form = reactive({
   name: "",
   cluster_id: null,
+  access_mode: "server",
+  probe_agent_id: null,
   host_domain: "",
   host_input: "",
   physical_address: "",
@@ -860,6 +875,8 @@ function resetForm() {
   editingExtraBase.value = {};
   form.name = "";
   form.cluster_id = null;
+  form.access_mode = "server";
+  form.probe_agent_id = null;
   form.host_domain = "";
   form.host_input = "";
   form.physical_address = "";
@@ -883,6 +900,8 @@ function openEditDialog(row) {
   const mode = exporter.mode === "custom" ? "custom" : "same_host";
   form.name = row.name || "";
   form.cluster_id = row.cluster_id ?? null;
+  form.access_mode = row.access_mode === "agent" ? "agent" : "server";
+  form.probe_agent_id = row.probe_agent_id ?? null;
   form.host_domain = row.host_domain || (rawExtra.domain || "");
   form.host_input = row.host_input || "";
   form.physical_address = rawExtra.physical_address || "";
@@ -1478,7 +1497,7 @@ function mysqlRole(row) {
 }
 
 function shouldHideReplicationDetails(row) {
-  return dbType.value === "mysql" && mysqlRole(row) === "master";
+  return dbType.value === "mysql" && ["master", "mgr_primary", "mgr_secondary"].includes(mysqlRole(row));
 }
 
 function clearStatusMaps() {
@@ -1528,6 +1547,8 @@ function readonlyTagType(effectiveReadOnly) {
 }
 
 function roleTagType(role) {
+  if (role === "mgr_primary") return "success";
+  if (role === "mgr_secondary") return "warning";
   if (role === "dual") {
     return "warning";
   }
@@ -1544,6 +1565,8 @@ function roleTagType(role) {
 }
 
 function roleText(role) {
+  if (role === "mgr_primary") return "MGR-主";
+  if (role === "mgr_secondary") return "MGR-从";
   if (role === "dual") {
     return "主库/从库";
   }
@@ -1640,6 +1663,13 @@ function showReplicationInfo(row) {
     return formatBeijingTime(isoValue);
   }
 
+function buildAccessModeDetailRows(row) {
+  const isAgent = row?.access_mode === "agent";
+  return [
+    { label: "接入模式", value: isAgent ? "Agent代理" : "Server" },
+    ...(isAgent ? [{ label: "探测Agent", value: row?.probe_agent_name || "-" }] : []),
+  ];
+}
 function openInfoDialog(title, rowsData) {
   infoDialogTitle.value = title;
   const sourceRows = rowsData?.length ? rowsData : [{ label: "结果", value: "-" }];
@@ -1705,6 +1735,8 @@ function buildMysqlReplicationRows(payload) {
     { label: "心跳时间", value: formatDateTime(payload.collected_at) },
     { label: "Node Exporter状态", value: normalizeInfoValue(payload.node_exporter_status) },
     { label: "主从角色", value: roleText(payload.replication_role) },
+    { label: "MGR成员状态", value: normalizeInfoValue(payload.mgr_member_state) },
+    { label: "MGR组名", value: normalizeInfoValue(payload.mgr_group_name) },
     { label: "只读(read_only)", value: normalizeInfoValue(payload.read_only) },
     { label: "只读(super_read_only)", value: normalizeInfoValue(payload.super_read_only) },
     { label: "综合只读", value: normalizeInfoValue(payload.effective_read_only) },
@@ -1872,6 +1904,16 @@ function buildNetworkRows(payload) {
       value: parts.length ? parts.join("，") : "-",
     };
   });
+}
+
+async function loadProbeAgents() {
+  try {
+    const { data } = await listBackupAgents({ enabled: true });
+    probeAgents.value = data.data || [];
+  } catch (error) {
+    probeAgents.value = [];
+    ElMessage.error(error.response?.data?.message || "加载 Agent 失败");
+  }
 }
 
 async function loadClusters() {
@@ -2156,6 +2198,11 @@ async function onSubmit() {
     return;
   }
 
+  if (form.access_mode === "agent" && !form.probe_agent_id) {
+    ElMessage.warning("请选择用于实例探测的 dbms_agent");
+    return;
+  }
+
   saving.value = true;
   try {
     const extraJson = buildExtraJsonPayload();
@@ -2166,6 +2213,8 @@ async function onSubmit() {
         port: form.port,
         cluster_id: form.cluster_id,
         extra_json: extraJson,
+        access_mode: form.access_mode,
+        probe_agent_id: form.access_mode === "agent" ? form.probe_agent_id : null,
       };
       if (showUsername.value) {
         payload.username = form.username || null;
@@ -2183,6 +2232,8 @@ async function onSubmit() {
         password: form.password,
         cluster_id: form.cluster_id,
         extra_json: extraJson,
+        access_mode: form.access_mode,
+        probe_agent_id: form.access_mode === "agent" ? form.probe_agent_id : null,
       };
 
       if (showUsername.value) {
@@ -2381,7 +2432,7 @@ async function removeInstance(row) {
         if (payload.collected_at) {
           lastCheckAtMap[row.id] = payload.collected_at;
         }
-        openInfoDialog(`${row.name} - 实例详情`, buildMysqlDetailRows(payload));
+        openInfoDialog(`${row.name} - 实例详情`, [...buildAccessModeDetailRows(row), ...buildMysqlDetailRows(payload)]);
         return;
       }
       if (dbType.value === "mongodb") {
@@ -2390,7 +2441,7 @@ async function removeInstance(row) {
           running_status: payload.running_status,
           collected_at: payload.collected_at,
         };
-        openInfoDialog(`${row.name} - 实例详情`, buildMongoDetailRows(merged));
+        openInfoDialog(`${row.name} - 实例详情`, [...buildAccessModeDetailRows(row), ...buildMongoDetailRows(merged)]);
         return;
       }
       if (dbType.value === "redis") {
@@ -2399,15 +2450,17 @@ async function removeInstance(row) {
           running_status: payload.running_status,
           collected_at: payload.collected_at,
         };
-        openInfoDialog(`${row.name} - 实例详情`, buildRedisDetailRows(merged));
+        openInfoDialog(`${row.name} - 实例详情`, [...buildAccessModeDetailRows(row), ...buildRedisDetailRows(merged)]);
         return;
       }
+      const genericPayload = payload.payload_json && typeof payload.payload_json === "object" ? payload.payload_json : payload;
+      openInfoDialog(`${row.name} - 实例详情`, [...buildAccessModeDetailRows(row), ...buildGenericInfoRows(genericPayload)]);
     } catch (error) {
       const fallback = mysqlStatus(row);
       if (fallback && Object.keys(fallback).length) {
         openInfoDialog(
         `${row.name} - 实例详情`,
-        buildMysqlDetailRows({
+        [...buildAccessModeDetailRows(row), ...buildMysqlDetailRows({
           source: fallback.source || "snapshot",
           running_status: fallback.running_status || rowRunningStatus(row),
           collected_at: fallback.collected_at || rowLastCheckAt(row),
@@ -2430,7 +2483,7 @@ async function removeInstance(row) {
           host_disk_entries: fallback.host_disk_entries,
           host_net_rates: fallback.host_net_rates,
           collect_error: error.response?.data?.message || error.message || "collect failed",
-        }),
+        })],
       );
       ElMessage.warning("实时详情采集失败，已展示最近一次心跳数据");
       return;
@@ -2443,7 +2496,7 @@ onMounted(async () => {
   resetForm();
   resetPager();
   await loadInstanceStatusConfig();
-  await reloadAll();
+  await Promise.all([loadProbeAgents(), reloadAll()]);
   setupHealthTimer();
 });
 

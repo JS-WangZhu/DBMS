@@ -430,6 +430,8 @@ def run_inspection_cycle(trigger: str = "manual", force: bool = False):
         payload_by_instance = {}
         issue_map = {}
         work_items = []
+        timeout_seconds = max(3, int(cfg.collect_timeout_seconds or 8))
+        probe_timeout_seconds = max(1.0, float(timeout_seconds) - 0.5)
         for instance in instances:
             try:
                 password = decrypt_secret(instance.password_encrypted) if instance.password_encrypted else None
@@ -447,11 +449,15 @@ def run_inspection_cycle(trigger: str = "manual", force: bool = False):
                 "port": instance.port,
                 "username": instance.username,
                 "extra_json": instance.extra_json,
+                "access_mode": instance.access_mode or "server",
+                "probe_agent_id": instance.probe_agent_id,
+                "probe_agent_url": instance.probe_agent.url if instance.probe_agent else None,
+                "probe_agent_api_key": instance.probe_agent.api_key if instance.probe_agent else "",
+                "probe_timeout_seconds": probe_timeout_seconds,
             }
             work_items.append((instance.id, instance_data, password))
 
         max_workers = max(1, min(int(current_app.config.get("INSPECTION_COLLECT_WORKERS", 8)), max(1, len(work_items))))
-        timeout_seconds = max(3, int(cfg.collect_timeout_seconds or 8))
         agent_abnormal = 0
         for agent in agents:
             agent_status, message, payload, checked_at = _collect_agent(agent, timeout_seconds)

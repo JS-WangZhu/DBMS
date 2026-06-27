@@ -2,11 +2,30 @@ from sqlalchemy import String, cast, or_
 
 from app.extensions import db
 from app.models.db_asset import DatabaseCluster, DatabaseInstance
+from app.models.backup_agent import BackupAgent
 from app.services.dns_resolver import resolve_and_update_instance, resolve_host
 from app.services.redis_cache import KEY_INSTANCE_LIST_PREFIX, delete_pattern, get_json, set_json
 from app.utils.crypto import encrypt_secret
 
 VALID_DB_TYPES = {"mysql", "mongodb", "redis", "doris"}
+
+
+def _normalize_access_binding(access_mode, probe_agent_id):
+    mode = str(access_mode or "server").strip().lower()
+    if mode not in {"server", "agent"}:
+        return None, None, "access_mode must be server or agent"
+    if mode == "server":
+        return mode, None, None
+    try:
+        agent_id = int(probe_agent_id)
+    except (TypeError, ValueError):
+        return None, None, "probe_agent_id is required for agent mode"
+    agent = BackupAgent.query.get(agent_id)
+    if not agent:
+        return None, None, "probe agent not found"
+    if not agent.enabled:
+        return None, None, "probe agent is disabled"
+    return mode, agent_id, None
 
 
 def _instance_list_cache_key(db_type=None, enabled=None):
@@ -239,6 +258,12 @@ def create_instance(payload: dict, db_type: str):
     if cluster_err:
         return None, cluster_err
 
+    access_mode, probe_agent_id, access_err = _normalize_access_binding(
+        payload.get("access_mode", "server"), payload.get("probe_agent_id")
+    )
+    if access_err:
+        return None, access_err
+
     normalized_extra_json = _normalize_extra_json(payload.get("extra_json"))
     uniqueness_err = _validate_instance_uniqueness_in_cluster(
         db_type=db_type,
@@ -262,6 +287,8 @@ def create_instance(payload: dict, db_type: str):
         is_read_only=bool(payload.get("is_read_only", False)),
         enabled=bool(payload.get("enabled", True)),
         extra_json=normalized_extra_json,
+        access_mode=access_mode,
+        probe_agent_id=probe_agent_id,
     )
 
     db.session.add(instance)
@@ -272,6 +299,16 @@ def create_instance(payload: dict, db_type: str):
 
 
 def update_instance(instance: DatabaseInstance, payload: dict):
+    if "access_mode" in payload or "probe_agent_id" in payload:
+        access_mode, probe_agent_id, access_err = _normalize_access_binding(
+            payload.get("access_mode", instance.access_mode or "server"),
+            payload.get("probe_agent_id", instance.probe_agent_id),
+        )
+        if access_err:
+            raise ValueError(access_err)
+        instance.access_mode = access_mode
+        instance.probe_agent_id = probe_agent_id
+
     if "cluster_id" in payload:
         cluster_id, cluster_err = _validate_cluster_binding(payload.get("cluster_id"), db_type=instance.db_type)
         if cluster_err:

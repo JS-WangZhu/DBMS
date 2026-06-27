@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div class="page">
     <el-card>
       <template #header>
@@ -177,6 +177,8 @@ function replicationFor(row) {
 }
 
 function roleTagType(role) {
+  if (role === "mgr_primary") return "success";
+  if (role === "mgr_secondary") return "warning";
   if (role === "master_slave" || role === "dual") {
     return "warning";
   }
@@ -193,6 +195,8 @@ function roleTagType(role) {
 }
 
 function roleText(role) {
+  if (role === "mgr_primary") return "MGR-主";
+  if (role === "mgr_secondary") return "MGR-从";
   if (role === "master_slave" || role === "dual") {
     return "主/从";
   }

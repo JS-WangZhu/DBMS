@@ -375,7 +375,7 @@ def _refresh_mysql_cluster_ha(instances, payload_by_instance):
             has_downstream_replica = bool(self_key and self_key in downstream_source_keys)
             matched_writable = bool(
                 payload.get("ping_ok") is True
-                and (role in {"master", "master_slave"} or (role == "slave" and has_downstream_replica))
+                and (role in {"master", "master_slave", "mgr_primary"} or (role == "slave" and has_downstream_replica))
                 and payload.get("effective_read_only") is False
             )
             break
@@ -469,6 +469,9 @@ def job_monitor_collect(app):
             ok_count = 0
             fail_count = 0
             payload_by_instance = {}
+            status_cfg = get_or_create_instance_status_config()
+            collect_timeout_seconds = max(1.0, float(status_cfg.metric_refresh_timeout_seconds or 8))
+            probe_timeout_seconds = max(1.0, collect_timeout_seconds - 0.5)
 
             for instance in instances:
                 try:
@@ -488,6 +491,11 @@ def job_monitor_collect(app):
                     "port": instance.port,
                     "username": instance.username,
                     "extra_json": instance.extra_json,
+                    "access_mode": instance.access_mode or "server",
+                    "probe_agent_id": instance.probe_agent_id,
+                    "probe_agent_url": instance.probe_agent.url if instance.probe_agent else None,
+                    "probe_agent_api_key": instance.probe_agent.api_key if instance.probe_agent else "",
+                    "probe_timeout_seconds": probe_timeout_seconds,
                 }
                 work_items.append((instance.id, instance_data, password))
 
@@ -498,10 +506,6 @@ def job_monitor_collect(app):
                     future_map[future] = instance_id
 
                 completed = set()
-                status_cfg = get_or_create_instance_status_config()
-                collect_timeout_seconds = float(status_cfg.metric_refresh_timeout_seconds or 8)
-                if collect_timeout_seconds < 1:
-                    collect_timeout_seconds = 1
                 try:
                     for future in as_completed(future_map.keys(), timeout=collect_timeout_seconds):
                         completed.add(future)
