@@ -5,8 +5,12 @@ from flask import Blueprint, current_app, request
 from app.api.routes.common import active_user_required
 from app.extensions import db
 from app.models.db_asset import DatabaseInstance
-from app.models.monitor_snapshot import snapshot_model_for_db, snapshot_model_for_instance
-from app.services.monitor_snapshot_service import latest_snapshot_for_instance, latest_snapshots_by_instance_ids
+from app.services.monitor_snapshot_service import (
+    latest_snapshot_for_instance,
+    latest_snapshots_by_instance_ids,
+    latest_success_snapshot_for_instance,
+    latest_success_snapshots_by_instance_ids,
+)
 from app.services.collectors import collect_instance_metrics
 from app.services.instance_service import list_instances as list_instances_by_type
 from app.services.redis_cache import enqueue_snapshot_flush, set_latest_snapshot
@@ -78,7 +82,7 @@ def latest_snapshot(instance_id):
 @bp.get("/instance/<int:instance_id>/health")
 @active_user_required
 def get_instance_health(instance_id):
-    """获取实例最新健康状态（从数据库读取）"""
+    """获取实例最新健康状态（缓存优先，数据库兜底）"""
     instance = DatabaseInstance.query.get_or_404(instance_id)
 
     latest_snapshot = latest_snapshot_for_instance(instance_id=instance.id, db_type=instance.db_type, metric_type="status")
@@ -101,18 +105,12 @@ def get_instance_health(instance_id):
     latest_failed = _snapshot_failed(payload_json)
 
     last_success_snapshot = None
-    snapshot_model = snapshot_model_for_instance(instance)
-    recent = (
-        snapshot_model.query
-        .filter_by(instance_id=instance_id, metric_type="status")
-        .order_by(snapshot_model.collected_at.desc(), snapshot_model.id.desc())
-        .limit(240)
-        .all()
-    )
-    for snap in recent:
-        if not _snapshot_failed(snap.payload_json or {}):
-            last_success_snapshot = snap
-            break
+    if latest_failed:
+        last_success_snapshot = latest_success_snapshot_for_instance(
+            instance_id=instance.id,
+            db_type=instance.db_type,
+            metric_type="status",
+        )
 
     now = datetime.now()
     base = last_success_snapshot.collected_at if last_success_snapshot else latest_snapshot.collected_at
@@ -149,7 +147,7 @@ def get_instances_health():
     """批量获取实例最新健康状态，减少前端 N+1 请求。"""
     payload = request.get_json(silent=True) or {}
     db_type = str(payload.get("db_type") or "").strip().lower()
-    if db_type not in {"mysql", "mongodb", "redis", "doris"}:
+    if db_type not in {"mysql", "mongodb", "redis", "postgresql", "doris"}:
         return error_response("invalid db_type", code=400)
 
     raw_ids = payload.get("instance_ids")
@@ -186,21 +184,16 @@ def get_instances_health():
     status_by_id = {_row_id(row): _row_status(row) for row in rows}
     latest_snapshot_by_id = latest_snapshots_by_instance_ids(db_type=db_type, instance_ids=row_ids, metric_type="status")
 
-    last_success_by_id = {}
-    snapshot_model = snapshot_model_for_db(db_type)
-    if snapshot_model:
-        recent_snapshots = (
-            snapshot_model.query
-            .filter(snapshot_model.instance_id.in_(row_ids), snapshot_model.metric_type == "status")
-            .order_by(snapshot_model.instance_id.asc(), snapshot_model.collected_at.desc(), snapshot_model.id.desc())
-            .limit(max(1, len(row_ids)) * 240)
-            .all()
-        )
-        for snap in recent_snapshots:
-            if snap.instance_id in last_success_by_id:
-                continue
-            if not _snapshot_failed(snap.payload_json or {}):
-                last_success_by_id[snap.instance_id] = snap
+    failed_ids = [
+        instance_id
+        for instance_id, snapshot in latest_snapshot_by_id.items()
+        if _snapshot_failed(snapshot.payload_json if isinstance(snapshot.payload_json, dict) else {})
+    ]
+    last_success_by_id = latest_success_snapshots_by_instance_ids(
+        db_type=db_type,
+        instance_ids=failed_ids,
+        metric_type="status",
+    ) if failed_ids else {}
 
     snapshot_payload_by_id = {}
     now = datetime.now()

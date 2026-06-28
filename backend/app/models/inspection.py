@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from app.extensions import db
 from app.models.base import TimestampMixin
 
@@ -41,6 +43,13 @@ class InspectionConfig(db.Model, TimestampMixin):
                 continue
         return sorted(set(normalized))
 
+    def get_notify_repeat_seconds(self):
+        extra = self.extra_json if isinstance(self.extra_json, dict) else {}
+        try:
+            return max(60, int(extra.get("notify_repeat_seconds") or 3600))
+        except (TypeError, ValueError):
+            return 3600
+
     def to_dict(self):
         return {
             "id": self.id,
@@ -54,6 +63,7 @@ class InspectionConfig(db.Model, TimestampMixin):
             "last_run_at": self.last_run_at.isoformat() if self.last_run_at else None,
             "last_run_summary_json": self.last_run_summary_json or {},
             "extra_json": self.extra_json or {},
+            "notify_repeat_seconds": self.get_notify_repeat_seconds(),
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
@@ -81,6 +91,12 @@ class InspectionAlert(db.Model, TimestampMixin):
     notify_count = db.Column(db.Integer, nullable=False, default=0)
     last_notified_at = db.Column(db.DateTime, nullable=True)
     recovery_notified_at = db.Column(db.DateTime, nullable=True)
+    muted_at = db.Column(db.DateTime, nullable=True)
+    muted_until = db.Column(db.DateTime, nullable=True, index=True)
+
+    def is_muted(self, now=None):
+        now = now or datetime.now()
+        return bool(self.muted_until and self.muted_until > now)
 
     def to_dict(self):
         return {
@@ -100,6 +116,9 @@ class InspectionAlert(db.Model, TimestampMixin):
             "notify_count": self.notify_count,
             "last_notified_at": self.last_notified_at.isoformat() if self.last_notified_at else None,
             "recovery_notified_at": self.recovery_notified_at.isoformat() if self.recovery_notified_at else None,
+            "muted_at": self.muted_at.isoformat() if self.muted_at else None,
+            "muted_until": self.muted_until.isoformat() if self.muted_until else None,
+            "is_muted": self.is_muted(),
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }

@@ -375,7 +375,7 @@
                   <el-pagination
                     v-model:current-page="currentPage"
                     v-model:page-size="pageSize"
-                    :page-sizes="[15, 30, 50, 100, 200]"
+                    :page-sizes="[10, 20, 50, 100, 200]"
                     :total="tableRows.length"
                     layout="total, sizes, prev, pager, next, jumper"
                     background
@@ -467,7 +467,7 @@ const tableColumns = ref([]);
 const tableRows = ref([]);
 const rawResult = ref("");
 const currentPage = ref(1);
-const pageSize = ref(15);
+const pageSize = ref(10);
 const mongoDatabases = ref([]);
 const mongoDatabasesLoading = ref(false);
 const mysqlDatabases = ref([]);

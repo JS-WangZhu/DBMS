@@ -31,6 +31,8 @@ DEFAULT_THRESHOLDS = {
     "mongodb_cache_used_pct": 90,
     "redis_memory_usage_pct": 90,
     "redis_connection_usage_pct": 90,
+    "postgresql_replication_lag_seconds": 60,
+    "postgresql_connection_usage_pct": 90,
     "host_cpu_usage_pct": 90,
     "host_memory_usage_pct": 90,
     "host_data_disk_usage_pct": 90,
@@ -105,6 +107,14 @@ def update_inspection_config(cfg: InspectionConfig, payload: dict):
             except (TypeError, ValueError):
                 continue
         cfg.muted_cluster_ids_json = sorted(set(ids))
+    if "notify_repeat_seconds" in payload:
+        try:
+            repeat_seconds = max(60, int(payload.get("notify_repeat_seconds") or 3600))
+        except (TypeError, ValueError):
+            return "notify_repeat_seconds must be integer >= 60"
+        extra = dict(cfg.extra_json) if isinstance(cfg.extra_json, dict) else {}
+        extra["notify_repeat_seconds"] = repeat_seconds
+        cfg.extra_json = extra
     if "thresholds" in payload:
         thresholds = payload.get("thresholds") or {}
         if not isinstance(thresholds, dict):
@@ -367,6 +377,20 @@ def _extract_issues(instance: DatabaseInstance, payload: dict, thresholds: dict)
         if payload.get("role") == "slave" and str(payload.get("master_link_status") or "").lower() == "down":
             issues.append(_build_issue("redis_replication_link", "Redis主从链路异常", "master_link_status=down", "critical"))
 
+    if instance.db_type == "postgresql":
+        connection_pct = _safe_float(payload.get("connection_usage_pct"))
+        lag = _safe_float(payload.get("replication_lag_seconds"))
+        if connection_pct is not None and connection_pct >= thresholds["postgresql_connection_usage_pct"]:
+            issues.append(_build_issue("postgresql_connection_high", "PostgreSQL\u8fde\u63a5\u6570\u9ad8", f"\u8fde\u63a5\u4f7f\u7528\u7387 {connection_pct}%"))
+        if payload.get("replication_role") == "standby":
+            if payload.get("replay_paused") is True:
+                issues.append(_build_issue("postgresql_replay_paused", "PostgreSQL\u590d\u5236\u56de\u653e\u6682\u505c", "WAL replay \u5df2\u6682\u505c", "critical"))
+            if lag is not None and lag >= thresholds["postgresql_replication_lag_seconds"]:
+                issues.append(_build_issue("postgresql_replication_lag", "PostgreSQL\u590d\u5236\u5ef6\u8fdf\u9ad8", f"\u590d\u5236\u5ef6\u8fdf {lag}s"))
+        lock_waiters = _safe_int(payload.get("lock_waiting_connections"))
+        if lock_waiters and lock_waiters > 0:
+            issues.append(_build_issue("postgresql_lock_wait", "PostgreSQL\u9501\u7b49\u5f85", f"\u5b58\u5728 {lock_waiters} \u4e2a\u9501\u7b49\u5f85\u8fde\u63a5"))
+
     return issues
 
 
@@ -548,6 +572,8 @@ def run_inspection_cycle(trigger: str = "manual", force: bool = False):
         recovered_alerts = 0
         sent_alerts = 0
         sent_recoveries = 0
+        suppressed_alerts = 0
+        repeat_seconds = cfg.get_notify_repeat_seconds()
 
         for instance_id, issues in issue_map.items():
             instance = instance_map.get(instance_id)
@@ -594,7 +620,18 @@ def run_inspection_cycle(trigger: str = "manual", force: bool = False):
                     alert.message = issue["message"]
                     alert.last_payload_json = payload_by_instance.get(instance_id) or {}
 
-                if is_new_or_reopen and instance.cluster_id not in muted_cluster_ids:
+                repeat_due = bool(
+                    alert.last_notified_at is None
+                    or (now - alert.last_notified_at).total_seconds() >= repeat_seconds
+                )
+                alert_muted = alert.is_muted(now)
+                if alert_muted:
+                    suppressed_alerts += 1
+                if (
+                    (is_new_or_reopen or repeat_due)
+                    and not alert_muted
+                    and instance.cluster_id not in muted_cluster_ids
+                ):
                     notify_result = _send_event_notification("alert", cfg, instance, cluster, issue)
                     if notify_result.get("ok"):
                         sent_alerts += 1
@@ -614,7 +651,7 @@ def run_inspection_cycle(trigger: str = "manual", force: bool = False):
             alert.status = "recovered"
             alert.recovered_at = now
             recovered_alerts += 1
-            if cfg.notify_recovery and instance.cluster_id not in muted_cluster_ids:
+            if cfg.notify_recovery and not alert.is_muted(now) and instance.cluster_id not in muted_cluster_ids:
                 notify_result = _send_event_notification("recovery", cfg, instance, cluster, alert)
                 if notify_result.get("ok"):
                     sent_recoveries += 1
@@ -634,6 +671,8 @@ def run_inspection_cycle(trigger: str = "manual", force: bool = False):
             "recovered_alerts": recovered_alerts,
             "sent_alerts": sent_alerts,
             "sent_recoveries": sent_recoveries,
+            "suppressed_alerts": suppressed_alerts,
+            "notify_repeat_seconds": repeat_seconds,
             "collect_workers": max_workers,
             "collect_timeout_seconds": timeout_seconds,
             "collect_batches": batch_count,
@@ -709,7 +748,7 @@ def inspection_overview(
         alerts_by_instance.setdefault(row.instance_id, []).append(row)
 
     payload_by_instance = {}
-    for item_type in {"mysql", "mongodb", "redis", "doris"}:
+    for item_type in {"mysql", "mongodb", "redis", "postgresql", "doris"}:
         ids = [item.id for item in instances if item.db_type == item_type]
         if ids:
             payload_by_instance.update(latest_payload_by_instance_ids(db_type=item_type, instance_ids=ids, metric_type="inspection"))

@@ -691,7 +691,7 @@ def list_logs():
     start_at = _parse_datetime(request.args.get("start_at", ""))
     end_at = _parse_datetime(request.args.get("end_at", ""))
     page = max(int(request.args.get("page", "1")), 1)
-    page_size = min(max(int(request.args.get("page_size", "20")), 1), 200)
+    page_size = min(max(int(request.args.get('page_size', '10')), 1), 200)
 
     query = db.session.query(BackupLog, BackupPolicy).join(BackupPolicy, BackupLog.policy_id == BackupPolicy.id)
 

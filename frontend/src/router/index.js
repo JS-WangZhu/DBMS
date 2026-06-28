@@ -30,6 +30,7 @@ import MysqlConnectionManageView from "../views/MysqlConnectionManageView.vue";
 import MongoConnectionManageView from "../views/MongoConnectionManageView.vue";
 import RedisConnectionManageView from "../views/RedisConnectionManageView.vue";
 import DatabaseApplyView from "../views/DatabaseApplyView.vue";
+import DatabaseApplicationOverviewView from "../views/DatabaseApplicationOverviewView.vue";
 import DatabaseRecycleView from "../views/DatabaseRecycleView.vue";
 import DatabaseApplicationHistoryView from "../views/DatabaseApplicationHistoryView.vue";
 import S3StorageConfigView from "../views/S3StorageConfigView.vue";
@@ -60,6 +61,7 @@ const routes = [
       { path: "/dashboard", component: DashboardView, meta: { title: "总览" } },
 
       { path: "/resources/database-apply", component: DatabaseApplyView, meta: { title: "数据库申请" } },
+      { path: "/resources/application-overview", component: DatabaseApplicationOverviewView, meta: { title: "申请预览" } },
       { path: "/resources/database-recycle", component: DatabaseRecycleView, meta: { title: "数据库回收" } },
       { path: "/resources/application-history", component: DatabaseApplicationHistoryView, meta: { title: "申请流水" } },
 
@@ -77,6 +79,10 @@ const routes = [
       { path: "/databases/redis/clusters", component: ClusterManageView, meta: { title: "Redis 集群管理", dbType: "redis", dbLabel: "Redis" } },
       { path: "/databases/redis/instances", component: InstanceManageView, meta: { title: "Redis 实例管理", dbType: "redis", dbLabel: "Redis" } },
       { path: "/databases/redis/connections", component: RedisConnectionManageView, meta: { title: "Redis 连接管理", dbType: "redis", dbLabel: "Redis" } },
+
+      { path: "/databases/postgresql", redirect: "/databases/postgresql/instances" },
+      { path: "/databases/postgresql/clusters", component: ClusterManageView, meta: { title: "PostgreSQL \u96c6\u7fa4\u7ba1\u7406", dbType: "postgresql", dbLabel: "PostgreSQL" } },
+      { path: "/databases/postgresql/instances", component: InstanceManageView, meta: { title: "PostgreSQL \u5b9e\u4f8b\u7ba1\u7406", dbType: "postgresql", dbLabel: "PostgreSQL" } },
 
       { path: "/databases/doris", redirect: "/databases/doris/instances" },
       { path: "/databases/doris/clusters", component: ClusterManageView, meta: { title: "Doris 集群管理", dbType: "doris", dbLabel: "Doris" } },

@@ -3,7 +3,14 @@ from typing import Dict, Iterable, List
 from app.extensions import db
 from app.models.db_asset import DatabaseInstance
 from app.models.monitor_snapshot import snapshot_model_for_db
-from app.services.redis_cache import get_latest_snapshot, get_latest_snapshots, set_latest_snapshot
+from app.services.redis_cache import (
+    get_last_success_snapshot,
+    get_last_success_snapshots,
+    get_latest_snapshot,
+    get_latest_snapshots,
+    set_last_success_snapshot,
+    set_latest_snapshot,
+)
 
 
 def latest_snapshot_for_instance(instance_id: int, db_type: str, metric_type: str = "status"):
@@ -112,6 +119,70 @@ def latest_snapshots_by_instance_ids(
             metric_type=metric_type,
             payload_json=row.payload_json if isinstance(row.payload_json, dict) else {},
             collected_at=row.collected_at,
+        )
+    return result
+
+
+def _snapshot_succeeded(payload: dict) -> bool:
+    return isinstance(payload, dict) and payload.get("ok") is not False and payload.get("ping_ok") is not False
+
+
+def latest_success_snapshot_for_instance(instance_id: int, db_type: str, metric_type: str = "status"):
+    cached = get_last_success_snapshot(db_type=db_type, instance_id=instance_id, metric_type=metric_type)
+    if cached:
+        return cached
+    model = snapshot_model_for_db(db_type)
+    if not model:
+        return None
+    recent = (
+        model.query
+        .filter_by(instance_id=instance_id, metric_type=metric_type)
+        .order_by(model.collected_at.desc(), model.id.desc())
+        .limit(240)
+        .all()
+    )
+    snapshot = next((row for row in recent if _snapshot_succeeded(row.payload_json or {})), None)
+    if snapshot:
+        set_last_success_snapshot(
+            db_type=db_type,
+            instance_id=instance_id,
+            metric_type=metric_type,
+            payload_json=snapshot.payload_json if isinstance(snapshot.payload_json, dict) else {},
+            collected_at=snapshot.collected_at,
+        )
+    return snapshot
+
+
+def latest_success_snapshots_by_instance_ids(
+    db_type: str,
+    instance_ids: Iterable[int],
+    metric_type: str = "status",
+):
+    ids: List[int] = [int(item) for item in instance_ids if item is not None]
+    if not ids:
+        return {}
+    result = get_last_success_snapshots(db_type=db_type, instance_ids=ids, metric_type=metric_type)
+    model = snapshot_model_for_db(db_type)
+    if not model:
+        return result
+    for instance_id in (item for item in ids if item not in result):
+        recent = (
+            model.query
+            .filter_by(instance_id=instance_id, metric_type=metric_type)
+            .order_by(model.collected_at.desc(), model.id.desc())
+            .limit(240)
+            .all()
+        )
+        snapshot = next((row for row in recent if _snapshot_succeeded(row.payload_json or {})), None)
+        if not snapshot:
+            continue
+        result[instance_id] = snapshot
+        set_last_success_snapshot(
+            db_type=db_type,
+            instance_id=instance_id,
+            metric_type=metric_type,
+            payload_json=snapshot.payload_json if isinstance(snapshot.payload_json, dict) else {},
+            collected_at=snapshot.collected_at,
         )
     return result
 

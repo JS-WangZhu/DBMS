@@ -34,6 +34,10 @@ class MonitorSnapshotRedis(MonitorSnapshotBase):
     __tablename__ = "monitor_snapshots_redis"
 
 
+class MonitorSnapshotPostgreSQL(MonitorSnapshotBase):
+    __tablename__ = "monitor_snapshots_postgresql"
+
+
 class MonitorSnapshotDoris(MonitorSnapshotBase):
     __tablename__ = "monitor_snapshots_doris"
 
@@ -42,6 +46,7 @@ SNAPSHOT_MODEL_BY_DB_TYPE = {
     "mysql": MonitorSnapshotMySQL,
     "mongodb": MonitorSnapshotMongoDB,
     "redis": MonitorSnapshotRedis,
+    "postgresql": MonitorSnapshotPostgreSQL,
     "doris": MonitorSnapshotDoris,
 }
 

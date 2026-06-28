@@ -43,7 +43,7 @@ def _tool_schema() -> Dict[str, Any]:
         "properties": {
             "db_type": {
                 "type": "string",
-                "enum": ["mysql", "mongodb", "redis", "doris"],
+                "enum": ["mysql", "mongodb", "redis", "postgresql", "doris"],
                 "description": "Optional database type filter.",
             },
             "business_line": {"type": "string", "description": "Optional business line filter."},

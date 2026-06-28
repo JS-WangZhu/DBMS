@@ -19,9 +19,9 @@ def list_users():
     except ValueError:
         page = 1
     try:
-        page_size = int(request.args.get("page_size", "20"))
+        page_size = int(request.args.get('page_size', '10'))
     except ValueError:
-        page_size = 20
+        page_size = 10
     page = max(page, 1)
     page_size = min(max(page_size, 1), 200)
     keyword = (request.args.get("keyword") or "").strip()

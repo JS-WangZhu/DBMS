@@ -111,7 +111,7 @@ const dialogVisible = ref(false);
 const editingRecordId = ref("");
 const editingOriginal = ref(null);
 const page = ref(1);
-const pageSize = ref(20);
+const pageSize = ref(10);
 const total = ref(0);
 const recordTypes = ["A", "AAAA", "CNAME", "MX", "TXT", "NS", "SRV", "CAA", "PTR"];
 

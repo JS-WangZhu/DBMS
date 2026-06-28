@@ -1,7 +1,7 @@
 <template>
   <div>
     <el-row :gutter="16">
-      <el-col :xs="24" :sm="12" :md="6" v-for="card in cards" :key="card.key">
+      <el-col class="metric-col" :xs="24" :sm="12" :md="6" v-for="card in cards" :key="card.key">
         <el-card class="metric-card">
           <div class="label">{{ card.label }}</div>
           <div class="value">{{ card.value }}</div>
@@ -48,6 +48,7 @@ const cards = reactive([
   { key: "mysql", label: "MySQL 实例", value: "0/0" },
   { key: "mongodb", label: "MongoDB 实例", value: "0/0" },
   { key: "redis", label: "Redis 实例", value: "0/0" },
+  { key: "postgresql", label: "PostgreSQL \u5b9e\u4f8b", value: "0/0" },
   { key: "doris", label: "Doris 实例", value: "0/0" },
 ]);
 
@@ -121,6 +122,7 @@ function renderDbTypeChart(data) {
     mysql: "MySQL",
     mongodb: "MongoDB",
     redis: "Redis",
+    postgresql: "PostgreSQL",
     doris: "Doris",
   };
   dbTypeChartInstance.setOption({
@@ -181,7 +183,7 @@ async function loadStats() {
   try {
     await loadClusterStats();
 
-    const tasks = ["mysql", "mongodb", "redis", "doris"].map(async (dbType) => {
+    const tasks = ["mysql", "mongodb", "redis", "postgresql", "doris"].map(async (dbType) => {
       const { data } = await listInstances(dbType);
       const instances = Array.isArray(data.data) ? data.data : [];
       setInstanceCard(dbType, instances);
@@ -215,6 +217,13 @@ onBeforeUnmount(() => {
 <style scoped>
 .metric-card {
   margin-bottom: 16px;
+}
+
+@media (min-width: 992px) {
+  .metric-col {
+    flex: 0 0 20%;
+    max-width: 20%;
+  }
 }
 
 .label {

@@ -1,5 +1,15 @@
 <template>
-  <el-card>
+  <div class='instance-page' :aria-busy='loading'>
+    <Transition name='page-loading-fade' appear>
+      <div v-if='loading' class='page-loading-mask' role='status' aria-live='polite'>
+        <div class='page-loading-indicator'>
+          <span class='page-loading-spinner' aria-hidden='true'></span>
+          <span>正在加载实例数据...</span>
+        </div>
+      </div>
+    </Transition>
+
+    <el-card>
     <template #header>
       <div class="header-row">
         <span>{{ dbLabel }} 实例管理</span>
@@ -27,9 +37,7 @@
     <div class="table-wrap">
       <el-table
         class="instance-table"
-        :data="displayRows"
-        v-loading="loading"
-        stripe
+        :data="displayRows"        stripe
         border
         size="small"
         table-layout="fixed"
@@ -133,6 +141,24 @@
         <el-table-column v-if="dbType === 'redis'" label="版本" min-width="70">
           <template #default="scope">
             {{ rowVersion(scope.row) }}
+          </template>
+        </el-table-column>
+        <el-table-column v-if="dbType === 'postgresql'" label="&#20027;&#20174;&#35282;&#33394;" min-width="78">
+          <template #default="scope">
+            <el-tag :type="postgresqlRoleTagType(postgresqlPayload(scope.row).replication_role)">{{ postgresqlRoleText(postgresqlPayload(scope.row).replication_role) }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column v-if="dbType === 'postgresql'" label="&#29256;&#26412;" min-width="90" show-overflow-tooltip>
+          <template #default="scope">
+            {{ rowVersion(scope.row) }}
+          </template>
+        </el-table-column>
+        <el-table-column v-if="dbType === 'postgresql'" label="&#36830;&#25509;&#20351;&#29992;&#29575;" min-width="105">
+          <template #default="scope">
+            <el-tag v-if="postgresqlConnectionUsageText(scope.row) !== '-'" size="small" :class="usageTagClass(postgresqlPayload(scope.row).connection_usage_pct)">
+              {{ postgresqlConnectionUsageText(scope.row) }}
+            </el-tag>
+            <span v-else>-</span>
           </template>
         </el-table-column>
         <el-table-column v-if="dbType === 'redis'" label="实例内存使用率" min-width="132" show-overflow-tooltip>
@@ -342,7 +368,7 @@
         :total="pager.total"
         :current-page="pager.page"
         :page-size="pager.page_size"
-        :page-sizes="[20, 50, 100, 200]"
+        :page-sizes="[10, 20, 50, 100, 200]"
         @current-change="onPageChange"
         @size-change="onPageSizeChange"
       />
@@ -407,7 +433,8 @@
         <el-button type="primary" :loading="saving" @click="onSubmit">{{ editingInstanceId ? "更新" : "保存" }}</el-button>
       </template>
     </el-dialog>
-  </el-card>
+    </el-card>
+  </div>
 </template>
 
 <script setup>
@@ -423,6 +450,7 @@ import { collectClusterHealth, listClusters } from "../api/modules/clusters";
   import { getInstanceHealth, getInstancesHealth } from "../api/modules/monitoring";
   import { createMysqlInstance, listMysqlInstances, mysqlInstanceDetail, mysqlReplication } from "../api/modules/mysql";
   import { createRedisInstance, listRedisInstances, redisClusterHealth } from "../api/modules/redis";
+  import { createPostgreSQLInstance, listPostgreSQLInstances, postgresqlStatus } from "../api/modules/postgresql";
   import { listBackupAgents } from "../api/modules/backups";
   import { formatBeijingTime, parseBeijingTimeMs } from "../utils/time";
 
@@ -459,6 +487,16 @@ const CONFIG = {
     instanceDetailFn: (instanceId) => getInstanceHealth(instanceId),
     showUsername: false,
   },
+  postgresql: {
+    defaultPort: 5432,
+    actionLabel: "\u72b6\u6001",
+    icon: DataAnalysis,
+    listFn: listPostgreSQLInstances,
+    createFn: createPostgreSQLInstance,
+    detailFn: postgresqlStatus,
+    instanceDetailFn: (instanceId) => getInstanceHealth(instanceId),
+    showUsername: true,
+  },
   doris: {
     defaultPort: 9030,
     actionLabel: "FE",
@@ -487,7 +525,8 @@ const isAdmin = computed(() => {
   }
 });
 
-const loading = ref(false);
+const loadingDepth = ref(1);
+const loading = computed(() => loadingDepth.value > 0);
 const saving = ref(false);
 const healthChecking = ref(false);
 const healthBatchRunning = ref(false);
@@ -508,6 +547,14 @@ const nowTickMs = ref(Date.now());
 const infoDialogVisible = ref(false);
 const infoDialogTitle = ref("");
 const infoRows = ref([]);
+
+function beginPageLoading() {
+  loadingDepth.value += 1;
+}
+
+function endPageLoading() {
+  loadingDepth.value = Math.max(0, loadingDepth.value - 1);
+}
 const lastHealthFetchAt = ref(0);
 
 let healthTimer = null;
@@ -520,12 +567,12 @@ const commonHealthMap = reactive({});
 const lastCheckAtMap = reactive({});
 const pager = reactive({
   page: 1,
-  page_size: 20,
+  page_size: 10,
   total: 0,
 });
 const pagerSnapshotBeforeCluster = reactive({
   page: 1,
-  page_size: 20,
+  page_size: 10,
 });
 const isClusterSnapshotActive = ref(false);
 const editingExtraBase = ref({});
@@ -1045,6 +1092,30 @@ function hostMetricPayload(row) {
   return commonHealthMap[row.id]?.payload_json || {};
 }
 
+
+function postgresqlPayload(row) {
+  return commonHealthMap[row.id]?.payload_json || {};
+}
+
+function postgresqlRoleText(role) {
+  if (role === "primary") return "\u4e3b\u5e93";
+  if (role === "standby") return "\u4ece\u5e93";
+  return "\u672a\u77e5";
+}
+
+function postgresqlRoleTagType(role) {
+  if (role === "primary") return "success";
+  if (role === "standby") return "warning";
+  return "info";
+}
+
+function postgresqlConnectionUsageText(row) {
+  const value = Number(postgresqlPayload(row).connection_usage_pct);
+  if (!Number.isFinite(value)) {
+    return "-";
+  }
+  return `${value.toFixed(2)}%`;
+}
   function mongoRole(row) {
     const payload = commonHealthMap[row.id]?.payload_json || {};
     const explicit = payload.mongo_role;
@@ -1623,7 +1694,7 @@ function showReplicationInfo(row) {
 }
 
   function showInstanceDetail(_row) {
-    return (dbType.value === "mysql" || dbType.value === "mongodb" || dbType.value === "redis") && typeof pageCfg.value.instanceDetailFn === "function";
+    return (dbType.value === "mysql" || dbType.value === "mongodb" || dbType.value === "redis" || dbType.value === "postgresql") && typeof pageCfg.value.instanceDetailFn === "function";
   }
 
   function safeJsonStringify(value) {
@@ -1926,7 +1997,7 @@ async function loadClusters() {
 }
 
 async function loadInstances() {
-  loading.value = true;
+  beginPageLoading();
   try {
     const baseParams = {
       keyword: keyword.value.trim() || undefined,
@@ -1962,7 +2033,7 @@ async function loadInstances() {
   } catch (error) {
     ElMessage.error(error.response?.data?.message || "加载实例失败");
   } finally {
-    loading.value = false;
+    endPageLoading();
   }
 }
 
@@ -1995,7 +2066,7 @@ async function loadAllInstancePages(params = {}) {
 
 function resetPager() {
   pager.page = 1;
-  pager.page_size = 20;
+  pager.page_size = 10;
   pager.total = 0;
 }
 
@@ -2005,7 +2076,7 @@ async function onPageChange(page) {
 }
 
 async function onPageSizeChange(size) {
-  pager.page_size = Number(size) || 20;
+  pager.page_size = Number(size) || 10;
   pager.page = 1;
   await runHealthCheck(true);
 }
@@ -2176,9 +2247,14 @@ function setupRefreshTimer() {
 }
 
 async function reloadAll(forceHealth = false) {
-  await Promise.all([loadClusters(), loadInstances()]);
-  // 刷新页面时从数据库读取健康状态
-  await loadHealthStatusFromDb(forceHealth);
+  beginPageLoading();
+  try {
+    await Promise.all([loadClusters(), loadInstances()]);
+    // 刷新页面时从数据库读取健康状态
+    await loadHealthStatusFromDb(forceHealth);
+  } finally {
+    endPageLoading();
+  }
 }
 
 function clearSearchTimer() {
@@ -2493,11 +2569,15 @@ async function removeInstance(row) {
 }
 
 onMounted(async () => {
-  resetForm();
-  resetPager();
-  await loadInstanceStatusConfig();
-  await Promise.all([loadProbeAgents(), reloadAll()]);
-  setupHealthTimer();
+  try {
+    resetForm();
+    resetPager();
+    await loadInstanceStatusConfig();
+    await Promise.all([loadProbeAgents(), reloadAll()]);
+    setupHealthTimer();
+  } finally {
+    endPageLoading();
+  }
 });
 
 onActivated(async () => {
@@ -2568,6 +2648,63 @@ watch(
 </script>
 
 <style scoped>
+.instance-page {
+  position: relative;
+  min-height: 240px;
+}
+
+.page-loading-mask {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.9);
+  backdrop-filter: blur(2px);
+  cursor: wait;
+}
+
+.page-loading-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 18px;
+  border: 1px solid #d9ecff;
+  border-radius: 8px;
+  color: #409eff;
+  background: #fff;
+  box-shadow: 0 8px 24px rgba(64, 158, 255, 0.14);
+  font-size: 14px;
+}
+
+.page-loading-spinner {
+  width: 22px;
+  height: 22px;
+  border: 3px solid #c6e2ff;
+  border-top-color: #409eff;
+  border-radius: 50%;
+  animation: page-loading-spin 0.8s linear infinite;
+}
+
+.page-loading-fade-enter-active,
+.page-loading-fade-leave-active {
+  transition: opacity 0.25s ease;
+}
+
+.page-loading-fade-enter-from,
+.page-loading-fade-leave-to {
+  opacity: 0;
+}
+
+@keyframes page-loading-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+
 .header-row {
   display: flex;
   justify-content: space-between;

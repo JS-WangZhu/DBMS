@@ -54,7 +54,7 @@ def _to_cn_time(dt):
 
 def _parse_page_args():
     page = max(_safe_int(request.args.get("page"), 1), 1)
-    page_size = _safe_int(request.args.get("page_size"), 20)
+    page_size = _safe_int(request.args.get('page_size'), 10)
     page_size = min(max(page_size, 1), 200)
     return page, page_size
 

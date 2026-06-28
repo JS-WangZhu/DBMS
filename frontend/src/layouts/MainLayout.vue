@@ -24,7 +24,7 @@
           </el-menu-item>
         </el-sub-menu>
 
-        <el-sub-menu v-if="hasAnyMenu(['mysql_instances','mysql_clusters','mysql_connections','mongodb_instances','mongodb_clusters','mongodb_connections','redis_instances','redis_clusters','redis_connections','doris_instances','doris_clusters','inspection_manage'])" index="service-manage">
+        <el-sub-menu v-if="hasAnyMenu(['mysql_instances','mysql_clusters','mysql_connections','mongodb_instances','mongodb_clusters','mongodb_connections','redis_instances','redis_clusters','redis_connections','postgresql_instances','postgresql_clusters','doris_instances','doris_clusters','inspection_manage'])" index="service-manage">
           <template #title>
             <el-icon><Menu /></el-icon>
             <span>服务管理</span>
@@ -84,6 +84,21 @@
             <el-menu-item v-if="hasMenu('redis_connections')" index="/databases/redis/connections">
               <el-icon><Promotion /></el-icon>
               <span>连接管理</span>
+            </el-menu-item>
+          </el-sub-menu>
+
+          <el-sub-menu v-if="hasAnyMenu(['postgresql_instances','postgresql_clusters'])" index="db-postgresql">
+            <template #title>
+              <el-icon class="db-brand-icon"><PostgreSQLIcon /></el-icon>
+              <span>PostgreSQL</span>
+            </template>
+            <el-menu-item v-if="hasMenu('postgresql_instances')" index="/databases/postgresql/instances">
+              <el-icon class="db-brand-icon"><PostgreSQLIcon /></el-icon>
+              <span>&#23454;&#20363;&#31649;&#29702;</span>
+            </el-menu-item>
+            <el-menu-item v-if="hasMenu('postgresql_clusters')" index="/databases/postgresql/clusters">
+              <el-icon><Coin /></el-icon>
+              <span>&#38598;&#32676;&#31649;&#29702;</span>
             </el-menu-item>
           </el-sub-menu>
 
@@ -371,6 +386,7 @@ import {
 import MysqlIcon from "../components/icons/MysqlIcon.vue";
 import MongoIcon from "../components/icons/MongoIcon.vue";
 import RedisIcon from "../components/icons/RedisIcon.vue";
+import PostgreSQLIcon from "../components/icons/PostgreSQLIcon.vue";
 import DorisIcon from "../components/icons/DorisIcon.vue";
 import { listMyUserPermissions } from "../api/modules/backups";
 
@@ -423,6 +439,8 @@ const routePermissionMap = {
   "/databases/redis/instances": "redis_instances",
   "/databases/redis/clusters": "redis_clusters",
   "/databases/redis/connections": "redis_connections",
+  "/databases/postgresql/instances": "postgresql_instances",
+  "/databases/postgresql/clusters": "postgresql_clusters",
   "/databases/doris/instances": "doris_instances",
   "/databases/doris/clusters": "doris_clusters",
   "/service/inspection": "inspection_manage",

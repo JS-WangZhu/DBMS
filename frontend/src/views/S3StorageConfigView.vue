@@ -104,7 +104,7 @@ const saving = ref(false);
 const editingId = ref(null);
 const keyword = ref("");
 const page = ref(1);
-const pageSize = ref(20);
+const pageSize = ref(10);
 const total = ref(0);
 
 const form = reactive({
@@ -159,7 +159,7 @@ async function onSearch() {
 async function onReset() {
   keyword.value = "";
   page.value = 1;
-  pageSize.value = 20;
+  pageSize.value = 10;
   await loadConfigs();
 }
 

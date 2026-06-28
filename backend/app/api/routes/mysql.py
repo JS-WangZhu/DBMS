@@ -7,6 +7,7 @@ from app.extensions import db
 from app.models.db_asset import DatabaseInstance
 from app.models.monitor_snapshot import snapshot_model_for_instance
 from app.services.monitor_snapshot_service import latest_snapshot_for_instance
+from app.services.redis_cache import set_latest_snapshot
 from app.services.audit import log_audit
 from app.services.collectors import collect_instance_metrics
 from app.services.instance_service import create_instance, list_instances_paginated
@@ -14,6 +15,34 @@ from app.utils.crypto import decrypt_secret
 from app.utils.response import error_response, ok_response
 
 bp = Blueprint("mysql", __name__, url_prefix="/mysql")
+
+
+def _store_manual_status_snapshot(instance, collected_payload):
+    payload = collected_payload if isinstance(collected_payload, dict) else {}
+    collected_at = datetime.now()
+    payload.setdefault("ok", False)
+    payload.setdefault("collected_at", collected_at.isoformat())
+    running_status = "running" if payload.get("ok") and payload.get("ping_ok") else "error"
+    instance.running_status = running_status
+    set_latest_snapshot(
+        db_type=instance.db_type,
+        instance_id=instance.id,
+        metric_type="status",
+        payload_json=payload,
+        collected_at=collected_at,
+        running_status=running_status,
+    )
+    snapshot_model = snapshot_model_for_instance(instance)
+    db.session.add(
+        snapshot_model(
+            instance_id=instance.id,
+            metric_type="status",
+            payload_json=payload,
+            collected_at=collected_at,
+        )
+    )
+    db.session.commit()
+    return payload, running_status
 
 
 def _infer_replication_role(payload):
@@ -128,7 +157,7 @@ def _instance_detail_view(instance_id, payload, source, running_status="unknown"
 @active_user_required
 def mysql_list_instances():
     page = request.args.get("page", 1)
-    page_size = request.args.get("page_size", 20)
+    page_size = request.args.get('page_size', 10)
     keyword = request.args.get("keyword")
     cluster_id = request.args.get("cluster_id")
     namespace = request.args.get("namespace")
@@ -184,18 +213,11 @@ def mysql_replication(instance_id):
     if refresh:
         password = decrypt_secret(instance.password_encrypted) if instance.password_encrypted else None
         live = collect_instance_metrics(instance=instance, password=password)
+        live, running_status = _store_manual_status_snapshot(instance, live)
         if live.get("ok"):
-            snapshot_model = snapshot_model_for_instance(instance)
-            new_snapshot = snapshot_model(instance_id=instance.id, metric_type="status", payload_json=live)
-            db.session.add(new_snapshot)
-            instance.running_status = "running" if live.get("ping_ok") else "error"
-            db.session.commit()
-            running_status = instance.running_status
             return ok_response(data=_replication_view(instance.id, live, source="live", running_status=running_status))
 
         if snapshot_payload:
-            instance.running_status = "error"
-            db.session.commit()
             data = _replication_view(
                 instance.id,
                 snapshot_payload,
@@ -226,18 +248,11 @@ def mysql_instance_detail(instance_id):
     if refresh:
         password = decrypt_secret(instance.password_encrypted) if instance.password_encrypted else None
         live = collect_instance_metrics(instance=instance, password=password)
+        live, running_status = _store_manual_status_snapshot(instance, live)
         if live.get("ok"):
-            snapshot_model = snapshot_model_for_instance(instance)
-            new_snapshot = snapshot_model(instance_id=instance.id, metric_type="status", payload_json=live)
-            db.session.add(new_snapshot)
-            instance.running_status = "running" if live.get("ping_ok") else "error"
-            db.session.commit()
-            running_status = instance.running_status
             return ok_response(data=_instance_detail_view(instance.id, live, source="live", running_status=running_status))
 
         if snapshot_payload:
-            instance.running_status = "error"
-            db.session.commit()
             return ok_response(
                 data=_instance_detail_view(
                     instance.id,

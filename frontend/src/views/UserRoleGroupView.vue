@@ -116,7 +116,7 @@ const clusterKeyword = ref("");
 
 const pager = reactive({
   page: 1,
-  pageSize: 20,
+  pageSize: 10,
   total: 0,
 });
 const clusterPager = reactive({

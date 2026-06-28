@@ -75,7 +75,7 @@
         :total="displayRows.length"
         :current-page="pager.page"
         :page-size="pager.page_size"
-        :page-sizes="[20, 50, 100, 200]"
+        :page-sizes="[10, 20, 50, 100, 200]"
         @current-change="onPageChange"
         @size-change="onPageSizeChange"
       />
@@ -373,7 +373,7 @@ const selectedStatus = ref("");
 const selectedClusterId = ref(null);
 const pager = reactive({
   page: 1,
-  page_size: 20,
+  page_size: 10,
 });
 
 const dialogVisible = ref(false);
@@ -586,7 +586,7 @@ function onPageChange(page) {
 }
 
 function onPageSizeChange(size) {
-  pager.page_size = Number(size) || 20;
+  pager.page_size = Number(size) || 10;
   pager.page = 1;
 }
 

@@ -1,8 +1,11 @@
+from datetime import datetime, timedelta
+
 from flask import Blueprint, current_app, request
 
 from app.api.routes.common import get_current_user, list_allowed_cluster_ids, require_menu_permission
 from app.extensions import db, scheduler
 from app.models.db_asset import DatabaseCluster
+from app.models.inspection import InspectionAlert
 from app.models.notify_target import BackupNotifyTarget
 from app.services.audit import log_audit
 from app.services.redis_cache import get_json
@@ -50,6 +53,45 @@ def get_overview():
     )
     return ok_response(data=data)
 
+
+@bp.put("/alerts/<int:alert_id>/mute")
+@require_menu_permission("inspection_manage")
+def mute_alert(alert_id):
+    payload = request.get_json(silent=True) or {}
+    try:
+        duration_minutes = int(payload.get("duration_minutes"))
+    except (TypeError, ValueError):
+        return error_response("duration_minutes must be an integer", code=400)
+    if duration_minutes < 0:
+        return error_response("duration_minutes must be >= 0", code=400)
+
+    alert = InspectionAlert.query.get_or_404(alert_id)
+    user = get_current_user()
+    if user and user.role != "admin":
+        allowed = set(list_allowed_cluster_ids("query") or [])
+        if alert.cluster_id not in allowed:
+            return error_response("no permission for this inspection alert", code=403)
+    now = datetime.now()
+    if duration_minutes == 0:
+        alert.muted_at = None
+        alert.muted_until = None
+        action = "inspection.alert.unmute"
+    else:
+        alert.muted_at = now
+        alert.muted_until = now + timedelta(minutes=min(duration_minutes, 525600))
+        action = "inspection.alert.mute"
+    db.session.commit()
+    log_audit(
+        user_id=None,
+        action=action,
+        target_type="inspection_alert",
+        target_id=str(alert.id),
+        detail={
+            "duration_minutes": duration_minutes,
+            "muted_until": alert.muted_until.isoformat() if alert.muted_until else None,
+        },
+    )
+    return ok_response(data=alert.to_dict())
 
 @bp.post("/run")
 @require_menu_permission("inspection_manage")

@@ -141,15 +141,19 @@ def _try_collect_arbiter_without_auth(instance):
 
 def collect_mongodb_status(instance, password):
     host_metrics = collect_node_exporter_metrics(instance)
+    client = None
     try:
         from pymongo import MongoClient
         host = instance.resolved_ip or instance.host_input
         extra = instance.extra_json if isinstance(instance.extra_json, dict) else {}
+        tls_enabled = _as_bool(extra.get("tls", extra.get("ssl")), default=False)
+        direct_connection = _as_bool(extra.get("direct_connection"), default=False)
         client_opts = {
             "serverSelectionTimeoutMS": 2000,
             "connectTimeoutMS": 2000,
             "socketTimeoutMS": 2000,
-            "ssl": False,
+            "tls": tls_enabled,
+            "directConnection": direct_connection,
             "appname": "dbms-monitor",
         }
 
@@ -278,9 +282,7 @@ def collect_mongodb_status(instance, password):
             role = "secondary"
 
         if topology is None and hello.get("setName"):
-            topology = "shard"
-            if role is None:
-                role = "shard"
+            topology = "replica_set"
 
         repl_summary = {"set": hello.get("setName"), "myState": None, "members": 0}
         rs_status = None
@@ -329,7 +331,13 @@ def collect_mongodb_status(instance, password):
         except Exception:
             pass
 
+        try:
+            rs_conf = _bson_to_json(client.admin.command("replSetGetConfig"))
+        except Exception:
+            rs_conf = None
+
         client.close()
+        client = None
 
         uptime = status.get("uptime")
         started_at = None
@@ -373,6 +381,11 @@ def collect_mongodb_status(instance, password):
             **host_metrics,
         }
     except Exception as exc:
+        if client is not None:
+            try:
+                client.close()
+            except Exception:
+                pass
         exc_text = str(exc)
         if "Authentication failed" in exc_text:
             try:
@@ -387,12 +400,12 @@ def collect_mongodb_status(instance, password):
         auth_source = (extra.get("auth_source") or extra.get("auth_db") or "admin").strip()
         auth_mech = _normalize_auth_mechanism(extra.get("auth_mechanism")) or "auto"
         direct_connection = _as_bool(extra.get("direct_connection"), default=False)
+        tls_enabled = _as_bool(extra.get("tls", extra.get("ssl")), default=False)
         host = instance.resolved_ip or instance.host_input
         user = instance.username or ""
-        raw_password = password or ""
         safe_user = user if user else "<empty>"
-        safe_password = raw_password if raw_password else "<empty>"
-        conn_parts = [f"authSource={auth_source}", f"directConnection={direct_connection}", "tls=false"]
+        safe_password = "***" if password else "<empty>"
+        conn_parts = [f"authSource={auth_source}", f"directConnection={direct_connection}", f"tls={str(tls_enabled).lower()}"]
         if auth_mech and auth_mech != "auto":
             conn_parts.append(f"authMechanism={auth_mech}")
         conn_query = "&".join(conn_parts)

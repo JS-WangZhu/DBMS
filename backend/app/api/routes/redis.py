@@ -14,7 +14,7 @@ bp = Blueprint("redis", __name__, url_prefix="/redis")
 @active_user_required
 def redis_list_instances():
     page = request.args.get("page", 1)
-    page_size = request.args.get("page_size", 20)
+    page_size = request.args.get('page_size', 10)
     keyword = request.args.get("keyword")
     cluster_id = request.args.get("cluster_id")
     namespace = request.args.get("namespace")

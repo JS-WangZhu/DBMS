@@ -7,7 +7,7 @@ from app.services.dns_resolver import resolve_and_update_instance, resolve_host
 from app.services.redis_cache import KEY_INSTANCE_LIST_PREFIX, delete_pattern, get_json, set_json
 from app.utils.crypto import encrypt_secret
 
-VALID_DB_TYPES = {"mysql", "mongodb", "redis", "doris"}
+VALID_DB_TYPES = {"mysql", "mongodb", "redis", "postgresql", "doris"}
 
 
 def _normalize_access_binding(access_mode, probe_agent_id):
@@ -182,7 +182,7 @@ def list_instances_paginated(
     db_type=None,
     enabled=None,
     page=1,
-    page_size=20,
+    page_size=10,
     keyword=None,
     cluster_id=None,
     namespace=None,
@@ -196,7 +196,7 @@ def list_instances_paginated(
     try:
         page_size = int(page_size)
     except (TypeError, ValueError):
-        page_size = 20
+        page_size = 10
 
     page = max(page, 1)
     page_size = max(1, min(page_size, 200))

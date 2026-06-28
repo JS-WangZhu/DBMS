@@ -168,7 +168,7 @@ def list_results():
     if task_type:
         query = query.filter(ScheduledTask.task_type == task_type)
     page = max(1, _safe_int(request.args.get("page"), 1))
-    page_size = max(1, min(_safe_int(request.args.get("page_size"), 20), 100))
+    page_size = max(1, min(_safe_int(request.args.get('page_size'), 10), 100))
     total = query.count()
     rows = (
         query.order_by(ScheduledTaskRun.id.desc())

@@ -360,7 +360,7 @@ function onReset() {
   filters.keyword = "";
   filters.range = [];
   page.value = 1;
-  pageSize.value = 20;
+  pageSize.value = 10;
   loadRecords();
 }
 

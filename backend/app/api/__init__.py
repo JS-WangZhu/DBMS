@@ -21,6 +21,7 @@ from app.api.routes.mcp_platform import bp as mcp_platform_bp
 from app.api.routes.mongodb import bp as mongodb_bp
 from app.api.routes.monitoring import bp as monitoring_bp
 from app.api.routes.mysql import bp as mysql_bp
+from app.api.routes.postgresql import bp as postgresql_bp
 from app.api.routes.redis import bp as redis_bp
 from app.api.routes.s3_storage import bp as s3_storage_bp
 from app.api.routes.sso_config import bp as sso_config_bp
@@ -44,6 +45,7 @@ def register_blueprints(app):
     api_v1.register_blueprint(mysql_bp)
     api_v1.register_blueprint(mongodb_bp)
     api_v1.register_blueprint(redis_bp)
+    api_v1.register_blueprint(postgresql_bp)
     api_v1.register_blueprint(doris_bp)
     api_v1.register_blueprint(monitoring_bp)
     api_v1.register_blueprint(metrics_bp)

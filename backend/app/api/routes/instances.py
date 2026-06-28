@@ -66,7 +66,7 @@ def create_instance():
     db_type = payload.get("db_type")
     if not db_type:
         return error_response("db_type is required", code=400)
-    if db_type not in {"mysql", "redis", "doris", "mongodb"}:
+    if db_type not in {"mysql", "redis", "postgresql", "doris", "mongodb"}:
         return error_response("invalid db_type", code=400)
 
     instance, err = create_instance_by_type(payload, db_type=db_type)

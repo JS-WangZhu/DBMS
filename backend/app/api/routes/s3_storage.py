@@ -16,7 +16,7 @@ def list_configs():
     enabled = request.args.get("enabled")
     keyword = (request.args.get("keyword") or "").strip()
     page = max(int(request.args.get("page", "1")), 1)
-    page_size = min(max(int(request.args.get("page_size", "20")), 1), 200)
+    page_size = min(max(int(request.args.get('page_size', '10')), 1), 200)
     query = S3StorageConfig.query
     if enabled is not None:
         query = query.filter_by(enabled=(enabled.lower() == "true"))

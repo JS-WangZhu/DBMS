@@ -2,7 +2,7 @@ from app.extensions import db
 from app.models.base import TimestampMixin
 
 
-DB_TYPE_ENUM = db.Enum("mysql", "redis", "doris", "mongodb", name="db_type_enum", native_enum=False)
+DB_TYPE_ENUM = db.Enum("mysql", "redis", "postgresql", "doris", "mongodb", name="db_type_enum", native_enum=False)
 
 
 class DatabaseCluster(db.Model, TimestampMixin):

@@ -170,7 +170,7 @@ const searchKeyword = ref("");
 const roleGroupOptions = ref([]);
 const pager = reactive({
   page: 1,
-  pageSize: 20,
+  pageSize: 10,
   total: 0,
 });
 

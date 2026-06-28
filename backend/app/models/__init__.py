@@ -14,6 +14,7 @@ from app.models.monitor_snapshot import (
     MonitorSnapshotDoris,
     MonitorSnapshotMongoDB,
     MonitorSnapshotMySQL,
+    MonitorSnapshotPostgreSQL,
     MonitorSnapshotRedis,
 )
 from app.models.notify_target import BackupNotifyTarget
@@ -52,6 +53,7 @@ __all__ = [
     "MonitorSnapshotMySQL",
     "MonitorSnapshotMongoDB",
     "MonitorSnapshotRedis",
+    "MonitorSnapshotPostgreSQL",
     "MonitorSnapshotDoris",
     "S3StorageConfig",
     "SsoConfig",

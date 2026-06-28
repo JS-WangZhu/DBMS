@@ -1,6 +1,7 @@
 from app.services.collectors.doris import collect_doris_status
 from app.services.collectors.mongodb import collect_mongodb_status
 from app.services.collectors.mysql import collect_mysql_status
+from app.services.collectors.postgresql import collect_postgresql_status
 from app.services.collectors.redisdb import collect_redis_status
 
 
@@ -9,6 +10,7 @@ COLLECTOR_MAP = {
     "doris": collect_doris_status,
     "mongodb": collect_mongodb_status,
     "redis": collect_redis_status,
+    "postgresql": collect_postgresql_status,
 }
 
 

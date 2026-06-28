@@ -17,9 +17,9 @@ def _page_params():
     except ValueError:
         page = 1
     try:
-        page_size = int(request.args.get("page_size", "20"))
+        page_size = int(request.args.get('page_size', '10'))
     except ValueError:
-        page_size = 20
+        page_size = 10
     return max(page, 1), min(max(page_size, 1), 200)
 
 

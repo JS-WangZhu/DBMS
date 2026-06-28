@@ -50,6 +50,10 @@ def metrics():
     redis_instance_running_total = _count(
         DatabaseInstance.query.filter(DatabaseInstance.db_type == "redis", DatabaseInstance.running_status == "running")
     )
+    postgresql_instance_total = _count(DatabaseInstance.query.filter(DatabaseInstance.db_type == "postgresql"))
+    postgresql_instance_running_total = _count(
+        DatabaseInstance.query.filter(DatabaseInstance.db_type == "postgresql", DatabaseInstance.running_status == "running")
+    )
     doris_instance_total = _count(DatabaseInstance.query.filter(DatabaseInstance.db_type == "doris"))
     doris_instance_running_total = _count(
         DatabaseInstance.query.filter(DatabaseInstance.db_type == "doris", DatabaseInstance.running_status == "running")
@@ -102,12 +106,14 @@ def metrics():
         f'dbms_instances_by_type_total{{db_type="mysql"}} {mysql_instance_total}',
         f'dbms_instances_by_type_total{{db_type="mongodb"}} {mongodb_instance_total}',
         f'dbms_instances_by_type_total{{db_type="redis"}} {redis_instance_total}',
+        f'dbms_instances_by_type_total{{db_type="postgresql"}} {postgresql_instance_total}',
         f'dbms_instances_by_type_total{{db_type="doris"}} {doris_instance_total}',
         "# HELP dbms_instances_running_by_type_total Total number of running instances by database type.",
         "# TYPE dbms_instances_running_by_type_total gauge",
         f'dbms_instances_running_by_type_total{{db_type="mysql"}} {mysql_instance_running_total}',
         f'dbms_instances_running_by_type_total{{db_type="mongodb"}} {mongodb_instance_running_total}',
         f'dbms_instances_running_by_type_total{{db_type="redis"}} {redis_instance_running_total}',
+        f'dbms_instances_running_by_type_total{{db_type="postgresql"}} {postgresql_instance_running_total}',
         f'dbms_instances_running_by_type_total{{db_type="doris"}} {doris_instance_running_total}',
         "# HELP dbms_notify_targets_total Total number of notification targets.",
         "# TYPE dbms_notify_targets_total gauge",

@@ -104,7 +104,7 @@ const selectedRows = ref([]);
 const detail = ref(null);
 const detailVisible = ref(false);
 const filters = reactive({ task_name: "", task_type: "", status: "" });
-const pager = reactive({ page: 1, page_size: 20, total: 0 });
+const pager = reactive({ page: 1, page_size: 10, total: 0 });
 
 function taskTypeText(type) {
   return { shell: "Shell脚本", python: "Python脚本", http: "HTTP请求", sql: "SQL请求" }[type] || type;

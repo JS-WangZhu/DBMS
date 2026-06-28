@@ -15,6 +15,7 @@ from app.models.ha_config import HAConfig
 from app.models.monitor_snapshot import snapshot_model_for_instance
 from app.models.user import User
 from app.services.monitor_snapshot_service import latest_snapshot_for_instance
+from app.services.redis_cache import set_latest_snapshot
 from app.services.audit import log_audit
 from app.services.collectors import collect_instance_metrics
 from app.services.dns_resolver import list_host_addresses, resolve_host
@@ -189,7 +190,7 @@ def _normalize_data_access_route(value):
 
 def _parse_page_args():
     page = max(_safe_int(request.args.get("page"), 1), 1)
-    page_size = min(max(_safe_int(request.args.get("page_size"), 20), 1), 200)
+    page_size = min(max(_safe_int(request.args.get('page_size'), 10), 1), 200)
     return page, page_size
 
 
@@ -404,7 +405,7 @@ def create_cluster():
 
     if not name or not db_type:
         return error_response("name and db_type are required", code=400)
-    if db_type not in {"mysql", "redis", "doris", "mongodb"}:
+    if db_type not in {"mysql", "redis", "postgresql", "doris", "mongodb"}:
         return error_response("invalid db_type", code=400)
     try:
         ha_mode = _normalize_ha_mode(payload.get("ha_mode"), db_type)
@@ -506,13 +507,22 @@ def collect_cluster_health(cluster_id):
             payload.setdefault("collected_at", datetime.now().isoformat())
             failed = _snapshot_failed(payload)
             instance.running_status = "error" if failed else "running"
+            collected_at = datetime.now()
+            set_latest_snapshot(
+                db_type=instance.db_type,
+                instance_id=instance.id,
+                metric_type="status",
+                payload_json=payload,
+                collected_at=collected_at,
+                running_status=instance.running_status,
+            )
 
             snapshot_model = snapshot_model_for_instance(instance)
             snapshot = snapshot_model(
                 instance_id=instance.id,
                 metric_type="status",
                 payload_json=payload,
-                collected_at=datetime.now(),
+                collected_at=collected_at,
             )
             db.session.add(snapshot)
             payload_map[instance.id] = payload
@@ -526,12 +536,22 @@ def collect_cluster_health(cluster_id):
             )
         except Exception as e:
             instance.running_status = "error"
+            collected_at = datetime.now()
+            failed_payload = {"ok": False, "error": str(e), "collected_at": collected_at.isoformat()}
+            set_latest_snapshot(
+                db_type=instance.db_type,
+                instance_id=instance.id,
+                metric_type="status",
+                payload_json=failed_payload,
+                collected_at=collected_at,
+                running_status=instance.running_status,
+            )
             snapshot_model = snapshot_model_for_instance(instance)
             snapshot = snapshot_model(
                 instance_id=instance.id,
                 metric_type="status",
-                payload_json={"ok": False, "error": str(e), "collected_at": datetime.now().isoformat()},
-                collected_at=datetime.now(),
+                payload_json=failed_payload,
+                collected_at=collected_at,
             )
             db.session.add(snapshot)
             payload_map[instance.id] = snapshot.payload_json
@@ -570,7 +590,7 @@ def collect_cluster_health(cluster_id):
 @bp.get("/<int:cluster_id>/health/latest")
 @active_user_required
 def cluster_latest_health(cluster_id):
-    """获取集群所有实例的最新健康状态（从数据库读取）"""
+    """获取集群所有实例的最新健康状态（缓存优先，数据库兜底）"""
     cluster = DatabaseCluster.query.get_or_404(cluster_id)
     instances = DatabaseInstance.query.filter_by(cluster_id=cluster.id, enabled=True).all()
 

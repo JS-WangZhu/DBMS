@@ -67,7 +67,7 @@ export function listMysqlTableColumns(clusterId, database, table, route = {}) {
   });
 }
 
-export function listQueryHistory(page = 1, pageSize = 20, filters = {}) {
+export function listQueryHistory(page = 1, pageSize = 10, filters = {}) {
   const params = {
     page,
     page_size: pageSize,
@@ -86,7 +86,7 @@ export function listQueryHistory(page = 1, pageSize = 20, filters = {}) {
   });
 }
 
-export function listChangeHistory(page = 1, pageSize = 20, filters = {}) {
+export function listChangeHistory(page = 1, pageSize = 10, filters = {}) {
   const params = {
     page,
     page_size: pageSize,

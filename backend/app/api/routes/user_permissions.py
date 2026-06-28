@@ -36,6 +36,8 @@ MENU_CATALOG = [
     {"key": "redis_instances", "label": "Redis 实例管理"},
     {"key": "redis_clusters", "label": "Redis 集群管理"},
     {"key": "redis_connections", "label": "Redis 连接管理"},
+    {"key": "postgresql_instances", "label": "PostgreSQL \u5b9e\u4f8b\u7ba1\u7406"},
+    {"key": "postgresql_clusters", "label": "PostgreSQL \u96c6\u7fa4\u7ba1\u7406"},
     {"key": "doris_instances", "label": "Doris 实例管理"},
     {"key": "doris_clusters", "label": "Doris 集群管理"},
     {"key": "inspection_manage", "label": "巡检管理"},
@@ -89,9 +91,9 @@ def _parse_page_params():
     except ValueError:
         page = 1
     try:
-        page_size = int(request.args.get("page_size", "20"))
+        page_size = int(request.args.get('page_size', '10'))
     except ValueError:
-        page_size = 20
+        page_size = 10
     page = max(page, 1)
     page_size = min(max(page_size, 1), 200)
     return page, page_size

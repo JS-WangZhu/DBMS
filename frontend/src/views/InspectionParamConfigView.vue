@@ -67,6 +67,13 @@
               <span class="hint-text">告警恢复后推送提示</span>
             </el-form-item>
           </el-col>
+          <el-col :xs="24" :sm="12">
+            <el-form-item label="持续告警间隔">
+              <el-input-number v-model="form.notify_repeat_minutes" :min="1" :max="10080" controls-position="right" style="width: 180px" />
+              <span class="unit-text">分钟</span>
+              <span class="hint-text">异常未恢复时按此间隔继续通知，默认60分钟</span>
+            </el-form-item>
+          </el-col>
           <el-col :span="24">
             <el-form-item label="通知地址">
               <el-select
@@ -176,6 +183,25 @@
           </el-row>
         </div>
 
+        <!-- PostgreSQL -->
+        <div class="threshold-group">
+          <div class="threshold-group-title">
+            <span class="group-badge group-badge--postgresql">PostgreSQL</span>
+          </div>
+          <el-row :gutter="24">
+            <el-col :xs="24" :sm="12">
+              <el-form-item :label="'\u590d\u5236\u5ef6\u8fdf\u9608\u503c\uff08\u79d2\uff09'">
+                <el-input-number v-model="form.thresholds.postgresql_replication_lag_seconds" :min="1" controls-position="right" style="width: 180px" />
+              </el-form-item>
+            </el-col>
+            <el-col :xs="24" :sm="12">
+              <el-form-item :label="'\u8fde\u63a5\u4f7f\u7528\u7387\uff08%\uff09'">
+                <el-input-number v-model="form.thresholds.postgresql_connection_usage_pct" :min="1" :max="100" controls-position="right" style="width: 180px" />
+              </el-form-item>
+            </el-col>
+          </el-row>
+        </div>
+
         <!-- 主机 -->
         <div class="threshold-group">
           <div class="threshold-group-title">
@@ -220,6 +246,7 @@ const form = reactive({
   collect_timeout_seconds: 8,
   notify_enabled: true,
   notify_recovery: true,
+  notify_repeat_minutes: 60,
   notify_target_ids: [],
   muted_cluster_ids: [],
   thresholds: {
@@ -230,6 +257,8 @@ const form = reactive({
     redis_memory_usage_pct: 90,
     redis_connection_usage_pct: 90,
     host_cpu_usage_pct: 90,
+    postgresql_replication_lag_seconds: 60,
+    postgresql_connection_usage_pct: 90,
     host_memory_usage_pct: 90,
     host_data_disk_usage_pct: 90,
   },
@@ -241,6 +270,7 @@ function applyConfig(data) {
   form.collect_timeout_seconds = data.collect_timeout_seconds || 8;
   form.notify_enabled = !!data.notify_enabled;
   form.notify_recovery = !!data.notify_recovery;
+  form.notify_repeat_minutes = Math.max(1, Math.round(Number(data.notify_repeat_seconds || 3600) / 60));
   form.notify_target_ids = Array.isArray(data.notify_target_ids) ? [...data.notify_target_ids] : [];
   form.muted_cluster_ids = Array.isArray(data.muted_cluster_ids) ? [...data.muted_cluster_ids] : [];
   form.thresholds = {
@@ -272,6 +302,7 @@ async function saveConfig() {
       collect_timeout_seconds: form.collect_timeout_seconds,
       notify_enabled: form.notify_enabled,
       notify_recovery: form.notify_recovery,
+      notify_repeat_seconds: Math.max(60, Number(form.notify_repeat_minutes || 60) * 60),
       notify_target_ids: form.notify_target_ids,
       muted_cluster_ids: form.muted_cluster_ids,
       thresholds: form.thresholds,
@@ -389,6 +420,11 @@ onMounted(loadData);
   color: #2e7d32;
   background: #e8f5e9;
   border: 1px solid #c8e6c9;
+}
+.group-badge--postgresql {
+  color: #336791;
+  background: #e8f1f8;
+  border: 1px solid #b7d3e8;
 }
 .group-badge--redis {
   color: #c62828;

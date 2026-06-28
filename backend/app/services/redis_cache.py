@@ -19,6 +19,8 @@ KEY_QUERY_OPS = "dbms:config:data_query_ops"
 KEY_INSTANCE_LIST_PREFIX = "dbms:instances:list"
 KEY_INSTANCE_STATUS_PREFIX = "dbms:instance_status"
 KEY_SNAPSHOT_PREFIX = "dbms:latest_snapshot"
+KEY_LAST_SUCCESS_SNAPSHOT_PREFIX = "dbms:last_success_snapshot"
+LATEST_SNAPSHOT_TTL_SECONDS = 600
 KEY_INSPECTION_SUMMARY = "dbms:inspection:last_summary"
 
 
@@ -121,6 +123,10 @@ def snapshot_key(db_type: str, instance_id: int, metric_type: str = "status") ->
     return f"{KEY_SNAPSHOT_PREFIX}:{db_type}:{metric_type}:{int(instance_id)}"
 
 
+def last_success_snapshot_key(db_type: str, instance_id: int, metric_type: str = "status") -> str:
+    return f"{KEY_LAST_SUCCESS_SNAPSHOT_PREFIX}:{db_type}:{metric_type}:{int(instance_id)}"
+
+
 def instance_status_key(instance_id: int) -> str:
     return f"{KEY_INSTANCE_STATUS_PREFIX}:{int(instance_id)}"
 
@@ -163,6 +169,28 @@ def cached_snapshot_from_dict(data: dict):
     )
 
 
+def set_last_success_snapshot(
+    db_type: str,
+    instance_id: int,
+    metric_type: str,
+    payload_json: dict,
+    collected_at: Optional[datetime] = None,
+) -> bool:
+    collected_at = collected_at or datetime.now()
+    return set_json(
+        last_success_snapshot_key(db_type, instance_id, metric_type),
+        {
+            "id": None,
+            "instance_id": int(instance_id),
+            "db_type": db_type,
+            "metric_type": metric_type,
+            "payload_json": payload_json if isinstance(payload_json, dict) else {},
+            "collected_at": collected_at.isoformat(),
+        },
+        ex=LATEST_SNAPSHOT_TTL_SECONDS,
+    )
+
+
 def set_latest_snapshot(
     db_type: str,
     instance_id: int,
@@ -180,7 +208,17 @@ def set_latest_snapshot(
         "payload_json": payload_json if isinstance(payload_json, dict) else {},
         "collected_at": collected_at.isoformat(),
     }
-    ok = set_json(snapshot_key(db_type, instance_id, metric_type), payload)
+    ok = set_json(snapshot_key(db_type, instance_id, metric_type), payload, ex=LATEST_SNAPSHOT_TTL_SECONDS)
+    snapshot_payload = payload["payload_json"]
+    succeeded = snapshot_payload.get("ok") is not False and snapshot_payload.get("ping_ok") is not False
+    if metric_type == "status" and succeeded:
+        set_last_success_snapshot(
+            db_type=db_type,
+            instance_id=instance_id,
+            metric_type=metric_type,
+            payload_json=snapshot_payload,
+            collected_at=collected_at,
+        )
     if metric_type == "status" and running_status:
         set_json(
             instance_status_key(instance_id),
@@ -191,12 +229,35 @@ def set_latest_snapshot(
                 "collected_at": collected_at.isoformat(),
                 "payload_json": payload["payload_json"],
             },
+            ex=LATEST_SNAPSHOT_TTL_SECONDS,
         )
     return ok
 
 
 def get_latest_snapshot(db_type: str, instance_id: int, metric_type: str = "status"):
     return cached_snapshot_from_dict(get_json(snapshot_key(db_type, instance_id, metric_type)))
+
+
+def get_last_success_snapshot(db_type: str, instance_id: int, metric_type: str = "status"):
+    return cached_snapshot_from_dict(get_json(last_success_snapshot_key(db_type, instance_id, metric_type)))
+
+
+def get_last_success_snapshots(db_type: str, instance_ids: Iterable[int], metric_type: str = "status") -> dict:
+    client = get_client()
+    ids = [int(item) for item in instance_ids if item is not None]
+    if not client or not ids:
+        return {}
+    try:
+        keys = [last_success_snapshot_key(db_type, item, metric_type) for item in ids]
+        values = client.mget(keys)
+    except Exception:
+        return {}
+    result = {}
+    for raw in values:
+        snap = cached_snapshot_from_dict(_loads(raw))
+        if snap:
+            result[snap.instance_id] = snap
+    return result
 
 
 def get_latest_snapshots(db_type: str, instance_ids: Iterable[int], metric_type: str = "status") -> dict:

@@ -71,7 +71,7 @@
         :total="displayRows.length"
         :current-page="pager.page"
         :page-size="pager.page_size"
-        :page-sizes="[20, 50, 100, 200]"
+        :page-sizes="[10, 20, 50, 100, 200]"
         @current-change="onPageChange"
         @size-change="onPageSizeChange"
       />
@@ -201,7 +201,7 @@ const selectedBusinessLine = ref("");
 const selectedEnvironment = ref("");
 const selectedClusterId = ref(null);
 
-const pager = reactive({ page: 1, page_size: 20 });
+const pager = reactive({ page: 1, page_size: 10 });
 
 const probeDialogVisible = ref(false);
 const probing = ref(false);

@@ -34,6 +34,7 @@ def ensure_backup_extra_columns():
         "user_menu_permissions",
         "user_cluster_permissions",
         "api_keys",
+        "inspection_alerts",
     ]:
         try:
             table_columns[table] = {col["name"] for col in inspector.get_columns(table)}
@@ -41,10 +42,21 @@ def ensure_backup_extra_columns():
             table_columns[table] = set()
 
     statements = []
+    if engine.dialect.name == "mysql":
+        asset_types = "'mysql','redis','postgresql','doris','mongodb'"
+        statements.extend([
+            f"ALTER TABLE db_clusters MODIFY COLUMN db_type ENUM({asset_types}) NOT NULL",
+            f"ALTER TABLE db_instances MODIFY COLUMN db_type ENUM({asset_types}) NOT NULL",
+        ])
+
     if table_columns["db_instances"] and "access_mode" not in table_columns["db_instances"]:
         statements.append("ALTER TABLE db_instances ADD COLUMN access_mode VARCHAR(16) NOT NULL DEFAULT 'server'")
     if table_columns["db_instances"] and "probe_agent_id" not in table_columns["db_instances"]:
         statements.append("ALTER TABLE db_instances ADD COLUMN probe_agent_id INTEGER NULL")
+    if table_columns["inspection_alerts"] and "muted_at" not in table_columns["inspection_alerts"]:
+        statements.append("ALTER TABLE inspection_alerts ADD COLUMN muted_at DATETIME NULL")
+    if table_columns["inspection_alerts"] and "muted_until" not in table_columns["inspection_alerts"]:
+        statements.append("ALTER TABLE inspection_alerts ADD COLUMN muted_until DATETIME NULL")
     if table_columns["db_clusters"] and "namespace" not in table_columns["db_clusters"]:
         statements.append("ALTER TABLE db_clusters ADD COLUMN namespace VARCHAR(64) NOT NULL DEFAULT 'default'")
     if table_columns["db_clusters"] and "business_line" not in table_columns["db_clusters"]:

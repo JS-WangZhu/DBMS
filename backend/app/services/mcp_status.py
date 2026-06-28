@@ -6,7 +6,7 @@ from app.services.monitor_snapshot_service import latest_snapshots_by_instance_i
 
 
 STALE_SECONDS = 600
-DB_TYPES = {"mysql", "mongodb", "redis", "doris"}
+DB_TYPES = {"mysql", "mongodb", "redis", "postgresql", "doris"}
 
 
 def _iso(value):
@@ -43,6 +43,8 @@ def _role(instance, payload):
         return _pick(payload, "mongo_role", "role", "topology") or instance.role_label
     if instance.db_type == "redis":
         return _pick(payload, "role", "redis_role") or instance.role_label
+    if instance.db_type == "postgresql":
+        return _pick(payload, "replication_role") or instance.role_label
     return _pick(payload, "role") or instance.role_label
 
 
