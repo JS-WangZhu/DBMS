@@ -9,7 +9,7 @@ from app.api.routes.common import active_user_required, admin_required
 from app.extensions import db, scheduler
 from app.models.backup_agent import BackupAgent
 from app.models.backup import BackupLog, BackupPolicy, _utc_isoformat
-from app.models.db_asset import DatabaseInstance
+from app.models.db_asset import DatabaseCluster, DatabaseInstance
 from app.models.notify_target import BackupNotifyTarget
 from app.models.s3_storage_config import S3StorageConfig
 from app.services.audit import log_audit
@@ -914,69 +914,73 @@ def backup_overview():
     hours = max(1, min(hours, 168))
     cutoff = datetime.utcnow() - timedelta(hours=hours)
 
-    rows = (
+    clusters = DatabaseCluster.query.order_by(DatabaseCluster.name.asc(), DatabaseCluster.id.asc()).all()
+    instances = DatabaseInstance.query.filter(DatabaseInstance.cluster_id.isnot(None)).all()
+    instance_map = {item.id: item for item in instances}
+
+    log_rows = (
         db.session.query(BackupLog, BackupPolicy)
         .join(BackupPolicy, BackupLog.policy_id == BackupPolicy.id)
         .filter(BackupLog.started_at >= cutoff)
+        .order_by(BackupLog.started_at.desc(), BackupLog.id.desc())
         .all()
     )
 
+    logs_by_cluster = {}
+    for log, policy in log_rows:
+        if policy.target_type != "instance":
+            continue
+        instance = instance_map.get(policy.target_id)
+        if not instance or not instance.cluster_id:
+            continue
+        logs_by_cluster.setdefault(instance.cluster_id, []).append((log, policy, instance))
+
+    items = []
+    normal_count = 0
+    for cluster in clusters:
+        cluster_logs = logs_by_cluster.get(cluster.id, [])
+        is_normal = any(log.status == "success" for log, _, _ in cluster_logs)
+        if is_normal:
+            normal_count += 1
+
+        latest_backup = None
+        if cluster_logs:
+            log, policy, instance = cluster_logs[0]
+            latest_backup = {
+                "log_id": log.id,
+                "policy_id": policy.id,
+                "policy_name": policy.name,
+                "instance_id": instance.id,
+                "instance_name": instance.name,
+                "status": log.status,
+                "started_at": _utc_isoformat(log.started_at),
+                "finished_at": _utc_isoformat(log.finished_at),
+                "error_message": log.error_message,
+            }
+
+        items.append(
+            {
+                "cluster_id": cluster.id,
+                "cluster_name": cluster.name,
+                "db_type": cluster.db_type,
+                "business_line": cluster.business_line or cluster.namespace,
+                "environment": cluster.environment,
+                "backup_status": "normal" if is_normal else "abnormal",
+                "successful_backup_count": sum(
+                    1 for log, _, _ in cluster_logs if log.status == "success"
+                ),
+                "latest_backup": latest_backup,
+            }
+        )
+
+    total = len(clusters)
     summary = {
         "time_window_hours": hours,
-        "success": 0,
-        "failed": 0,
-        "mysql": {"success": 0, "failed": 0},
-        "mongodb": {"success": 0, "failed": 0},
-        "chart": {"labels": [], "success": [], "failed": []},
-        "recent_failures": [],
+        "total_clusters": total,
+        "normal_backup_sets": normal_count,
+        "abnormal_backup_sets": total - normal_count,
+        "normal_ratio": round(normal_count * 100 / total, 2) if total else 0,
+        "items": items,
     }
-
-    hour_map = {}
-    slot = cutoff.replace(minute=0, second=0, microsecond=0)
-    end_slot = datetime.utcnow().replace(minute=0, second=0, microsecond=0)
-    while slot <= end_slot:
-        key = slot.strftime("%Y-%m-%d %H:00")
-        hour_map[key] = {"success": 0, "failed": 0}
-        slot += timedelta(hours=1)
-
-    for log, policy in rows:
-        if not log.started_at:
-            continue
-
-        hour_key = log.started_at.replace(minute=0, second=0, microsecond=0).strftime("%Y-%m-%d %H:00")
-        if hour_key not in hour_map:
-            hour_map[hour_key] = {"success": 0, "failed": 0}
-
-        db_bucket = summary.get(policy.db_type)
-
-        if log.status == "success":
-            summary["success"] += 1
-            if isinstance(db_bucket, dict):
-                db_bucket["success"] += 1
-            hour_map[hour_key]["success"] += 1
-        elif log.status == "failed":
-            summary["failed"] += 1
-            if isinstance(db_bucket, dict):
-                db_bucket["failed"] += 1
-            hour_map[hour_key]["failed"] += 1
-            summary["recent_failures"].append(
-                {
-                    "log_id": log.id,
-                    "policy_id": policy.id,
-                    "policy_name": policy.name,
-                    "db_type": policy.db_type,
-                    "error_message": log.error_message,
-                    "started_at": _utc_isoformat(log.started_at),
-                }
-            )
-
-    summary["recent_failures"] = sorted(
-        summary["recent_failures"], key=lambda item: item["log_id"], reverse=True
-    )[:10]
-
-    labels = sorted(hour_map.keys())
-    summary["chart"]["labels"] = labels
-    summary["chart"]["success"] = [hour_map[label]["success"] for label in labels]
-    summary["chart"]["failed"] = [hour_map[label]["failed"] for label in labels]
 
     return ok_response(data=summary)
