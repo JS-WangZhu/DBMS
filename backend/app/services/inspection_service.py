@@ -651,6 +651,17 @@ def run_inspection_cycle(trigger: str = "manual", force: bool = False):
             alert.status = "recovered"
             alert.recovered_at = now
             recovered_alerts += 1
+
+        # A recovery is persisted independently from notification delivery.
+        # Retry undelivered recovery notifications on later cycles instead of
+        # losing them forever after a transient webhook/network timeout.
+        for alert in alerts:
+            if alert.status != "recovered" or alert.recovery_notified_at is not None:
+                continue
+            instance = instance_map.get(alert.instance_id)
+            if not instance:
+                continue
+            cluster = cluster_map.get(instance.cluster_id)
             if cfg.notify_recovery and not alert.is_muted(now) and instance.cluster_id not in muted_cluster_ids:
                 notify_result = _send_event_notification("recovery", cfg, instance, cluster, alert)
                 if notify_result.get("ok"):

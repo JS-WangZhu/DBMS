@@ -94,3 +94,43 @@ def test_open_alert_repeats_after_interval_and_respects_mute(app, monkeypatch):
         db.session.refresh(alert)
         assert alert.notify_count == 2
         assert sent.count("alert") == 2
+
+
+def test_failed_recovery_notification_is_retried(app, monkeypatch):
+    results = iter([
+        {"ok": False, "error": "request timeout"},
+        {"ok": True, "ping_ok": True},
+        {"ok": True, "ping_ok": True},
+    ])
+    sent = []
+
+    monkeypatch.setattr(inspection_service, "_collect_instance", lambda instance_id, *_args: (instance_id, next(results), "running"))
+    monkeypatch.setattr(inspection_service, "enqueue_snapshot_flush", lambda **kwargs: None)
+
+    def fake_notify(event_type, *_args):
+        sent.append(event_type)
+        if event_type == "recovery" and sent.count("recovery") == 1:
+            return {"ok": False, "message": "webhook timeout"}
+        return {"ok": True}
+
+    monkeypatch.setattr(inspection_service, "_send_event_notification", fake_notify)
+
+    with app.app_context():
+        instance = DatabaseInstance(name="recovery-retry", db_type="mysql", host_input="127.0.0.1", port=3306, enabled=True)
+        db.session.add(instance)
+        cfg = inspection_service.get_or_create_inspection_config()
+        cfg.notify_enabled = True
+        cfg.notify_recovery = True
+        cfg.notify_target_ids_json = [1]
+        db.session.commit()
+
+        inspection_service.run_inspection_cycle(force=True)
+        inspection_service.run_inspection_cycle(force=True)
+        alert = InspectionAlert.query.filter_by(instance_id=instance.id, issue_key="connectivity").one()
+        assert alert.status == "recovered"
+        assert alert.recovery_notified_at is None
+
+        inspection_service.run_inspection_cycle(force=True)
+        db.session.refresh(alert)
+        assert alert.recovery_notified_at is not None
+        assert sent.count("recovery") == 2

@@ -147,7 +147,11 @@ def collect_mongodb_status(instance, password):
         host = instance.resolved_ip or instance.host_input
         extra = instance.extra_json if isinstance(instance.extra_json, dict) else {}
         tls_enabled = _as_bool(extra.get("tls", extra.get("ssl")), default=False)
-        direct_connection = _as_bool(extra.get("direct_connection"), default=False)
+        # Status collection is scoped to one configured instance.  Without a
+        # direct connection PyMongo may discover the replica set and execute
+        # commands on its current primary, making several configured nodes all
+        # appear to be the primary when one member is unavailable.
+        direct_connection = True
         client_opts = {
             "serverSelectionTimeoutMS": 2000,
             "connectTimeoutMS": 2000,
@@ -399,7 +403,7 @@ def collect_mongodb_status(instance, password):
         extra = instance.extra_json if isinstance(instance.extra_json, dict) else {}
         auth_source = (extra.get("auth_source") or extra.get("auth_db") or "admin").strip()
         auth_mech = _normalize_auth_mechanism(extra.get("auth_mechanism")) or "auto"
-        direct_connection = _as_bool(extra.get("direct_connection"), default=False)
+        direct_connection = True
         tls_enabled = _as_bool(extra.get("tls", extra.get("ssl")), default=False)
         host = instance.resolved_ip or instance.host_input
         user = instance.username or ""
