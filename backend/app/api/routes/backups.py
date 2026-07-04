@@ -910,6 +910,10 @@ def delete_policy(policy_id):
 @bp.get("/overview")
 @active_user_required
 def backup_overview():
+    # Reconcile remote jobs before aggregating, matching the records endpoint.
+    # Otherwise the overview can remain stale until the records page is opened.
+    sync_running_remote_backups()
+
     hours = int(request.args.get("hours", "24"))
     hours = max(1, min(hours, 168))
     cutoff = datetime.utcnow() - timedelta(hours=hours)

@@ -10,7 +10,7 @@ from app.models.backup import BackupPolicy
 from app.models.db_asset import DatabaseCluster, DatabaseInstance
 from app.models.inspection import InspectionConfig
 from app.models.monitor_snapshot import SNAPSHOT_MODEL_BY_DB_TYPE
-from app.services.remote_backup_service import submit_remote_backup
+from app.services.remote_backup_service import submit_remote_backup, sync_running_remote_backups
 from app.services.backup_executor import run_backup_policy
 from app.services.collectors import collect_instance_metrics
 from app.services.dns_resolver import refresh_all_dns, resolve_host
@@ -74,6 +74,16 @@ def _resolve_app(app):
 def register_jobs(scheduler, app):
     app = _resolve_app(app) or app
     scheduler.add_job(
+        id="remote_backup_reconcile_30s",
+        func=job_reconcile_remote_backups,
+        trigger="interval",
+        seconds=30,
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        kwargs={"app": app},
+    )
+    scheduler.add_job(
         id="dns_refresh_hourly",
         func=job_dns_refresh,
         trigger="interval",
@@ -110,6 +120,21 @@ def register_jobs(scheduler, app):
     sync_backup_jobs(scheduler=scheduler, app=app)
     sync_inspection_job(scheduler=scheduler, app=app)
     sync_scheduled_task_jobs(scheduler=scheduler, app=app)
+
+
+def job_reconcile_remote_backups(app):
+    app = _resolve_app(app) or app
+    if app is None:
+        current_app.logger.error("remote backup reconcile job missing app context")
+        return 0
+    with app.app_context():
+        updated = sync_running_remote_backups()
+        if updated:
+            current_app.logger.info(
+                "remote backup reconcile finished: updated=%s",
+                updated,
+            )
+        return updated
 
 
 def sync_cache_warm_job(scheduler, app):

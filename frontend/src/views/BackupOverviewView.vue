@@ -48,20 +48,6 @@
       </template>
 
       <div class="filter-row">
-        <el-select
-          v-model="clusterFilter"
-          filterable
-          clearable
-          placeholder="筛选集群"
-          class="cluster-filter"
-        >
-          <el-option
-            v-for="item in clusterOptions"
-            :key="item.cluster_id"
-            :label="item.cluster_name"
-            :value="item.cluster_id"
-          />
-        </el-select>
         <el-select v-model="businessFilter" filterable clearable placeholder="筛选业务" class="business-filter">
           <el-option
             v-for="item in businessOptions"
@@ -72,6 +58,20 @@
         </el-select>
         <el-select v-model="dbTypeFilter" clearable placeholder="筛选数据库类型" class="db-type-filter">
           <el-option v-for="item in dbTypeOptions" :key="item" :label="dbTypeLabel(item)" :value="item" />
+        </el-select>
+        <el-select
+          v-model="clusterFilter"
+          filterable
+          clearable
+          placeholder="筛选集群"
+          class="cluster-filter"
+        >
+          <el-option
+            v-for="item in clusterOptions"
+            :key="item.cluster_id"
+            :label="buildClusterLabel(item, Boolean(dbTypeFilter))"
+            :value="item.cluster_id"
+          />
         </el-select>
         <el-select v-model="resultFilter" clearable placeholder="筛选备份结果" class="result-filter">
           <el-option label="正常" value="normal" />
@@ -152,6 +152,11 @@ import { ElMessage } from "element-plus";
 import { Refresh } from "@element-plus/icons-vue";
 
 import { backupOverview } from "../api/modules/backups";
+import {
+  buildClusterLabel,
+  dbTypeDisplayName,
+  filterClusterOptions,
+} from "./backupOverviewFilters";
 
 const loading = ref(false);
 const clusterFilter = ref(null);
@@ -168,7 +173,13 @@ const summary = reactive({
   items: [],
 });
 
-const clusterOptions = computed(() => summary.items || []);
+const clusterOptions = computed(() =>
+  filterClusterOptions(summary.items, {
+    business: businessFilter.value,
+    dbType: dbTypeFilter.value,
+    result: resultFilter.value,
+  })
+);
 const businessOptions = computed(() =>
   [...new Set((summary.items || []).map((item) => item.business_line || "__unset__"))].sort()
 );
@@ -195,20 +206,19 @@ watch([clusterFilter, businessFilter, dbTypeFilter, resultFilter, pageSize], () 
   currentPage.value = 1;
 });
 
+watch(clusterOptions, (options) => {
+  if (clusterFilter.value && !options.some((item) => item.cluster_id === clusterFilter.value)) {
+    clusterFilter.value = null;
+  }
+});
+
 function formatRatio(value) {
   const number = Number(value || 0);
   return (Number.isInteger(number) ? number : number.toFixed(2)) + "%";
 }
 
 function dbTypeLabel(value) {
-  const labels = {
-    mysql: "MySQL",
-    mongodb: "MongoDB",
-    redis: "Redis",
-    postgresql: "PostgreSQL",
-    doris: "Doris",
-  };
-  return labels[value] || value || "-";
+  return dbTypeDisplayName(value);
 }
 
 function latestStatusLabel(status) {

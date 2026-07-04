@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta
 
+from app.api.routes import backups
 from app.api.routes.backups import backup_overview
 from app.extensions import db
 from app.models.backup import BackupLog, BackupPolicy
@@ -84,3 +85,19 @@ def test_backup_overview_is_aggregated_by_cluster(app):
     assert rows["mysql-prod"]["latest_backup"]["instance_name"] == "mysql-02"
     assert rows["redis-cache"]["backup_status"] == "abnormal"
     assert rows["redis-cache"]["latest_backup"] is None
+
+
+def test_backup_overview_syncs_running_remote_backups_before_query(app, monkeypatch):
+    calls = []
+
+    def sync_running_backups():
+        calls.append(True)
+
+    monkeypatch.setattr(backups, "sync_running_remote_backups", sync_running_backups)
+
+    with app.test_request_context("/api/v1/backups/overview?hours=24"):
+        response, status_code = backup_overview.__wrapped__()
+
+    assert status_code == 200
+    assert response.get_json()["data"]["total_clusters"] == 0
+    assert calls == [True]
