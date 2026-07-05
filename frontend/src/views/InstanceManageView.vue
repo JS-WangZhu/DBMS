@@ -453,6 +453,7 @@ import { collectClusterHealth, listClusters } from "../api/modules/clusters";
   import { createPostgreSQLInstance, listPostgreSQLInstances, postgresqlStatus } from "../api/modules/postgresql";
   import { listBackupAgents } from "../api/modules/backups";
   import { formatBeijingTime, parseBeijingTimeMs } from "../utils/time";
+  import { getInstanceStatusExportColumns } from "../utils/instanceExport";
 
 const route = useRoute();
 
@@ -836,27 +837,27 @@ function exportRows() {
     ["版本", (row) => rowVersion(row)],
     ["心跳时间", (row) => lastCheckText(row)],
   ];
-  if (dbType.value === "mysql") {
-    columns.splice(
-      7,
-      0,
-      ["应用连接", (row) => appConnText(row)],
-      ["只读状态", (row) => readonlyText(mysqlStatus(row).effective_read_only)],
-      ["主从角色", (row) => roleText(mysqlRole(row))],
-      ["复制延迟", (row) => (shouldHideReplicationDetails(row) ? "-" : (mysqlStatus(row).seconds_behind_master ?? "-"))],
-    );
-  } else if (dbType.value === "mongodb") {
-    columns.splice(7, 0, ["主从角色", (row) => mongoRoleText(mongoRole(row))]);
-  } else if (dbType.value === "redis") {
-    columns.splice(
-      7,
-      0,
-      ["主从角色", (row) => redisRoleText(redisRole(row))],
-      ["高可用模式", (row) => redisHaModeText(redisHaMode(row))],
-      ["复制源信息", (row) => redisReplicationSource(row)],
-      ["实例内存使用率", (row) => redisContainerMemoryText(row)],
-    );
-  }
+  const statusColumns = getInstanceStatusExportColumns(dbType.value, {
+    appConnText,
+    readonlyText,
+    mysqlStatus,
+    roleText,
+    mysqlRole,
+    shouldHideReplicationDetails,
+    threadLabel,
+    mongoRoleText,
+    mongoRole,
+    redisRoleText,
+    redisRole,
+    redisHaModeText,
+    redisHaMode,
+    redisReplicationSource,
+    redisContainerMemoryText,
+    postgresqlRoleText,
+    postgresqlPayload,
+    postgresqlConnectionUsageText,
+  });
+  columns.splice(7, 0, ...statusColumns);
   const csv = [
     columns.map(([label]) => csvCell(label)).join(","),
     ...source.map((row) => columns.map(([, getter]) => csvCell(getter(row))).join(",")),
