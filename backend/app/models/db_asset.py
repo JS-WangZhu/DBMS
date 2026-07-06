@@ -84,7 +84,9 @@ class DatabaseInstance(db.Model, TimestampMixin):
     probe_agent = db.relationship("BackupAgent", foreign_keys=[probe_agent_id])
 
     def to_dict(self) -> dict:
-        extra = self.extra_json if isinstance(self.extra_json, dict) else {}
+        extra = dict(self.extra_json) if isinstance(self.extra_json, dict) else {}
+        discovery_mode = str(extra.get("physical_discovery_mode") or "auto").strip().lower()
+        extra["physical_discovery_mode"] = discovery_mode if discovery_mode in {"auto", "manual"} else "auto"
         host_domain = str(extra.get("domain") or "").strip() or None
         return {
             "id": self.id,
@@ -99,7 +101,7 @@ class DatabaseInstance(db.Model, TimestampMixin):
             "role_label": self.role_label,
             "is_read_only": self.is_read_only,
             "enabled": self.enabled,
-            "extra_json": self.extra_json,
+            "extra_json": extra,
             "running_status": self.running_status,
             "access_mode": self.access_mode if self.access_mode in {"server", "agent"} else "server",
             "probe_agent_id": self.probe_agent_id,

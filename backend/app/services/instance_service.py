@@ -98,6 +98,8 @@ def _normalize_node_exporter(node_exporter):
 
 def _normalize_extra_json(extra_json):
     normalized = dict(extra_json) if isinstance(extra_json, dict) else {}
+    discovery_mode = str(normalized.get("physical_discovery_mode") or "auto").strip().lower()
+    normalized["physical_discovery_mode"] = discovery_mode if discovery_mode in {"auto", "manual"} else "auto"
     domain = str(normalized.get("domain") or "").strip()
     if domain:
         normalized["domain"] = domain
