@@ -409,8 +409,11 @@
         </el-form-item>
         <el-form-item label="域名"><el-input v-model.trim="form.host_domain" placeholder="可选，如 db.example.com" /></el-form-item>
         <el-form-item label="地址"><el-input v-model="form.host_input" placeholder="IP或主机地址" /></el-form-item>
+        <el-form-item label="物理机探测模式">
+          <el-radio-group v-model="form.physical_discovery_mode"><el-radio-button label="auto">自动发现</el-radio-button><el-radio-button label="manual">手动填写</el-radio-button></el-radio-group>
+        </el-form-item>
         <el-form-item label="物理机地址">
-          <el-input v-model.trim="form.physical_address" placeholder="可选，宿主机/物理机IP或域名" />
+          <el-input v-model.trim="form.physical_address" :disabled="form.physical_discovery_mode === 'auto'" placeholder="自动发现返回 vSAN 或当前物理节点 IP" />
         </el-form-item>
         <el-form-item label="端口"><el-input-number v-model="form.port" :min="1" :max="65535" style="width: 100%" /></el-form-item>
         <el-form-item label="Node Exporter">
@@ -600,6 +603,7 @@ const form = reactive({
   host_domain: "",
   host_input: "",
   physical_address: "",
+  physical_discovery_mode: "auto",
   port: 3306,
   node_exporter_mode: "same_host",
   node_exporter_address: "",
@@ -928,6 +932,7 @@ function resetForm() {
   form.host_domain = "";
   form.host_input = "";
   form.physical_address = "";
+  form.physical_discovery_mode = "auto";
   form.port = pageCfg.value.defaultPort;
   form.node_exporter_mode = "same_host";
   form.node_exporter_address = "";
@@ -953,6 +958,7 @@ function openEditDialog(row) {
   form.host_domain = row.host_domain || (rawExtra.domain || "");
   form.host_input = row.host_input || "";
   form.physical_address = rawExtra.physical_address || "";
+  form.physical_discovery_mode = rawExtra.physical_discovery_mode === "manual" ? "manual" : "auto";
   form.port = row.port || pageCfg.value.defaultPort;
   form.node_exporter_mode = mode;
   form.node_exporter_address = mode === "custom" ? (exporter.address || exporter.endpoint || "") : "";
@@ -979,6 +985,7 @@ function buildNodeExporterPayload() {
 
 function buildExtraJsonPayload() {
   const base = editingExtraBase.value && typeof editingExtraBase.value === "object" ? JSON.parse(JSON.stringify(editingExtraBase.value)) : {};
+  base.physical_discovery_mode = form.physical_discovery_mode === "manual" ? "manual" : "auto";
   const domain = (form.host_domain || "").trim();
   if (domain) {
     base.domain = domain;

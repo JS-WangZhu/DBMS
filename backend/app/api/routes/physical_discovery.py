@@ -1,9 +1,10 @@
-from flask import Blueprint, request
+from flask import Blueprint, current_app, request
 
 from app.api.routes.common import active_user_required, require_menu_permission
-from app.extensions import db
+from app.extensions import db, scheduler
 from app.models.physical_discovery import PhysicalDiscoveryConfig, VCenterConfig
 from app.services.physical_discovery_config import normalize_cidrs, validate_non_overlapping_cidrs
+from app.tasks.scheduler import sync_physical_discovery_job
 from app.utils.crypto import encrypt_secret
 from app.utils.response import error_response, ok_response
 
@@ -39,6 +40,8 @@ def update_config():
     except (TypeError, ValueError):
         return error_response("configuration values must be integers", code=400)
     db.session.commit()
+    if current_app.config.get("ENABLE_SCHEDULER"):
+        sync_physical_discovery_job(scheduler, current_app)
     return ok_response(data=config.to_dict())
 
 

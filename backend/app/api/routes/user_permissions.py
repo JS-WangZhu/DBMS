@@ -66,6 +66,7 @@ MENU_CATALOG = [
     {"key": "mcp_platform", "label": "MCP开放平台"},
     {"key": "sso_config", "label": "SSO登录管理"},
 ]
+MENU_CATALOG.append({"key": "physical_discovery_manage", "label": "物理机探测管理"})
 MENU_KEY_SET = {item["key"] for item in MENU_CATALOG}
 
 

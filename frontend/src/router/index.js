@@ -22,6 +22,7 @@ import HAConfigView from "../views/HAConfigView.vue";
 import DataQueryView from "../views/DataQueryView.vue";
 import InstanceManageView from "../views/InstanceManageView.vue";
 import InstanceStatusConfigView from "../views/InstanceStatusConfigView.vue";
+import PhysicalDiscoveryManageView from "../views/PhysicalDiscoveryManageView.vue";
 import InspectionManageView from "../views/InspectionManageView.vue";
 import InspectionParamConfigView from "../views/InspectionParamConfigView.vue";
 import LoginView from "../views/LoginView.vue";
@@ -120,6 +121,8 @@ const routes = [
     ],
   },
 ];
+
+routes[1].children.push({ path: "/config/physical-discovery", component: PhysicalDiscoveryManageView, meta: { title: "物理机探测管理" } });
 
 const router = createRouter({
   history: createWebHistory(),

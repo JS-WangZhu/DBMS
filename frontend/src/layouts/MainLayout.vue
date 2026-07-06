@@ -257,6 +257,10 @@
             <el-icon><Timer /></el-icon>
             <span>实例状态检测管理</span>
           </el-menu-item>
+          <el-menu-item v-if="hasMenu('physical_discovery_manage')" index="/config/physical-discovery">
+            <el-icon><Monitor /></el-icon>
+            <span>物理机探测管理</span>
+          </el-menu-item>
           <el-menu-item v-if="hasMenu('inspection_param_config')" index="/config/inspection">
             <el-icon><Setting /></el-icon>
             <span>巡检参数管理</span>
@@ -465,6 +469,7 @@ const routePermissionMap = {
   "/config/ai-models": "ai_model_config",
   "/config/ha": "ha_config",
   "/config/instance-status": "instance_status_config",
+  "/config/physical-discovery": "physical_discovery_manage",
   "/config/inspection": "inspection_param_config",
   "/config/data-query-ops": "data_query_op_config",
   "/config/domain": "domain_config",
