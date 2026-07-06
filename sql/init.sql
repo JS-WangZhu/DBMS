@@ -11,7 +11,7 @@
  Target Server Version : 80046 (8.0.46-0ubuntu0.24.04.3)
  File Encoding         : 65001
 
- Date: 28/06/2026 17:27:57
+ Date: 07/07/2026 00:17:51
 */
 
 SET NAMES utf8mb4;
@@ -107,7 +107,7 @@ CREATE TABLE `audit_logs`  (
   INDEX `idx_audit_logs_time`(`created_at` ASC) USING BTREE,
   INDEX `fk_audit_user`(`user_id` ASC) USING BTREE,
   CONSTRAINT `fk_audit_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT
-) ENGINE = InnoDB AUTO_INCREMENT = 695 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = DYNAMIC;
+) ENGINE = InnoDB AUTO_INCREMENT = 704 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = DYNAMIC;
 
 -- ----------------------------
 -- Table structure for backup_agents
@@ -163,7 +163,7 @@ CREATE TABLE `backup_logs`  (
   PRIMARY KEY (`id`) USING BTREE,
   INDEX `idx_backup_logs_policy_time`(`policy_id` ASC, `created_at` ASC) USING BTREE,
   CONSTRAINT `fk_backup_log_policy` FOREIGN KEY (`policy_id`) REFERENCES `backup_policies` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
-) ENGINE = InnoDB AUTO_INCREMENT = 4734 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = DYNAMIC;
+) ENGINE = InnoDB AUTO_INCREMENT = 4740 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = DYNAMIC;
 
 -- ----------------------------
 -- Table structure for backup_notify_targets
@@ -421,7 +421,7 @@ CREATE TABLE `monitor_snapshots_mongodb`  (
   INDEX `ix_monitor_snapshots_mongodb_metric_type`(`metric_type` ASC) USING BTREE,
   INDEX `ix_monitor_snapshots_mongodb_instance_id`(`instance_id` ASC) USING BTREE,
   INDEX `ix_monitor_snapshots_mongodb_collected_at`(`collected_at` ASC) USING BTREE
-) ENGINE = InnoDB AUTO_INCREMENT = 86815 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = DYNAMIC;
+) ENGINE = InnoDB AUTO_INCREMENT = 100249 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = DYNAMIC;
 
 -- ----------------------------
 -- Table structure for monitor_snapshots_mysql
@@ -439,7 +439,7 @@ CREATE TABLE `monitor_snapshots_mysql`  (
   INDEX `ix_monitor_snapshots_mysql_metric_type`(`metric_type` ASC) USING BTREE,
   INDEX `ix_monitor_snapshots_mysql_collected_at`(`collected_at` ASC) USING BTREE,
   INDEX `ix_monitor_snapshots_mysql_instance_id`(`instance_id` ASC) USING BTREE
-) ENGINE = InnoDB AUTO_INCREMENT = 44316 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = DYNAMIC;
+) ENGINE = InnoDB AUTO_INCREMENT = 51030 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = DYNAMIC;
 
 -- ----------------------------
 -- Table structure for monitor_snapshots_postgresql
@@ -475,7 +475,69 @@ CREATE TABLE `monitor_snapshots_redis`  (
   INDEX `ix_monitor_snapshots_redis_metric_type`(`metric_type` ASC) USING BTREE,
   INDEX `ix_monitor_snapshots_redis_collected_at`(`collected_at` ASC) USING BTREE,
   INDEX `ix_monitor_snapshots_redis_instance_id`(`instance_id` ASC) USING BTREE
-) ENGINE = InnoDB AUTO_INCREMENT = 125155 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = DYNAMIC;
+) ENGINE = InnoDB AUTO_INCREMENT = 145297 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = DYNAMIC;
+
+-- ----------------------------
+-- Table structure for physical_discovery_configs
+-- ----------------------------
+DROP TABLE IF EXISTS `physical_discovery_configs`;
+CREATE TABLE `physical_discovery_configs`  (
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `id` int NOT NULL AUTO_INCREMENT,
+  `enabled` tinyint(1) NOT NULL,
+  `poll_interval_minutes` int NOT NULL,
+  `connect_timeout_seconds` int NOT NULL,
+  `batch_size` int NOT NULL,
+  PRIMARY KEY (`id`) USING BTREE
+) ENGINE = InnoDB AUTO_INCREMENT = 2 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = Dynamic;
+
+-- ----------------------------
+-- Table structure for physical_discovery_details
+-- ----------------------------
+DROP TABLE IF EXISTS `physical_discovery_details`;
+CREATE TABLE `physical_discovery_details`  (
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `id` int NOT NULL AUTO_INCREMENT,
+  `run_id` int NOT NULL,
+  `instance_id` bigint NULL DEFAULT NULL,
+  `instance_name` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL,
+  `input_ip` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL,
+  `status` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL,
+  `discovered_address` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL,
+  `error_code` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL,
+  `error_message` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL,
+  PRIMARY KEY (`id`) USING BTREE,
+  INDEX `instance_id`(`instance_id` ASC) USING BTREE,
+  INDEX `ix_physical_discovery_details_run_id`(`run_id` ASC) USING BTREE,
+  CONSTRAINT `physical_discovery_details_ibfk_1` FOREIGN KEY (`run_id`) REFERENCES `physical_discovery_runs` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `physical_discovery_details_ibfk_2` FOREIGN KEY (`instance_id`) REFERENCES `db_instances` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
+) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = Dynamic;
+
+-- ----------------------------
+-- Table structure for physical_discovery_runs
+-- ----------------------------
+DROP TABLE IF EXISTS `physical_discovery_runs`;
+CREATE TABLE `physical_discovery_runs`  (
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `id` int NOT NULL AUTO_INCREMENT,
+  `vcenter_id` int NULL DEFAULT NULL,
+  `vcenter_name` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL,
+  `trigger_type` varchar(16) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL,
+  `status` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL,
+  `started_at` datetime NOT NULL,
+  `finished_at` datetime NULL DEFAULT NULL,
+  `total_count` int NOT NULL,
+  `success_count` int NOT NULL,
+  `failed_count` int NOT NULL,
+  `unmatched_count` int NOT NULL,
+  `error_message` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL,
+  PRIMARY KEY (`id`) USING BTREE,
+  INDEX `vcenter_id`(`vcenter_id` ASC) USING BTREE,
+  CONSTRAINT `physical_discovery_runs_ibfk_1` FOREIGN KEY (`vcenter_id`) REFERENCES `vcenter_configs` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
+) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = Dynamic;
 
 -- ----------------------------
 -- Table structure for role_group_cluster_permissions
@@ -566,7 +628,7 @@ CREATE TABLE `scheduled_task_runs`  (
   INDEX `ix_scheduled_task_runs_task_id`(`task_id` ASC) USING BTREE,
   INDEX `ix_scheduled_task_runs_retry_of_id`(`retry_of_id` ASC) USING BTREE,
   CONSTRAINT `scheduled_task_runs_ibfk_1` FOREIGN KEY (`task_id`) REFERENCES `scheduled_tasks` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
-) ENGINE = InnoDB AUTO_INCREMENT = 82 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = DYNAMIC;
+) ENGINE = InnoDB AUTO_INCREMENT = 88 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = DYNAMIC;
 
 -- ----------------------------
 -- Table structure for scheduled_tasks
@@ -676,5 +738,30 @@ CREATE TABLE `users`  (
   UNIQUE INDEX `username`(`username` ASC) USING BTREE,
   UNIQUE INDEX `uk_users_sso_subject`(`sso_subject` ASC) USING BTREE
 ) ENGINE = InnoDB AUTO_INCREMENT = 10 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = DYNAMIC;
+
+-- ----------------------------
+-- Table structure for vcenter_configs
+-- ----------------------------
+DROP TABLE IF EXISTS `vcenter_configs`;
+CREATE TABLE `vcenter_configs`  (
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `id` int NOT NULL AUTO_INCREMENT,
+  `name` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL,
+  `address` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL,
+  `port` int NOT NULL,
+  `cidrs_json` json NOT NULL,
+  `username` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL,
+  `password_encrypted` text CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL,
+  `verify_ssl` tinyint(1) NOT NULL,
+  `enabled` tinyint(1) NOT NULL,
+  `deleted` tinyint(1) NOT NULL,
+  `last_test_status` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL,
+  `last_test_message` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL,
+  `last_tested_at` datetime NULL DEFAULT NULL,
+  PRIMARY KEY (`id`) USING BTREE,
+  UNIQUE INDEX `uq_vcenter_address_port`(`address` ASC, `port` ASC) USING BTREE,
+  UNIQUE INDEX `name`(`name` ASC) USING BTREE
+) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = Dynamic;
 
 SET FOREIGN_KEY_CHECKS = 1;
