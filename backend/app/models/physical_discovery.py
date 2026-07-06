@@ -79,7 +79,7 @@ class PhysicalDiscoveryDetail(db.Model, TimestampMixin):
 
     id = db.Column(db.Integer, primary_key=True)
     run_id = db.Column(db.Integer, db.ForeignKey("physical_discovery_runs.id"), nullable=False, index=True)
-    instance_id = db.Column(db.Integer, db.ForeignKey("db_instances.id"), nullable=True)
+    instance_id = db.Column(db.BigInteger, db.ForeignKey("db_instances.id"), nullable=True)
     instance_name = db.Column(db.String(128), nullable=True)
     input_ip = db.Column(db.String(64), nullable=True)
     status = db.Column(db.String(32), nullable=False)
