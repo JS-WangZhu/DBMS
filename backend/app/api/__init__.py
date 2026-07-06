@@ -23,6 +23,7 @@ from app.api.routes.monitoring import bp as monitoring_bp
 from app.api.routes.mysql import bp as mysql_bp
 from app.api.routes.postgresql import bp as postgresql_bp
 from app.api.routes.redis import bp as redis_bp
+from app.api.routes.physical_discovery import bp as physical_discovery_bp
 from app.api.routes.s3_storage import bp as s3_storage_bp
 from app.api.routes.sso_config import bp as sso_config_bp
 from app.api.routes.task_management import bp as task_management_bp
@@ -45,6 +46,7 @@ def register_blueprints(app):
     api_v1.register_blueprint(mysql_bp)
     api_v1.register_blueprint(mongodb_bp)
     api_v1.register_blueprint(redis_bp)
+    api_v1.register_blueprint(physical_discovery_bp)
     api_v1.register_blueprint(postgresql_bp)
     api_v1.register_blueprint(doris_bp)
     api_v1.register_blueprint(monitoring_bp)
