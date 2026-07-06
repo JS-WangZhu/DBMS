@@ -122,7 +122,7 @@ const routes = [
   },
 ];
 
-routes[1].children.push({ path: "/config/physical-discovery", component: PhysicalDiscoveryManageView, meta: { title: "物理机探测管理" } });
+routes[2].children.push({ path: "/config/physical-discovery", component: PhysicalDiscoveryManageView, meta: { title: "物理机探测管理" } });
 
 const router = createRouter({
   history: createWebHistory(),
