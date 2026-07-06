@@ -8,6 +8,7 @@ from flask import current_app
 from app.extensions import db
 from app.models.backup import BackupPolicy
 from app.models.db_asset import DatabaseCluster, DatabaseInstance
+from app.models.physical_discovery import PhysicalDiscoveryConfig
 from app.models.inspection import InspectionConfig
 from app.models.monitor_snapshot import SNAPSHOT_MODEL_BY_DB_TYPE
 from app.services.remote_backup_service import submit_remote_backup, sync_running_remote_backups
@@ -18,6 +19,7 @@ from app.services.inspection_service import get_or_create_inspection_config, run
 from app.services.instance_service import warm_instance_list_cache
 from app.services.instance_status_config import get_or_create_instance_status_config
 from app.services.monitor_snapshot_service import warm_latest_snapshot_cache
+from app.services.physical_discovery import run_discovery
 from app.services.redis_cache import enqueue_snapshot_flush, set_latest_snapshot
 from app.services.topology_history import (
     extract_mongo_topology,
@@ -120,6 +122,36 @@ def register_jobs(scheduler, app):
     sync_backup_jobs(scheduler=scheduler, app=app)
     sync_inspection_job(scheduler=scheduler, app=app)
     sync_scheduled_task_jobs(scheduler=scheduler, app=app)
+    sync_physical_discovery_job(scheduler=scheduler, app=app)
+
+
+def sync_physical_discovery_job(scheduler, app):
+    app = _resolve_app(app) or app
+    job_id = "physical_host_discovery"
+    if scheduler.get_job(job_id):
+        scheduler.remove_job(job_id)
+    with app.app_context():
+        config = PhysicalDiscoveryConfig.query.first()
+        if not config or not config.enabled:
+            return
+        scheduler.add_job(
+            id=job_id,
+            func=job_physical_discovery,
+            trigger="interval",
+            minutes=max(1, int(config.poll_interval_minutes or 30)),
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+            kwargs={"app": app},
+        )
+
+
+def job_physical_discovery(app):
+    app = _resolve_app(app) or app
+    if app is None:
+        return None
+    with app.app_context():
+        return run_discovery(trigger_type="scheduled")
 
 
 def job_reconcile_remote_backups(app):
