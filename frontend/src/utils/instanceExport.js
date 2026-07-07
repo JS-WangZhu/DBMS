@@ -16,6 +16,7 @@ export function getInstanceStatusExportColumns(dbType, helpers = {}) {
     return [
       ["主从角色", (row) => helpers.redisRoleText(helpers.redisRole(row))],
       ["高可用模式", (row) => helpers.redisHaModeText(helpers.redisHaMode(row))],
+      ["集群状态", (row) => helpers.redisClusterStateText(row)],
       ["复制源信息", (row) => helpers.redisReplicationSource(row)],
       ["实例内存使用率", (row) => helpers.redisContainerMemoryText(row)],
     ];

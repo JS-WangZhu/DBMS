@@ -122,6 +122,14 @@
             <el-tag :type="redisHaModeTagType(redisHaMode(scope.row))">{{ redisHaModeText(redisHaMode(scope.row)) }}</el-tag>
           </template>
         </el-table-column>
+        <el-table-column v-if="dbType === 'redis'" label="集群状态" min-width="92">
+          <template #default="scope">
+            <el-tag v-if="redisClusterState(scope.row)" :type="redisClusterStateTagType(scope.row)">
+              {{ redisClusterStateText(scope.row) }}
+            </el-tag>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
         <el-table-column
           v-if="dbType === 'redis'"
           label="复制源信息"
@@ -866,6 +874,7 @@ async function exportRows() {
     redisRole,
     redisHaModeText,
     redisHaMode,
+    redisClusterStateText,
     redisReplicationSource,
     redisContainerMemoryText,
     postgresqlRoleText,
@@ -1194,7 +1203,8 @@ function postgresqlConnectionUsageText(row) {
       ? row.payload_json
       : commonHealthMap[row?.id]?.payload_json || {};
     const clusterEnabled = payload.cluster_enabled;
-    const clusterState = String(payload.cluster_state || "").toLowerCase();
+    const clusterInfo = payload.cluster_info && typeof payload.cluster_info === "object" ? payload.cluster_info : {};
+    const clusterState = String(clusterInfo.cluster_state || payload.cluster_state || "").toLowerCase();
     const redisMode = String(payload.redis_mode || payload.mode || "").toLowerCase();
     
     // 集群模式判定：INFO server 中的 redis_mode 或 INFO cluster 中的 cluster_enabled
@@ -1218,6 +1228,29 @@ function postgresqlConnectionUsageText(row) {
     if (mode === "sentinel") return "哨兵模式";
     if (mode === "replication") return "主从模式";
     return "单机模式";
+  }
+
+  function redisClusterState(row) {
+    if (redisHaMode(row) !== "cluster") {
+      return null;
+    }
+    const payload = redisPayload(row);
+    const clusterInfo = payload.cluster_info && typeof payload.cluster_info === "object" ? payload.cluster_info : {};
+    return String(clusterInfo.cluster_state || payload.cluster_state || "").trim().toLowerCase() || "unknown";
+  }
+
+  function redisClusterStateText(row) {
+    const state = redisClusterState(row);
+    if (!state) return "-";
+    if (state === "unknown") return "未知";
+    return state;
+  }
+
+  function redisClusterStateTagType(row) {
+    const state = redisClusterState(row);
+    if (state === "ok") return "success";
+    if (state === "unknown") return "warning";
+    return "danger";
   }
 
   function redisHaModeTagType(mode) {

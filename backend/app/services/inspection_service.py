@@ -36,6 +36,7 @@ DEFAULT_THRESHOLDS = {
     "host_cpu_usage_pct": 90,
     "host_memory_usage_pct": 90,
     "host_data_disk_usage_pct": 90,
+    "host_disk_io_latency_ms": 20,
 }
 _INSPECTION_LOCK = threading.Lock()
 INSPECTION_CONFIG_CACHE_KEY = "dbms:config:inspection"
@@ -323,6 +324,7 @@ def _extract_issues(instance: DatabaseInstance, payload: dict, thresholds: dict)
     host_cpu = _safe_float(payload.get("host_cpu_usage_pct"))
     host_mem = _safe_float(payload.get("host_memory_usage_pct"))
     host_disk = _safe_float(payload.get("host_data_disk_usage_pct"))
+    host_disk_io_latency = _safe_float(payload.get("host_disk_io_latency_ms"))
 
     # CPU 采用近 10 分钟均值判断，避免瞬时峰值误报
     host_cpu_avg = _metric_average_window(instance, "host_cpu_usage_pct", host_cpu, CPU_AVERAGE_WINDOW_MINUTES)
@@ -339,6 +341,13 @@ def _extract_issues(instance: DatabaseInstance, payload: dict, thresholds: dict)
     if host_disk is not None and host_disk >= thresholds["host_data_disk_usage_pct"]:
         mount = payload.get("host_data_disk_mountpoint") or "-"
         issues.append(_build_issue("host_disk_high", "主机磁盘高", f"磁盘使用率 {host_disk}% (挂载点 {mount})"))
+    if host_disk_io_latency is not None and host_disk_io_latency >= thresholds["host_disk_io_latency_ms"]:
+        device = payload.get("host_disk_io_device") or payload.get("host_data_disk_device") or "-"
+        issues.append(_build_issue(
+            "host_disk_io_latency",
+            "主机磁盘I/O延迟高",
+            f"平均I/O延迟 {host_disk_io_latency}ms (设备 {device})",
+        ))
 
     if instance.db_type == "mysql":
         lag = _safe_int(payload.get("seconds_behind_master"))
@@ -365,6 +374,19 @@ def _extract_issues(instance: DatabaseInstance, payload: dict, thresholds: dict)
     if instance.db_type == "redis":
         memory_pct = _safe_float(payload.get("memory_usage_pct"))
         connection_pct = _safe_float(payload.get("connection_usage_pct"))
+        cluster_info = payload.get("cluster_info") if isinstance(payload.get("cluster_info"), dict) else {}
+        redis_mode = str(payload.get("redis_mode") or payload.get("mode") or "").strip().lower()
+        cluster_state = str(cluster_info.get("cluster_state") or payload.get("cluster_state") or "").strip().lower()
+        cluster_enabled = payload.get("cluster_enabled")
+        is_cluster_mode = redis_mode == "cluster" or cluster_enabled in (1, True) or bool(cluster_state)
+        if is_cluster_mode and cluster_state != "ok":
+            state_text = cluster_state or "missing"
+            issues.append(_build_issue(
+                "redis_cluster_state",
+                "Redis集群状态异常",
+                f"cluster_state={state_text}",
+                "critical",
+            ))
         if connection_pct is None:
             maxclients = _safe_int(payload.get("maxclients"))
             connected_clients = _safe_int(payload.get("connected_clients"))

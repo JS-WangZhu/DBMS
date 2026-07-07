@@ -37,6 +37,7 @@ IGNORED_FS_TYPES = {
 IGNORED_MOUNT_PREFIXES = ("/proc", "/sys", "/dev", "/run")
 CPU_SNAPSHOT_CACHE = {}
 NET_SNAPSHOT_CACHE = {}
+DISK_IO_SNAPSHOT_CACHE = {}
 
 
 def _clamp_pct(value):
@@ -317,6 +318,65 @@ def _network_rates(metrics, cache_key):
     return sorted(rates, key=lambda item: item.get("device") or "")
 
 
+def _disk_metric_map(metrics, metric_name):
+    return {
+        labels.get("device"): value
+        for labels, value in metrics.get(metric_name, [])
+        if labels.get("device") and value is not None
+    }
+
+
+def _disk_io_latency_ms(metrics, cache_key, target_device=None):
+    reads = _disk_metric_map(metrics, "node_disk_reads_completed_total")
+    read_seconds = _disk_metric_map(metrics, "node_disk_read_time_seconds_total")
+    writes = _disk_metric_map(metrics, "node_disk_writes_completed_total")
+    write_seconds = _disk_metric_map(metrics, "node_disk_write_time_seconds_total")
+    devices = set(reads) | set(read_seconds) | set(writes) | set(write_seconds)
+    current = {
+        device: {
+            "operations": reads.get(device, 0.0) + writes.get(device, 0.0),
+            "seconds": read_seconds.get(device, 0.0) + write_seconds.get(device, 0.0),
+        }
+        for device in devices
+        if not str(device).startswith(("loop", "ram", "fd", "sr"))
+    }
+    snapshot = DISK_IO_SNAPSHOT_CACHE.get(cache_key) or {}
+    previous = snapshot.get("counters")
+    last_result = snapshot.get("result")
+    if not previous:
+        DISK_IO_SNAPSHOT_CACHE[cache_key] = {"counters": current, "result": None}
+        return None
+    if current == previous:
+        return last_result
+
+    candidates = []
+    for device, counters in current.items():
+        old = previous.get(device)
+        if not old:
+            continue
+        operation_delta = counters["operations"] - old["operations"]
+        seconds_delta = counters["seconds"] - old["seconds"]
+        if operation_delta <= 0 or seconds_delta < 0:
+            continue
+        candidates.append({
+            "device": device,
+            "latency_ms": round(seconds_delta * 1000 / operation_delta, 2),
+        })
+    if not candidates:
+        DISK_IO_SNAPSHOT_CACHE[cache_key] = {"counters": current, "result": None}
+        return None
+
+    target = str(target_device or "").strip().rsplit("/", 1)[-1]
+    if target:
+        matched = next((item for item in candidates if item["device"] == target), None)
+        if matched:
+            DISK_IO_SNAPSHOT_CACHE[cache_key] = {"counters": current, "result": matched}
+            return matched
+    result = max(candidates, key=lambda item: item["latency_ms"])
+    DISK_IO_SNAPSHOT_CACHE[cache_key] = {"counters": current, "result": result}
+    return result
+
+
 def collect_node_exporter_metrics(instance):
     cfg = _node_exporter_config(instance)
     base = {
@@ -333,6 +393,8 @@ def collect_node_exporter_metrics(instance):
         "host_data_disk_mountpoint": None,
         "host_data_disk_device": None,
         "host_data_disk_size_bytes": None,
+        "host_disk_io_latency_ms": None,
+        "host_disk_io_device": None,
         "host_disk_entries": [],
         "host_net_rates": [],
     }
@@ -372,6 +434,11 @@ def collect_node_exporter_metrics(instance):
         base["host_data_disk_mountpoint"] = disk.get("mountpoint")
         base["host_data_disk_device"] = disk.get("device")
         base["host_data_disk_size_bytes"] = disk.get("size_bytes")
+
+    io_latency = _disk_io_latency_ms(metrics, cache_key=cfg["endpoint"], target_device=base["host_data_disk_device"])
+    if io_latency:
+        base["host_disk_io_latency_ms"] = io_latency["latency_ms"]
+        base["host_disk_io_device"] = io_latency["device"]
 
     base["host_net_rates"] = _network_rates(metrics, cache_key=cfg["endpoint"])
 
