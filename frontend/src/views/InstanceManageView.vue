@@ -457,6 +457,7 @@ import { collectClusterHealth, listClusters } from "../api/modules/clusters";
   import { listBackupAgents } from "../api/modules/backups";
   import { formatBeijingTime, parseBeijingTimeMs } from "../utils/time";
   import { getInstanceStatusExportColumns } from "../utils/instanceExport";
+  import { fetchHealthForAllRows } from "../utils/instanceHealthExport";
 
 const route = useRoute();
 
@@ -820,10 +821,20 @@ function csvCell(value) {
   return `"${text.replace(/"/g, '""')}"`;
 }
 
-function exportRows() {
+async function exportRows() {
   const source = filteredRows.value;
   if (!source.length) {
     ElMessage.warning("当前筛选条件下没有可导出的实例");
+    return;
+  }
+  try {
+    const healthById = await fetchHealthForAllRows(source, async (instanceIds) => {
+      const { data } = await getInstancesHealth(dbType.value, instanceIds);
+      return data?.data || {};
+    });
+    applyHealthPayloads(source, healthById);
+  } catch (error) {
+    ElMessage.error(error.response?.data?.message || "加载全部实例状态失败，未生成导出文件");
     return;
   }
   const columns = [
@@ -2146,6 +2157,10 @@ async function loadHealthStatusFromDb(force = false) {
 
   const { data } = await getInstancesHealth(dbType.value, instanceIds);
   const healthById = data?.data || {};
+  applyHealthPayloads(healthRows, healthById);
+}
+
+function applyHealthPayloads(healthRows, healthById) {
   healthRows.forEach((row) => {
     const payload = healthById[row.id] || healthById[String(row.id)] || {};
     if (dbType.value === "mysql") {
