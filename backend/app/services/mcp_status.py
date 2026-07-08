@@ -130,6 +130,25 @@ def _cluster_data(cluster):
     }
 
 
+def _physical_machine(instance):
+    extra = instance.extra_json if isinstance(instance.extra_json, dict) else {}
+    discovery_mode = str(extra.get("physical_discovery_mode") or "auto").strip().lower()
+    if discovery_mode not in {"auto", "manual"}:
+        discovery_mode = "auto"
+    return {
+        "address": extra.get("physical_address") or None,
+        "discovery_mode": discovery_mode,
+        "discovery_source": extra.get("physical_discovery_source") or None,
+        "discovered_at": extra.get("physical_discovered_at") or None,
+    }
+
+
+def _probe_agent(instance):
+    if not instance.probe_agent:
+        return None
+    return {"id": instance.probe_agent.id, "name": instance.probe_agent.name}
+
+
 def build_mcp_instance_status(filters=None, allowed_cluster_ids=None):
     filters = filters or {}
     query = DatabaseInstance.query
@@ -157,6 +176,7 @@ def build_mcp_instance_status(filters=None, allowed_cluster_ids=None):
 
     items = []
     for instance in instances:
+        extra = instance.extra_json if isinstance(instance.extra_json, dict) else {}
         snapshot = snapshots_by_type.get(instance.db_type, {}).get(instance.id)
         payload = snapshot.payload_json if snapshot and isinstance(snapshot.payload_json, dict) else {}
         age = _age_seconds(snapshot.collected_at) if snapshot else None
@@ -171,10 +191,13 @@ def build_mcp_instance_status(filters=None, allowed_cluster_ids=None):
             "name": instance.name,
             "db_type": instance.db_type,
             "host": instance.host_input,
+            "host_domain": str(extra.get("domain") or "").strip() or None,
             "resolved_ip": instance.resolved_ip,
             "port": instance.port,
             "username": instance.username,
             "enabled": bool(instance.enabled),
+            "access_mode": instance.access_mode if instance.access_mode in {"server", "agent"} else "server",
+            "probe_agent": _probe_agent(instance),
             "configured_role": instance.role_label,
             "detected_role": _role(instance, payload),
             "is_read_only": bool(instance.is_read_only),
@@ -183,12 +206,14 @@ def build_mcp_instance_status(filters=None, allowed_cluster_ids=None):
             "cluster": _cluster_data(clusters.get(instance.cluster_id)),
             "metrics": _metrics(payload),
             "alerts": alerts,
+            "physical_machine": _physical_machine(instance),
             "latest_snapshot": {
                 "id": snapshot.id if snapshot else None,
                 "metric_type": snapshot.metric_type if snapshot else None,
                 "collected_at": _iso(snapshot.collected_at) if snapshot else None,
                 "age_seconds": age,
             },
+            "created_at": _iso(instance.created_at),
             "updated_at": _iso(instance.updated_at),
         }
         if filters.get("include_raw_payload"):

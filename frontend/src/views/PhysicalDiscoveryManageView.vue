@@ -21,7 +21,12 @@
         <el-table-column label="CIDR"><template #default="s">{{ s.row.cidrs.join(', ') }}</template></el-table-column>
         <el-table-column prop="username" label="只读用户" />
         <el-table-column label="状态"><template #default="s"><el-tag :type="s.row.enabled ? 'success' : 'info'">{{ s.row.enabled ? '启用' : '停用' }}</el-tag></template></el-table-column>
-        <el-table-column label="最近测试"><template #default="s">{{ s.row.last_test_message || '-' }}</template></el-table-column>
+        <el-table-column label="最近测试" min-width="180">
+          <template #default="s">
+            <div>{{ displayTime(s.row.last_tested_at) }}</div>
+            <div>{{ s.row.last_test_message || '-' }}</div>
+          </template>
+        </el-table-column>
         <el-table-column label="操作" width="320">
           <template #default="s">
             <el-button link type="primary" @click="openEdit(s.row)">编辑</el-button>
@@ -42,7 +47,8 @@
         <el-table-column prop="trigger_type" label="触发方式" />
         <el-table-column label="状态"><template #default="s"><el-tag :type="discoveryStatusType(s.row.status)">{{ s.row.status }}</el-tag></template></el-table-column>
         <el-table-column label="成功/失败"><template #default="s">{{ s.row.success_count }}/{{ s.row.failed_count }}</template></el-table-column>
-        <el-table-column prop="started_at" label="开始时间" />
+        <el-table-column label="开始时间" min-width="180"><template #default="s">{{ displayTime(s.row.started_at) }}</template></el-table-column>
+        <el-table-column label="结束时间" min-width="180"><template #default="s">{{ displayTime(s.row.finished_at) }}</template></el-table-column>
         <el-table-column prop="error_message" label="汇总错误" />
       </el-table>
       <el-pagination v-model:current-page="page" :page-size="20" :total="runs.total" @current-change="loadRuns" />
@@ -83,12 +89,15 @@ import {
   updatePhysicalDiscoveryConfig, updateVcenter,
 } from "../api/modules/physical_discovery";
 import { discoveryStatusType } from "../utils/physicalDiscovery";
+import { formatBeijingTime } from "../utils/time";
 
 const config = reactive({ enabled: false, poll_interval_minutes: 30, connect_timeout_seconds: 10, batch_size: 500 });
 const vcenters = ref([]); const loading = ref(false); const dialogVisible = ref(false);
 const detailVisible = ref(false); const details = ref([]); const page = ref(1);
 const runs = reactive({ items: [], total: 0 });
 const form = reactive({ id: null, name: "", address: "", port: 443, cidrsText: "", username: "", password: "", verify_ssl: true, enabled: true });
+
+function displayTime(value) { return formatBeijingTime(value) || "-"; }
 
 async function loadAll() {
   loading.value = true;

@@ -33,6 +33,7 @@ CRON_ALIAS_MAP = {
     "@monthly": "0 0 1 * *",
 }
 S3_DOWNLOAD_LIFECYCLE_DAYS = 30
+BACKUP_OVERVIEW_DB_TYPES = {"mysql", "mongodb"}
 
 
 def _parse_datetime(value: str):
@@ -918,8 +919,18 @@ def backup_overview():
     hours = max(1, min(hours, 168))
     cutoff = datetime.utcnow() - timedelta(hours=hours)
 
-    clusters = DatabaseCluster.query.order_by(DatabaseCluster.name.asc(), DatabaseCluster.id.asc()).all()
-    instances = DatabaseInstance.query.filter(DatabaseInstance.cluster_id.isnot(None)).all()
+    clusters = (
+        DatabaseCluster.query
+        .filter(DatabaseCluster.db_type.in_(BACKUP_OVERVIEW_DB_TYPES))
+        .order_by(DatabaseCluster.name.asc(), DatabaseCluster.id.asc())
+        .all()
+    )
+    cluster_ids = [item.id for item in clusters]
+    instances = (
+        DatabaseInstance.query.filter(DatabaseInstance.cluster_id.in_(cluster_ids)).all()
+        if cluster_ids
+        else []
+    )
     instance_map = {item.id: item for item in instances}
 
     log_rows = (

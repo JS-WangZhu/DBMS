@@ -23,7 +23,8 @@ def _policy(name, instance_id):
 def test_backup_overview_is_aggregated_by_cluster(app):
     normal_cluster = DatabaseCluster(name="mysql-prod", db_type="mysql")
     empty_cluster = DatabaseCluster(name="redis-cache", db_type="redis")
-    db.session.add_all([normal_cluster, empty_cluster])
+    hidden_cluster = DatabaseCluster(name="mongo-hidden", db_type="mongodb")
+    db.session.add_all([normal_cluster, empty_cluster, hidden_cluster])
     db.session.flush()
 
     first_node = DatabaseInstance(
@@ -40,12 +41,29 @@ def test_backup_overview_is_aggregated_by_cluster(app):
         port=3306,
         cluster_id=normal_cluster.id,
     )
-    db.session.add_all([first_node, second_node])
+    hidden_node = DatabaseInstance(
+        name="mongo-01",
+        db_type="mongodb",
+        host_input="10.0.0.3",
+        port=27017,
+        cluster_id=hidden_cluster.id,
+    )
+    db.session.add_all([first_node, second_node, hidden_node])
     db.session.flush()
 
     first_policy = _policy("node-1-backup", first_node.id)
     second_policy = _policy("node-2-backup", second_node.id)
-    db.session.add_all([first_policy, second_policy])
+    hidden_policy = BackupPolicy(
+        name="mongo-backup",
+        target_type="instance",
+        target_id=hidden_node.id,
+        db_type="mongodb",
+        backup_type="full",
+        tool_name="mongodump",
+        cron_expr="0 2 * * *",
+        storage_path="/backup",
+    )
+    db.session.add_all([first_policy, second_policy, hidden_policy])
     db.session.flush()
 
     now = datetime.utcnow()
@@ -64,6 +82,12 @@ def test_backup_overview_is_aggregated_by_cluster(app):
                 status="failed",
                 error_message="disk full",
             ),
+            BackupLog(
+                policy_id=hidden_policy.id,
+                started_at=now - timedelta(minutes=30),
+                finished_at=now - timedelta(minutes=20),
+                status="success",
+            ),
         ]
     )
     db.session.commit()
@@ -79,6 +103,7 @@ def test_backup_overview_is_aggregated_by_cluster(app):
     assert overview["normal_ratio"] == 50.0
 
     rows = {item["cluster_name"]: item for item in overview["items"]}
+    assert set(rows) == {"mysql-prod", "redis-cache"}
     assert rows["mysql-prod"]["backup_status"] == "normal"
     assert rows["mysql-prod"]["successful_backup_count"] == 1
     assert rows["mysql-prod"]["latest_backup"]["status"] == "failed"
