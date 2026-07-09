@@ -100,6 +100,7 @@ def _build_mongo_command(instance: dict, output_file: str, compress: bool, tool_
         tool_path,
         f"--host={instance.get('resolved_ip') or instance.get('host_input')}",
         f"--port={instance.get('port')}",
+        "--nsExclude=local.*",
     ]
     if archive_to_stdout:
         command.append("--archive=-")

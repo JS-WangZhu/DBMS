@@ -126,6 +126,7 @@ def _build_mongo_command(instance, password, output_file, compress, tool_path, a
         tool_path,
         f"--host={instance.resolved_ip or instance.host_input}",
         f"--port={instance.port}",
+        "--nsExclude=local.*",
     ]
     if archive_to_stdout:
         command.append("--archive=-")
