@@ -5,6 +5,7 @@
         <div class="header-row">
           <span>MySQL 策略</span>
           <div class="header-actions">
+            <el-input v-model="policyKeyword" clearable placeholder="搜索策略名称、实例或 cron" style="width: 260px" @input="mysqlPage.current = 1" />
             <el-button type="primary" @click="openCreatePolicyDialog">新建策略</el-button>
             <el-button @click="refreshAll">刷新</el-button>
           </div>
@@ -40,7 +41,7 @@
           v-model:page-size="mysqlPage.size"
           :page-sizes="[10, 20, 50]"
           layout="total, sizes, prev, pager, next, jumper"
-          :total="mysqlPage.total"
+          :total="filteredMysqlPolicies.length"
           @size-change="handleMysqlSizeChange"
           @current-change="handleMysqlCurrentChange"
         />
@@ -169,6 +170,7 @@ import {
 const DB_TYPE = "mysql";
 
 const mysqlPolicies = ref([]);
+const policyKeyword = ref("");
 const dialogVisible = ref(false);
 const saving = ref(false);
 const editingPolicyId = ref(null);
@@ -225,10 +227,19 @@ const currentDbTypeTools = computed(() => {
 const enabledAgents = computed(() => agents.value.filter((item) => item.enabled));
 const showPublicKeyInput = computed(() => form.encrypt_enabled && !form.encrypt_key_id);
 
+const filteredMysqlPolicies = computed(() => {
+  const keyword = policyKeyword.value.trim().toLowerCase();
+  if (!keyword) return mysqlPolicies.value;
+  return mysqlPolicies.value.filter((policy) =>
+    [policy.name, getInstanceLabel(policy.target_id), policy.cron_expr]
+      .some((value) => String(value || "").toLowerCase().includes(keyword))
+  );
+});
+
 const mysqlPoliciesData = computed(() => {
   const start = (mysqlPage.current - 1) * mysqlPage.size;
   const end = start + mysqlPage.size;
-  return mysqlPolicies.value.slice(start, end);
+  return filteredMysqlPolicies.value.slice(start, end);
 });
 
 const dialogTitle = computed(() => (editingPolicyId.value ? "编辑 MySQL 备份策略" : "新建 MySQL 备份策略"));

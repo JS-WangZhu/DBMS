@@ -177,6 +177,7 @@ def _build_payload_from_policy(policy: BackupPolicy, instance: DatabaseInstance)
         "compress": compress_method != "none",
         "compress_method": compress_method,
         "encrypt": encrypt_payload,
+        "mongo_backup": (policy.extra_json or {}).get("mongo_backup", {"mode": "full", "exclusions": []}),
     }
     if policy.s3_storage_config_id and _is_policy_s3_upload_enabled(policy):
         s3_config = S3StorageConfig.query.get(policy.s3_storage_config_id)
@@ -313,6 +314,18 @@ def get_backup_tasks_on_agent(agent_id: int, task_ids: list) -> dict:
         raise BackupAgentError(f"Unexpected task query error: {exc}")
 
 
+def cancel_backup_on_agent(agent_id: int, task_id: str) -> dict:
+    url, api_key = get_agent_url(agent_id), get_agent_api_key(agent_id)
+    headers = {"X-Agent-API-Key": api_key} if api_key else {}
+    try:
+        response = requests.post(f"{url.rstrip('/')}/api/agent/tasks/{task_id}/cancel", headers=headers, timeout=(3, 15))
+        data = response.json()
+        if response.status_code >= 400: raise BackupAgentError(data.get("message") or f"Agent cancel error({response.status_code})")
+        return data.get("data") or {}
+    except requests.exceptions.RequestException as exc:
+        raise BackupAgentError(f"Agent cancel request failed: {exc}")
+
+
 def check_agent_health(agent_id: int = None) -> dict:
     """Check agent health status"""
     url = get_agent_url(agent_id)
@@ -351,7 +364,7 @@ def download_backup_file_from_agent(agent_id: int, file_path: str):
             params={"path": file_path},
             headers=headers,
             stream=True,
-            timeout=(10, 86400),
+            timeout=(10, 2592000),
         )
         if response.status_code >= 400:
             agent_message = ""

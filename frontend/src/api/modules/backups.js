@@ -50,6 +50,10 @@ export function listBackupLogs(params = {}) {
   return client.get("/backups/logs", { params });
 }
 
+export function cancelBackupLog(logId) {
+  return client.post("/backups/logs/" + logId + "/cancel");
+}
+
 export function deleteBackupLog(logId, deleteFile = false) {
   return client.delete(`/backups/logs/${logId}`, {
     params: {

@@ -14,7 +14,7 @@ from app.models.notify_target import BackupNotifyTarget
 from app.models.s3_storage_config import S3StorageConfig
 from app.services.audit import log_audit
 from app.services.backup_executor import run_backup_policy
-from app.services.backup_agent_client import BackupAgentError, download_backup_file_from_agent
+from app.services.backup_agent_client import BackupAgentError, cancel_backup_on_agent, download_backup_file_from_agent
 from app.services.remote_backup_service import submit_remote_backup, sync_running_remote_backups
 from app.services.monitor_snapshot_service import latest_payload_by_instance_ids
 from app.services.notifier import test_notify_target, notify_backup_failure
@@ -104,6 +104,28 @@ def _normalize_extra_json(extra_json):
     extra["compress_method"] = compress_method
 
     return extra
+
+
+def _normalize_mongo_backup(db_type, config):
+    config = config if isinstance(config, dict) else {}
+    mode = str(config.get("mode") or "full").strip().lower()
+    if mode not in {"full", "partial"}: return None, "invalid mongo backup mode, allowed: full/partial"
+    if db_type != "mongodb":
+        return (None, "mongo partial backup is only available for mongodb") if mode == "partial" else ({"mode": "full", "exclusions": []}, None)
+    if mode == "full": return {"mode": "full", "exclusions": []}, None
+    rows = config.get("exclusions")
+    if not isinstance(rows, list) or not rows: return None, "mongodb partial backup requires at least one exclusion"
+    normalized, seen, whole = [], set(), set()
+    for row in rows:
+        if not isinstance(row, dict): return None, "mongodb exclusion must be an object"
+        database, collection = str(row.get("database") or "").strip(), str(row.get("collection") or "").strip()
+        if not database: return None, "mongodb exclusion database is required"
+        key = (database, collection)
+        if key in seen: return None, f"duplicate mongodb exclusion: {database}.{collection or '*'}"
+        seen.add(key); normalized.append({"database": database, "collection": collection})
+        if not collection: whole.add(database)
+    if any(row["collection"] and row["database"] in whole for row in normalized): return None, "whole database exclusion conflicts with collection exclusion"
+    return {"mode": "partial", "exclusions": normalized}, None
 
 
 def _validate_target_binding(target_type, target_id, db_type):
@@ -203,7 +225,11 @@ def _apply_policy_fields(policy: BackupPolicy, payload: dict, is_create: bool = 
             return "invalid compress_method, allowed: none/gzip/zstd"
 
     if "extra_json" in payload:
-        policy.extra_json = _normalize_extra_json(payload.get("extra_json") or {})
+        extra = _normalize_extra_json(payload.get("extra_json") or {})
+        mongo_backup, mongo_error = _normalize_mongo_backup(effective_db_type, extra.get("mongo_backup"))
+        if mongo_error: return mongo_error
+        extra["mongo_backup"] = mongo_backup
+        policy.extra_json = extra
 
     if requested_compress_method is not None:
         extra = _normalize_extra_json(policy.extra_json or {})
@@ -864,6 +890,25 @@ def download_log_file_via_agent(log_id):
             "Content-Disposition": f'attachment; filename="{filename}"',
         },
     )
+
+
+@bp.post("/logs/<int:log_id>/cancel")
+@active_user_required
+def cancel_backup_log(log_id):
+    log = BackupLog.query.get_or_404(log_id)
+    if log.status != "running": return ok_response(data={"status": log.status, "already_finished": True})
+    extra = dict(log.extra_json or {})
+    if extra.get("remote"):
+        if not extra.get("agent_id") or not extra.get("remote_task_id"): return error_response("remote backup task cannot be located", code=409)
+        try: cancel_backup_on_agent(int(extra["agent_id"]), str(extra["remote_task_id"]))
+        except BackupAgentError as exc: return error_response(str(exc), code=502)
+    else:
+        from app.services.backup_executor import cancel_local_backup
+        if not cancel_local_backup(log.id): return error_response("local backup process cannot be located", code=409)
+    log.status = "cancelled"; log.finished_at = datetime.utcnow()
+    extra.update({"cancelled_by_user": True, "cancel_reason": "cancelled by user", "cancel_requested_at": datetime.utcnow().isoformat() + "Z"})
+    log.extra_json = extra; db.session.commit()
+    return ok_response(data={"status": "cancelled"}, code=202)
 
 
 @bp.delete("/logs/<int:log_id>")

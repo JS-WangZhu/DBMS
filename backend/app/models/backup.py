@@ -12,7 +12,7 @@ def _utc_isoformat(value):
 
 TARGET_TYPE_ENUM = db.Enum("instance", "cluster", name="backup_target_type", native_enum=False)
 BACKUP_TYPE_ENUM = db.Enum("full", "incremental", name="backup_type_enum", native_enum=False)
-BACKUP_STATUS_ENUM = db.Enum("running", "success", "failed", name="backup_status_enum", native_enum=False)
+BACKUP_STATUS_ENUM = db.Enum("running", "success", "failed", "cancelled", name="backup_status_enum", native_enum=False)
 DB_TYPE_BACKUP_ENUM = db.Enum("mysql", "mongodb", name="backup_db_type", native_enum=False)
 
 

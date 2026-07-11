@@ -2,10 +2,37 @@ import os
 import shutil
 import subprocess
 import tempfile
+import threading
 import secrets
 import struct
+import tarfile
 from datetime import datetime, timedelta
 from pathlib import Path
+
+BACKUP_TIMEOUT_SECONDS = 2592000
+_running_backup_processes = {}
+_running_backup_lock = threading.RLock()
+
+def _run_registered_process(command, log_id):
+    proc = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    with _running_backup_lock:
+        _running_backup_processes[log_id] = proc
+    try:
+        stdout, stderr = proc.communicate(timeout=BACKUP_TIMEOUT_SECONDS)
+        if proc.returncode != 0:
+            raise subprocess.CalledProcessError(proc.returncode, command, output=stdout, stderr=stderr)
+    finally:
+        with _running_backup_lock:
+            _running_backup_processes.pop(log_id, None)
+
+def cancel_local_backup(log_id):
+    with _running_backup_lock:
+        proc = _running_backup_processes.get(log_id)
+    if not proc or proc.poll() is not None:
+        return False
+    proc.terminate()
+    return True
+
 
 from flask import current_app
 
@@ -141,6 +168,25 @@ def _build_mongo_command(instance, password, output_file, compress, tool_path, a
         command.append("--gzip")
 
     return command
+
+
+def _build_partial_mongo_commands(instance, password, output_dir, tool_path, databases, exclusions):
+    whole = {row["database"] for row in exclusions if not row.get("collection")}
+    by_database = {}
+    for row in exclusions:
+        if row.get("collection"):
+            by_database.setdefault(row["database"], []).append(row["collection"])
+    commands, skipped = [], []
+    for database in databases:
+        if database == "local" or database in whole:
+            skipped.append(database)
+            continue
+        command = [tool_path, f"--host={instance.resolved_ip or instance.host_input}", f"--port={instance.port}", f"--db={database}", f"--out={output_dir}"]
+        if instance.username: command.extend(["--username", instance.username])
+        if password: command.extend(["--password", password])
+        for collection in by_database.get(database, []): command.append(f"--excludeCollection={collection}")
+        commands.append(command)
+    return commands, skipped
 
 
 def _run_mongodump_zstd(command, output_file):
@@ -388,6 +434,8 @@ def run_backup_policy(policy_id: int, dry_run: bool = False):
     use_zstd = False
     use_mysql_zstd_pipe = False
     use_zstd_pipe = False
+    use_partial_mongo = False
+    partial_temp_dir = None
     zstd_source_file = None
     if policy.db_type == "mysql":
         if compress_method == "gzip":
@@ -402,26 +450,27 @@ def run_backup_policy(policy_id: int, dry_run: bool = False):
             filename = f"mysql_{instance.id}_{timestamp}.sql"
             command = _build_mysql_command(instance, password, str(Path(policy.storage_path) / filename), tool_path)
     elif policy.db_type == "mongodb":
-        if compress_method == "zstd":
+        mongo_cfg = (policy.extra_json or {}).get("mongo_backup") if isinstance(policy.extra_json, dict) else {}
+        if isinstance(mongo_cfg, dict) and mongo_cfg.get("mode") == "partial":
+            from pymongo import MongoClient
+            options = {"serverSelectionTimeoutMS": 10000}
+            if instance.username: options["username"] = instance.username
+            if password: options["password"] = password
+            client = MongoClient(instance.resolved_ip or instance.host_input, instance.port, **options)
+            try: databases = client.list_database_names()
+            finally: client.close()
+            partial_temp_dir = tempfile.mkdtemp(prefix=f"mongodb_{instance.id}_{timestamp}_", dir=policy.storage_path)
+            command, skipped_databases = _build_partial_mongo_commands(instance, password, partial_temp_dir, tool_path, databases, mongo_cfg.get("exclusions") or [])
+            use_partial_mongo = True
+            suffix = ".tar.gz" if compress_method == "gzip" else (".tar.zst" if compress_method == "zstd" else ".tar")
+            filename = f"mongodb_{instance.id}_{timestamp}{suffix}"
+        elif compress_method == "zstd":
             filename = f"mongodb_{instance.id}_{timestamp}.zst"
             use_zstd_pipe = True
-            command = _build_mongo_command(
-                instance,
-                password,
-                None,
-                False,
-                tool_path,
-                archive_to_stdout=True,
-            )
+            command = _build_mongo_command(instance, password, None, False, tool_path, archive_to_stdout=True)
         else:
             filename = f"mongodb_{instance.id}_{timestamp}.archive"
-            command = _build_mongo_command(
-                instance,
-                password,
-                str(Path(policy.storage_path) / filename),
-                compress_method == "gzip",
-                tool_path,
-            )
+            command = _build_mongo_command(instance, password, str(Path(policy.storage_path) / filename), compress_method == "gzip", tool_path)
     else:
         return _build_failed_result(policy, instance, f"unsupported db_type: {policy.db_type}")
 
@@ -440,14 +489,25 @@ def run_backup_policy(policy_id: int, dry_run: bool = False):
     db.session.commit()
 
     try:
-        if policy.db_type == "mysql" and use_gzip:
+        if use_partial_mongo:
+            for partial_command in command: _run_registered_process(partial_command, log.id)
+            if compress_method == "gzip":
+                with tarfile.open(output_file, "w:gz") as archive: archive.add(partial_temp_dir, arcname="dump")
+            elif compress_method == "zstd":
+                tar_source = output_file[:-4]
+                with tarfile.open(tar_source, "w") as archive: archive.add(partial_temp_dir, arcname="dump")
+                _compress_with_zstd(tar_source, output_file, remove_source=True)
+            else:
+                with tarfile.open(output_file, "w") as archive: archive.add(partial_temp_dir, arcname="dump")
+            shutil.rmtree(partial_temp_dir, ignore_errors=True)
+        elif policy.db_type == "mysql" and use_gzip:
             _run_mysqldump_gzip(command, output_file)
         elif policy.db_type == "mysql" and use_mysql_zstd_pipe:
             _run_mysqldump_zstd(command, output_file)
         elif policy.db_type == "mongodb" and use_zstd_pipe:
             _run_mongodump_zstd(command, output_file)
         else:
-            subprocess.run(command, check=True, capture_output=True, text=True)
+            _run_registered_process(command, log.id)
 
         extra = dict(log.extra_json or {})
         extra["compress"] = compress_method != "none"

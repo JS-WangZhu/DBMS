@@ -5,6 +5,7 @@
         <div class="header-row">
           <span>MongoDB 策略</span>
           <div class="header-actions">
+            <el-input v-model="policyKeyword" clearable placeholder="搜索策略名称、实例或 cron" style="width: 260px" @input="mongoPage.current = 1" />
             <el-button type="primary" @click="openCreatePolicyDialog">新建策略</el-button>
             <el-button @click="refreshAll">刷新</el-button>
           </div>
@@ -40,7 +41,7 @@
           v-model:page-size="mongoPage.size"
           :page-sizes="[10, 20, 50]"
           layout="total, sizes, prev, pager, next, jumper"
-          :total="mongoPage.total"
+          :total="filteredMongoPolicies.length"
           @size-change="handleMongoSizeChange"
           @current-change="handleMongoCurrentChange"
         />
@@ -64,6 +65,18 @@
           <el-select v-model="form.target_id" filterable style="width: 100%" placeholder="请选择已纳管实例">
             <el-option v-for="item in managedInstances" :key="item.id" :label="item.label" :value="item.id" />
           </el-select>
+        </el-form-item>
+        <el-form-item label="备份范围">
+          <el-radio-group v-model="form.mongo_backup_mode"><el-radio value="full">完全备份</el-radio><el-radio value="partial">部分备份</el-radio></el-radio-group>
+        </el-form-item>
+        <el-form-item v-if="form.mongo_backup_mode === 'partial'" label="排除库/集合">
+          <div class="exclusion-list">
+            <div v-for="(row, index) in form.mongo_exclusions" :key="index" class="exclusion-row">
+              <el-input v-model="row.database" placeholder="数据库名（必填）" /><el-input v-model="row.collection" placeholder="集合名（留空排除整个库）" />
+              <el-button type="danger" link @click="form.mongo_exclusions.splice(index, 1)">删除</el-button>
+            </div>
+            <el-button @click="form.mongo_exclusions.push({ database: '', collection: '' })">新增排除项</el-button>
+          </div>
         </el-form-item>
         <el-form-item label="备份工具">
           <el-select v-model="form.backup_tool_config_id" style="width: 100%" placeholder="选择已配置工具" clearable @change="onBackupToolConfigChange">
@@ -169,6 +182,7 @@ import {
 const DB_TYPE = "mongodb";
 
 const mongoPolicies = ref([]);
+const policyKeyword = ref("");
 const dialogVisible = ref(false);
 const saving = ref(false);
 const editingPolicyId = ref(null);
@@ -192,6 +206,8 @@ const form = reactive({
   target_type: "instance",
   target_id: null,
   backup_type: "full",
+  mongo_backup_mode: "full",
+  mongo_exclusions: [],
   tool_name: "mongodump",
   backup_tool_config_id: null,
   cron_expr: "0 2 * * *",
@@ -225,10 +241,19 @@ const currentDbTypeTools = computed(() => {
 const enabledAgents = computed(() => agents.value.filter((item) => item.enabled));
 const showPublicKeyInput = computed(() => form.encrypt_enabled && !form.encrypt_key_id);
 
+const filteredMongoPolicies = computed(() => {
+  const keyword = policyKeyword.value.trim().toLowerCase();
+  if (!keyword) return mongoPolicies.value;
+  return mongoPolicies.value.filter((policy) =>
+    [policy.name, getInstanceLabel(policy.target_id), policy.cron_expr]
+      .some((value) => String(value || "").toLowerCase().includes(keyword))
+  );
+});
+
 const mongoPoliciesData = computed(() => {
   const start = (mongoPage.current - 1) * mongoPage.size;
   const end = start + mongoPage.size;
-  return mongoPolicies.value.slice(start, end);
+  return filteredMongoPolicies.value.slice(start, end);
 });
 
 const dialogTitle = computed(() => (editingPolicyId.value ? "编辑 MongoDB 备份策略" : "新建 MongoDB 备份策略"));
@@ -240,6 +265,8 @@ function resetPolicyForm() {
   form.target_type = "instance";
   form.target_id = null;
   form.backup_type = "full";
+  form.mongo_backup_mode = "full";
+  form.mongo_exclusions = [];
   form.tool_name = "mongodump";
   form.backup_tool_config_id = null;
   form.cron_expr = "0 2 * * *";
@@ -362,6 +389,8 @@ async function refreshAll() {
   form.target_type = policy.target_type || "instance";
   form.target_id = policy.target_id || null;
   form.backup_type = policy.backup_type || "full";
+  form.mongo_backup_mode = extra.mongo_backup?.mode === "partial" ? "partial" : "full";
+  form.mongo_exclusions = Array.isArray(extra.mongo_backup?.exclusions) ? extra.mongo_backup.exclusions.map((row) => ({ ...row })) : [];
   form.tool_name = policy.tool_name || "mongodump";
   form.backup_tool_config_id = policy.backup_tool_config_id || null;
   form.cron_expr = policy.cron_expr || "0 2 * * *";
@@ -428,6 +457,7 @@ function buildPolicyPayload() {
           us3_cli_path: form.us3_cli_path,
         },
         compress_method: form.compress_method,
+        mongo_backup: { mode: form.mongo_backup_mode, exclusions: form.mongo_backup_mode === "partial" ? form.mongo_exclusions.map((row) => ({ database: row.database.trim(), collection: row.collection.trim() })) : [] },
         encrypt: {
           enabled: form.encrypt_enabled,
           key_id: form.encrypt_key_id,
@@ -441,6 +471,13 @@ function buildPolicyPayload() {
     if (!form.target_id) {
       ElMessage.warning("请选择备份实例");
       return;
+    }
+    if (form.mongo_backup_mode === "partial") {
+      if (!form.mongo_exclusions.length || form.mongo_exclusions.some((row) => !row.database.trim())) { ElMessage.warning("部分备份至少需要一个数据库名"); return; }
+      const keys = form.mongo_exclusions.map((row) => row.database.trim() + "\u0000" + row.collection.trim());
+      if (new Set(keys).size !== keys.length) { ElMessage.warning("排除项不能重复"); return; }
+      const whole = new Set(form.mongo_exclusions.filter((row) => !row.collection.trim()).map((row) => row.database.trim()));
+      if (form.mongo_exclusions.some((row) => row.collection.trim() && whole.has(row.database.trim()))) { ElMessage.warning("已排除整个库时不能再配置该库的集合"); return; }
     }
     if (form.encrypt_enabled && !form.encrypt_key_id && !form.encrypt_public_key) {
       ElMessage.warning("启用加密时请上传或粘贴公钥");
@@ -557,6 +594,8 @@ onMounted(refreshAll);
     justify-content: flex-end;
   }
 
+  .exclusion-list { display: flex; flex-direction: column; gap: 8px; width: 100%; }
+  .exclusion-row { display: grid; grid-template-columns: 1fr 1fr auto; gap: 8px; width: 100%; }
   .encrypt-box {
     display: flex;
     flex-direction: column;

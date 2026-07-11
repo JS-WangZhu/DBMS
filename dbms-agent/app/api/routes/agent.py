@@ -5,12 +5,15 @@ import shutil
 import subprocess
 import tempfile
 import struct
+import tarfile
 import gzip
 import threading
 import uuid
 from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
+
+BACKUP_TIMEOUT_SECONDS = 2592000
 from urllib.parse import urlsplit
 
 from flask import Blueprint, request, current_app, send_file
@@ -30,7 +33,7 @@ _MAX_BACKUP_TASKS = 1000
 
 
 def _task_snapshot(task):
-    return deepcopy(task)
+    return deepcopy({key: value for key, value in task.items() if key != "process"})
 
 
 def _prune_backup_tasks():
@@ -40,7 +43,7 @@ def _prune_backup_tasks():
         if overflow <= 0:
             return
         terminal = sorted(
-            (item for item in _backup_tasks.values() if item.get("status") in {"success", "failed"}),
+            (item for item in _backup_tasks.values() if item.get("status") in {"success", "failed", "cancelled"}),
             key=lambda item: item.get("finished_at") or "",
         )
         for item in terminal[:overflow]:
@@ -119,13 +122,32 @@ def _build_mongo_command(instance: dict, output_file: str, compress: bool, tool_
     return command
 
 
+def _build_partial_mongo_commands(instance, output_dir, tool_path, databases, exclusions):
+    whole = {row["database"] for row in exclusions if not row.get("collection")}
+    by_database = {}
+    for row in exclusions:
+        if row.get("collection"):
+            by_database.setdefault(row["database"], []).append(row["collection"])
+    commands, skipped = [], []
+    for database in databases:
+        if database == "local" or database in whole:
+            skipped.append(database)
+            continue
+        command = [tool_path, f"--host={instance.get('resolved_ip') or instance.get('host_input')}", f"--port={instance.get('port')}", f"--db={database}", f"--out={output_dir}"]
+        if instance.get("username"): command.extend(["--username", instance["username"]])
+        if instance.get("password"): command.extend(["--password", instance["password"]])
+        for collection in by_database.get(database, []): command.append(f"--excludeCollection={collection}")
+        commands.append(command)
+    return commands, skipped
+
+
 def _run_mysqldump_gzip(command, output_file):
     proc = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     with gzip.open(output_file, "wb") as gz:
         if proc.stdout:
             shutil.copyfileobj(proc.stdout, gz)
     stderr_data = proc.stderr.read() if proc.stderr else b""
-    proc.wait(timeout=86400)
+    proc.wait(timeout=BACKUP_TIMEOUT_SECONDS)
     if proc.returncode != 0:
         stderr_text = stderr_data.decode(errors="replace") if stderr_data else ""
         raise subprocess.CalledProcessError(proc.returncode, command, stderr=stderr_text)
@@ -332,7 +354,7 @@ def _encrypt_backup_file(file_path: str, public_key_pem: str):
     return enc_file, None, None, decrypt_cmd
 
 
-def _run_backup(policy: dict, instance: dict, dry_run: bool = False):
+def _run_backup(policy: dict, instance: dict, dry_run: bool = False, task_id: str = None):
     """Execute backup based on policy and instance data"""
     db_type = policy.get("db_type")
     default_tool = "mysqldump" if db_type == "mysql" else "mongodump"
@@ -358,6 +380,8 @@ def _run_backup(policy: dict, instance: dict, dry_run: bool = False):
     use_zstd = False
     use_mysql_zstd_pipe = False
     use_zstd_pipe = False
+    use_partial_mongo = False
+    partial_temp_dir = None
     zstd_source_file = None
     if db_type == "mysql":
         if compress_method == "gzip":
@@ -372,7 +396,21 @@ def _run_backup(policy: dict, instance: dict, dry_run: bool = False):
             output_file = os.path.join(storage_path, f"{instance_name}_{timestamp}.sql")
             command = _build_mysql_command(instance, output_file, tool_path, include_result_file=True)
     elif db_type == "mongodb":
-        if compress_method == "zstd":
+        mongo_cfg = policy.get("mongo_backup") if isinstance(policy.get("mongo_backup"), dict) else {}
+        if mongo_cfg.get("mode") == "partial":
+            from pymongo import MongoClient
+            options = {"serverSelectionTimeoutMS": 10000}
+            if instance.get("username"): options["username"] = instance["username"]
+            if instance.get("password"): options["password"] = instance["password"]
+            client = MongoClient(instance.get("resolved_ip") or instance.get("host_input"), instance.get("port"), **options)
+            try: databases = client.list_database_names()
+            finally: client.close()
+            partial_temp_dir = tempfile.mkdtemp(prefix=f"{instance_name}_{timestamp}_", dir=storage_path)
+            command, skipped_databases = _build_partial_mongo_commands(instance, partial_temp_dir, tool_path, databases, mongo_cfg.get("exclusions") or [])
+            use_partial_mongo = True
+            suffix = ".tar.gz" if compress_method == "gzip" else (".tar.zst" if compress_method == "zstd" else ".tar")
+            output_file = os.path.join(storage_path, f"{instance_name}_{timestamp}{suffix}")
+        elif compress_method == "zstd":
             output_file = os.path.join(storage_path, f"{instance_name}_{timestamp}.zst")
             zstd_source_file = None
             use_zstd_pipe = True
@@ -393,19 +431,38 @@ def _run_backup(policy: dict, instance: dict, dry_run: bool = False):
         }
     
     try:
-        if db_type == "mysql" and use_gzip:
+        if use_partial_mongo:
+            for partial_command in command:
+                proc = subprocess.Popen(partial_command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                if task_id:
+                    with _backup_tasks_lock:
+                        task = _backup_tasks.get(task_id)
+                        if task: task["process"] = proc
+                stdout, stderr = proc.communicate(timeout=BACKUP_TIMEOUT_SECONDS)
+                if proc.returncode != 0: raise subprocess.CalledProcessError(proc.returncode, partial_command, output=stdout, stderr=stderr)
+            if compress_method == "gzip":
+                with tarfile.open(output_file, "w:gz") as archive: archive.add(partial_temp_dir, arcname="dump")
+            elif compress_method == "zstd":
+                tar_source = output_file[:-4]
+                with tarfile.open(tar_source, "w") as archive: archive.add(partial_temp_dir, arcname="dump")
+                _compress_with_zstd(tar_source, output_file, remove_source=True)
+            else:
+                with tarfile.open(output_file, "w") as archive: archive.add(partial_temp_dir, arcname="dump")
+            shutil.rmtree(partial_temp_dir, ignore_errors=True)
+        elif db_type == "mysql" and use_gzip:
             _run_mysqldump_gzip(command, output_file)
         elif db_type == "mysql" and use_mysql_zstd_pipe:
             _run_mysqldump_zstd(command, output_file)
         elif db_type == "mongodb" and use_zstd_pipe:
             _run_mongodump_zstd(command, output_file)
         else:
-            result = subprocess.run(
-                command,
-                capture_output=True,
-                text=True,
-                timeout=86400,
-            )
+            proc = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            if task_id:
+                with _backup_tasks_lock:
+                    task = _backup_tasks.get(task_id)
+                    if task: task["process"] = proc
+            stdout, stderr = proc.communicate(timeout=BACKUP_TIMEOUT_SECONDS)
+            result = type("ProcessResult", (), {"returncode": proc.returncode, "stdout": stdout, "stderr": stderr})()
             if result.returncode != 0:
                 return {
                     "ok": False,
@@ -476,14 +533,14 @@ def _run_backup_task(app, task_id, policy, instance):
             task["status"] = "running"
             task["started_at"] = datetime.utcnow().isoformat() + "Z"
         try:
-            result = _run_backup(policy, instance, False)
+            result = _run_backup(policy, instance, False, task_id=task_id)
         except Exception as exc:
             logger.exception("backup task crashed: task_id=%s", task_id)
             result = {"ok": False, "message": str(exc)}
         with _backup_tasks_lock:
             task = _backup_tasks.get(task_id)
             if task:
-                task["status"] = "success" if result.get("ok") else "failed"
+                task["status"] = "cancelled" if task.get("cancel_requested") else ("success" if result.get("ok") else "failed")
                 task["result"] = result
                 task["finished_at"] = datetime.utcnow().isoformat() + "Z"
         _prune_backup_tasks()
@@ -564,6 +621,26 @@ def execute_backup():
     )
     worker.start()
     return ok_response(data={"task_id": task_id, "status": "submitted"}, code=202)
+
+
+@bp.route("/tasks/<task_id>/cancel", methods=["POST"])
+@_require_api_key
+def cancel_backup_task(task_id):
+    with _backup_tasks_lock:
+        task = _backup_tasks.get(task_id)
+        if not task:
+            return error_response("backup task not found", code=404)
+        if task.get("status") in {"success", "failed", "cancelled"}:
+            return ok_response(data=_task_snapshot(task))
+        task["cancel_requested"] = True
+        proc = task.get("process")
+        if proc and proc.poll() is None:
+            proc.terminate()
+        task["status"] = "cancelled"
+        task["finished_at"] = datetime.utcnow().isoformat() + "Z"
+        task["result"] = {"ok": False, "cancelled": True, "message": "cancelled by user"}
+        snapshot = _task_snapshot(task)
+    return ok_response(data=snapshot, code=202)
 
 
 @bp.route("/tasks/<task_id>", methods=["GET"])

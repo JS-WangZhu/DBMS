@@ -107,6 +107,7 @@
         <el-table-column label="操作" width="240" fixed="right">
           <template #default="scope">
             <div class="op-actions">
+              <el-button v-if="scope.row.status === 'running'" link type="danger" @click="cancelRecord(scope.row)">停止任务</el-button>
               <el-button link type="primary" @click="openDownloadDialog(scope.row)">下载</el-button>
               <el-button v-if="scope.row.encrypt?.enabled" link type="warning" @click="showDecryptHelp(scope.row)">解密方法</el-button>
               <el-button link type="danger" @click="removeRecord(scope.row, false)">删除记录</el-button>
@@ -191,7 +192,7 @@
 import { computed, onMounted, reactive, ref } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 
-import { deleteBackupLog, downloadBackupFile, downloadBackupFileFromAgent, getBackupDownloadUrl, listBackupLogs } from "../api/modules/backups";
+import { cancelBackupLog, deleteBackupLog, downloadBackupFile, downloadBackupFileFromAgent, getBackupDownloadUrl, listBackupLogs } from "../api/modules/backups";
 import { formatBeijingTime } from "../utils/time";
 
 const loading = ref(false);
@@ -450,6 +451,17 @@ function copyText(text) {
   }
   navigator.clipboard.writeText(text);
   ElMessage.success("已复制到剪贴板");
+}
+
+async function cancelRecord(row) {
+  try {
+    await ElMessageBox.confirm("确认停止备份任务（日志ID: " + row.id + "）吗？", "停止任务", { type: "warning" });
+    await cancelBackupLog(row.id);
+    ElMessage.success("停止请求已提交");
+    await loadRecords();
+  } catch (error) {
+    if (error !== "cancel" && error !== "close") ElMessage.error(error.response?.data?.message || "停止任务失败");
+  }
 }
 
 async function removeRecord(row, deleteFile) {

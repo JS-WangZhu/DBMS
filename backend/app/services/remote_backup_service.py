@@ -92,6 +92,7 @@ def submit_remote_backup(policy: BackupPolicy, dry_run: bool = False):
 
 def _finish_remote_log(log: BackupLog, policy: BackupPolicy, task: dict):
     result = task.get("result") if isinstance(task.get("result"), dict) else {}
+    cancelled = task.get("status") == "cancelled" or bool(result.get("cancelled"))
     succeeded = task.get("status") == "success" and bool(result.get("ok"))
     method = _compress_method(policy)
     extra = dict(log.extra_json or {})
@@ -118,9 +119,9 @@ def _finish_remote_log(log: BackupLog, policy: BackupPolicy, task: dict):
     log.finished_at = datetime.utcnow()
     log.file_path = result.get("output_file")
     log.size_bytes = result.get("file_size")
-    log.status = "success" if succeeded else "failed"
+    log.status = "cancelled" if cancelled else ("success" if succeeded else "failed")
     log.error_message = None if succeeded else (result.get("message") or "remote backup failed")
-    if not succeeded:
+    if not succeeded and not cancelled:
         instance = DatabaseInstance.query.get(policy.target_id)
         extra["notify"] = notify_backup_failure(
             policy=policy,
