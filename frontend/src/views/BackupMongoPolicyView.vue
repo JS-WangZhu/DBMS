@@ -69,13 +69,16 @@
         <el-form-item label="备份范围">
           <el-radio-group v-model="form.mongo_backup_mode"><el-radio value="full">完全备份</el-radio><el-radio value="partial">部分备份</el-radio></el-radio-group>
         </el-form-item>
-        <el-form-item v-if="form.mongo_backup_mode === 'partial'" label="排除库/集合">
+        <el-form-item v-if="form.mongo_backup_mode === 'partial'" label="目标数据库">
+          <el-input v-model="form.mongo_database" placeholder="请输入要备份的数据库名" />
+        </el-form-item>
+        <el-form-item v-if="form.mongo_backup_mode === 'partial'" label="排除集合">
           <div class="exclusion-list">
-            <div v-for="(row, index) in form.mongo_exclusions" :key="index" class="exclusion-row">
-              <el-input v-model="row.database" placeholder="数据库名（必填）" /><el-input v-model="row.collection" placeholder="集合名（留空排除整个库）" />
-              <el-button type="danger" link @click="form.mongo_exclusions.splice(index, 1)">删除</el-button>
+            <div v-for="(_collection, index) in form.mongo_excluded_collections" :key="index" class="exclusion-row">
+              <el-input v-model="form.mongo_excluded_collections[index]" placeholder="请输入要排除的集合名" />
+              <el-button type="danger" link @click="form.mongo_excluded_collections.splice(index, 1)">删除</el-button>
             </div>
-            <el-button @click="form.mongo_exclusions.push({ database: '', collection: '' })">新增排除项</el-button>
+            <el-button @click="form.mongo_excluded_collections.push('')">新增排除集合</el-button>
           </div>
         </el-form-item>
         <el-form-item label="备份工具">
@@ -207,7 +210,8 @@ const form = reactive({
   target_id: null,
   backup_type: "full",
   mongo_backup_mode: "full",
-  mongo_exclusions: [],
+  mongo_database: "",
+  mongo_excluded_collections: [],
   tool_name: "mongodump",
   backup_tool_config_id: null,
   cron_expr: "0 2 * * *",
@@ -266,7 +270,8 @@ function resetPolicyForm() {
   form.target_id = null;
   form.backup_type = "full";
   form.mongo_backup_mode = "full";
-  form.mongo_exclusions = [];
+  form.mongo_database = "";
+  form.mongo_excluded_collections = [];
   form.tool_name = "mongodump";
   form.backup_tool_config_id = null;
   form.cron_expr = "0 2 * * *";
@@ -378,6 +383,25 @@ async function refreshAll() {
   ]);
 }
 
+function readMongoBackupScope(source) {
+  const config = source && typeof source === "object" ? source : {};
+  const database = String(config.database || "").trim();
+  if (database || Array.isArray(config.excluded_collections)) {
+    return { database, excludedCollections: Array.isArray(config.excluded_collections) ? [...config.excluded_collections] : [] };
+  }
+  const legacyRows = Array.isArray(config.exclusions) ? config.exclusions : [];
+  const validRows = legacyRows.filter((row) => String(row?.database || "").trim() && String(row?.collection || "").trim());
+  const databases = new Set(validRows.map((row) => String(row.database).trim()));
+  if (legacyRows.length && validRows.length === legacyRows.length && databases.size === 1) {
+    return {
+      database: [...databases][0],
+      excludedCollections: validRows.map((row) => String(row.collection).trim()),
+    };
+  }
+  return { database: "", excludedCollections: [] };
+}
+
+
   function applyPolicyToForm(policy) {
     const extra = policy.extra_json || {};
     const notify = extra.notify || {};
@@ -389,8 +413,10 @@ async function refreshAll() {
   form.target_type = policy.target_type || "instance";
   form.target_id = policy.target_id || null;
   form.backup_type = policy.backup_type || "full";
+  const mongoScope = readMongoBackupScope(extra.mongo_backup);
   form.mongo_backup_mode = extra.mongo_backup?.mode === "partial" ? "partial" : "full";
-  form.mongo_exclusions = Array.isArray(extra.mongo_backup?.exclusions) ? extra.mongo_backup.exclusions.map((row) => ({ ...row })) : [];
+  form.mongo_database = mongoScope.database;
+  form.mongo_excluded_collections = mongoScope.excludedCollections.map((collection) => String(collection));
   form.tool_name = policy.tool_name || "mongodump";
   form.backup_tool_config_id = policy.backup_tool_config_id || null;
   form.cron_expr = policy.cron_expr || "0 2 * * *";
@@ -457,7 +483,7 @@ function buildPolicyPayload() {
           us3_cli_path: form.us3_cli_path,
         },
         compress_method: form.compress_method,
-        mongo_backup: { mode: form.mongo_backup_mode, exclusions: form.mongo_backup_mode === "partial" ? form.mongo_exclusions.map((row) => ({ database: row.database.trim(), collection: row.collection.trim() })) : [] },
+        mongo_backup: { mode: form.mongo_backup_mode, database: form.mongo_backup_mode === "partial" ? form.mongo_database.trim() : "", excluded_collections: form.mongo_backup_mode === "partial" ? form.mongo_excluded_collections.map((collection) => collection.trim()) : [] },
         encrypt: {
           enabled: form.encrypt_enabled,
           key_id: form.encrypt_key_id,
@@ -473,11 +499,10 @@ function buildPolicyPayload() {
       return;
     }
     if (form.mongo_backup_mode === "partial") {
-      if (!form.mongo_exclusions.length || form.mongo_exclusions.some((row) => !row.database.trim())) { ElMessage.warning("部分备份至少需要一个数据库名"); return; }
-      const keys = form.mongo_exclusions.map((row) => row.database.trim() + "\u0000" + row.collection.trim());
-      if (new Set(keys).size !== keys.length) { ElMessage.warning("排除项不能重复"); return; }
-      const whole = new Set(form.mongo_exclusions.filter((row) => !row.collection.trim()).map((row) => row.database.trim()));
-      if (form.mongo_exclusions.some((row) => row.collection.trim() && whole.has(row.database.trim()))) { ElMessage.warning("已排除整个库时不能再配置该库的集合"); return; }
+      if (!form.mongo_database.trim()) { ElMessage.warning("部分备份必须指定一个数据库"); return; }
+      const collections = form.mongo_excluded_collections.map((collection) => collection.trim());
+      if (collections.some((collection) => !collection)) { ElMessage.warning("排除集合名不能为空"); return; }
+      if (new Set(collections).size !== collections.length) { ElMessage.warning("排除集合不能重复"); return; }
     }
     if (form.encrypt_enabled && !form.encrypt_key_id && !form.encrypt_public_key) {
       ElMessage.warning("启用加密时请上传或粘贴公钥");
@@ -595,7 +620,7 @@ onMounted(refreshAll);
   }
 
   .exclusion-list { display: flex; flex-direction: column; gap: 8px; width: 100%; }
-  .exclusion-row { display: grid; grid-template-columns: 1fr 1fr auto; gap: 8px; width: 100%; }
+  .exclusion-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; width: 100%; }
   .encrypt-box {
     display: flex;
     flex-direction: column;

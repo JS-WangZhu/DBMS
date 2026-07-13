@@ -26,7 +26,7 @@ def test_execute_returns_immediately_and_result_can_be_refreshed(client, monkeyp
     release = threading.Event()
     calls = []
 
-    def fake_backup(_policy, _instance, _dry_run):
+    def fake_backup(_policy, _instance, _dry_run, task_id=None):
         calls.append(True)
         started.set()
         assert release.wait(timeout=2)
@@ -70,3 +70,50 @@ def test_execute_returns_immediately_and_result_can_be_refreshed(client, monkeyp
     data = batch.get_json()["data"]
     assert data["tasks"]["task-1"]["status"] == "success"
     assert data["missing"] == ["missing"]
+
+
+class FakeProcess:
+    def __init__(self):
+        self.terminated = False
+        self.returncode = None
+
+    def poll(self):
+        return self.returncode
+
+    def terminate(self):
+        self.terminated = True
+        self.returncode = -15
+
+
+def test_task_process_registration_tracks_and_removes_processes():
+    proc = FakeProcess()
+    with agent_routes._backup_tasks_lock:
+        agent_routes._backup_tasks["task-processes"] = {"processes": []}
+
+    agent_routes._register_task_process("task-processes", proc)
+    with agent_routes._backup_tasks_lock:
+        assert agent_routes._backup_tasks["task-processes"]["processes"] == [proc]
+
+    agent_routes._unregister_task_process("task-processes", proc)
+    with agent_routes._backup_tasks_lock:
+        assert agent_routes._backup_tasks["task-processes"]["processes"] == []
+
+
+def test_cancel_terminates_all_registered_processes_and_hides_them_from_snapshot(client):
+    first = FakeProcess()
+    second = FakeProcess()
+    with agent_routes._backup_tasks_lock:
+        agent_routes._backup_tasks["cancel-task"] = {
+            "task_id": "cancel-task",
+            "status": "running",
+            "processes": [first, second],
+            "result": None,
+        }
+
+    response = client.post("/api/agent/tasks/cancel-task/cancel")
+
+    assert response.status_code == 202
+    assert first.terminated and second.terminated
+    snapshot = response.get_json()["data"]
+    assert snapshot["status"] == "cancelled"
+    assert "processes" not in snapshot

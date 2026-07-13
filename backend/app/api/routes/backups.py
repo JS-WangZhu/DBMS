@@ -109,23 +109,55 @@ def _normalize_extra_json(extra_json):
 def _normalize_mongo_backup(db_type, config):
     config = config if isinstance(config, dict) else {}
     mode = str(config.get("mode") or "full").strip().lower()
-    if mode not in {"full", "partial"}: return None, "invalid mongo backup mode, allowed: full/partial"
+    if mode not in {"full", "partial"}:
+        return None, "invalid mongo backup mode, allowed: full/partial"
+
+    full_scope = {"mode": "full", "database": "", "excluded_collections": []}
     if db_type != "mongodb":
-        return (None, "mongo partial backup is only available for mongodb") if mode == "partial" else ({"mode": "full", "exclusions": []}, None)
-    if mode == "full": return {"mode": "full", "exclusions": []}, None
-    rows = config.get("exclusions")
-    if not isinstance(rows, list) or not rows: return None, "mongodb partial backup requires at least one exclusion"
-    normalized, seen, whole = [], set(), set()
+        if mode == "partial":
+            return None, "mongo partial backup is only available for mongodb"
+        return full_scope, None
+    if mode == "full":
+        return full_scope, None
+
+    if "database" in config or "excluded_collections" in config:
+        database = str(config.get("database") or "").strip()
+        rows = config.get("excluded_collections", [])
+        if not database:
+            return None, "mongodb partial backup database is required"
+        if not isinstance(rows, list):
+            return None, "mongodb excluded_collections must be a list"
+    else:
+        legacy_rows = config.get("exclusions")
+        if not isinstance(legacy_rows, list) or not legacy_rows:
+            return None, "mongodb partial backup database is required"
+        database_names = set()
+        rows = []
+        for row in legacy_rows:
+            if not isinstance(row, dict):
+                return None, "legacy mongodb exclusion must be an object"
+            legacy_database = str(row.get("database") or "").strip()
+            collection = str(row.get("collection") or "").strip()
+            if not legacy_database or not collection:
+                return None, "legacy mongodb partial backup scope requires one database and collection exclusions"
+            database_names.add(legacy_database)
+            rows.append(collection)
+        if len(database_names) != 1:
+            return None, "legacy mongodb partial backup scope spans multiple databases"
+        database = database_names.pop()
+
+    normalized = []
+    seen = set()
     for row in rows:
-        if not isinstance(row, dict): return None, "mongodb exclusion must be an object"
-        database, collection = str(row.get("database") or "").strip(), str(row.get("collection") or "").strip()
-        if not database: return None, "mongodb exclusion database is required"
-        key = (database, collection)
-        if key in seen: return None, f"duplicate mongodb exclusion: {database}.{collection or '*'}"
-        seen.add(key); normalized.append({"database": database, "collection": collection})
-        if not collection: whole.add(database)
-    if any(row["collection"] and row["database"] in whole for row in normalized): return None, "whole database exclusion conflicts with collection exclusion"
-    return {"mode": "partial", "exclusions": normalized}, None
+        collection = str(row or "").strip()
+        if not collection:
+            return None, "mongodb excluded collection is required"
+        if collection in seen:
+            return None, f"duplicate mongodb excluded collection: {collection}"
+        seen.add(collection)
+        normalized.append(collection)
+
+    return {"mode": "partial", "database": database, "excluded_collections": normalized}, None
 
 
 def _validate_target_binding(target_type, target_id, db_type):

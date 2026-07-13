@@ -5,11 +5,10 @@ import tempfile
 import threading
 import secrets
 import struct
-import tarfile
 from datetime import datetime, timedelta
 from pathlib import Path
 
-BACKUP_TIMEOUT_SECONDS = 2592000
+BACKUP_TIMEOUT_SECONDS = 604800
 _running_backup_processes = {}
 _running_backup_lock = threading.RLock()
 
@@ -80,6 +79,7 @@ def _build_mysql_command(instance, password, output_file, tool_path, include_res
         f"--user={instance.username or ''}",
         "--default-character-set=utf8mb4",
         "--single-transaction",
+        "--quick",
         "--all-databases",
     ]
     if include_result_file:
@@ -170,23 +170,27 @@ def _build_mongo_command(instance, password, output_file, compress, tool_path, a
     return command
 
 
-def _build_partial_mongo_commands(instance, password, output_dir, tool_path, databases, exclusions):
-    whole = {row["database"] for row in exclusions if not row.get("collection")}
-    by_database = {}
-    for row in exclusions:
-        if row.get("collection"):
-            by_database.setdefault(row["database"], []).append(row["collection"])
-    commands, skipped = [], []
-    for database in databases:
-        if database == "local" or database in whole:
-            skipped.append(database)
-            continue
-        command = [tool_path, f"--host={instance.resolved_ip or instance.host_input}", f"--port={instance.port}", f"--db={database}", f"--out={output_dir}"]
-        if instance.username: command.extend(["--username", instance.username])
-        if password: command.extend(["--password", password])
-        for collection in by_database.get(database, []): command.append(f"--excludeCollection={collection}")
-        commands.append(command)
-    return commands, skipped
+def _build_partial_mongo_command(
+    instance,
+    password,
+    output_file,
+    compress,
+    tool_path,
+    database,
+    excluded_collections,
+    archive_to_stdout=False,
+):
+    command = _build_mongo_command(
+        instance,
+        password,
+        output_file,
+        compress,
+        tool_path,
+        archive_to_stdout=archive_to_stdout,
+    )
+    command.append(f"--db={database}")
+    command.extend(f"--excludeCollection={collection}" for collection in excluded_collections)
+    return command
 
 
 def _run_mongodump_zstd(command, output_file):
@@ -434,8 +438,6 @@ def run_backup_policy(policy_id: int, dry_run: bool = False):
     use_zstd = False
     use_mysql_zstd_pipe = False
     use_zstd_pipe = False
-    use_partial_mongo = False
-    partial_temp_dir = None
     zstd_source_file = None
     if policy.db_type == "mysql":
         if compress_method == "gzip":
@@ -452,18 +454,22 @@ def run_backup_policy(policy_id: int, dry_run: bool = False):
     elif policy.db_type == "mongodb":
         mongo_cfg = (policy.extra_json or {}).get("mongo_backup") if isinstance(policy.extra_json, dict) else {}
         if isinstance(mongo_cfg, dict) and mongo_cfg.get("mode") == "partial":
-            from pymongo import MongoClient
-            options = {"serverSelectionTimeoutMS": 10000}
-            if instance.username: options["username"] = instance.username
-            if password: options["password"] = password
-            client = MongoClient(instance.resolved_ip or instance.host_input, instance.port, **options)
-            try: databases = client.list_database_names()
-            finally: client.close()
-            partial_temp_dir = tempfile.mkdtemp(prefix=f"mongodb_{instance.id}_{timestamp}_", dir=policy.storage_path)
-            command, skipped_databases = _build_partial_mongo_commands(instance, password, partial_temp_dir, tool_path, databases, mongo_cfg.get("exclusions") or [])
-            use_partial_mongo = True
-            suffix = ".tar.gz" if compress_method == "gzip" else (".tar.zst" if compress_method == "zstd" else ".tar")
-            filename = f"mongodb_{instance.id}_{timestamp}{suffix}"
+            database = str(mongo_cfg.get("database") or "").strip()
+            excluded_collections = mongo_cfg.get("excluded_collections") or []
+            if compress_method == "zstd":
+                filename = f"mongodb_{instance.id}_{timestamp}.zst"
+                use_zstd_pipe = True
+                command = _build_partial_mongo_command(
+                    instance, password, None, False, tool_path,
+                    database, excluded_collections, archive_to_stdout=True,
+                )
+            else:
+                filename = f"mongodb_{instance.id}_{timestamp}.archive"
+                command = _build_partial_mongo_command(
+                    instance, password, str(Path(policy.storage_path) / filename),
+                    compress_method == "gzip", tool_path, database,
+                    excluded_collections,
+                )
         elif compress_method == "zstd":
             filename = f"mongodb_{instance.id}_{timestamp}.zst"
             use_zstd_pipe = True
@@ -489,18 +495,7 @@ def run_backup_policy(policy_id: int, dry_run: bool = False):
     db.session.commit()
 
     try:
-        if use_partial_mongo:
-            for partial_command in command: _run_registered_process(partial_command, log.id)
-            if compress_method == "gzip":
-                with tarfile.open(output_file, "w:gz") as archive: archive.add(partial_temp_dir, arcname="dump")
-            elif compress_method == "zstd":
-                tar_source = output_file[:-4]
-                with tarfile.open(tar_source, "w") as archive: archive.add(partial_temp_dir, arcname="dump")
-                _compress_with_zstd(tar_source, output_file, remove_source=True)
-            else:
-                with tarfile.open(output_file, "w") as archive: archive.add(partial_temp_dir, arcname="dump")
-            shutil.rmtree(partial_temp_dir, ignore_errors=True)
-        elif policy.db_type == "mysql" and use_gzip:
+        if policy.db_type == "mysql" and use_gzip:
             _run_mysqldump_gzip(command, output_file)
         elif policy.db_type == "mysql" and use_mysql_zstd_pipe:
             _run_mysqldump_zstd(command, output_file)
