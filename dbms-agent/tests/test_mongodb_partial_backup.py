@@ -26,6 +26,7 @@ def test_build_partial_mongo_command_targets_one_database_and_excludes_collectio
     assert "--excludeCollection=audit" in command
     assert "--excludeCollection=temporary_data" in command
     assert "--gzip" in command
+    assert "--authenticationDatabase=admin" in command
     assert all(isinstance(argument, str) for argument in command)
 
 
@@ -96,5 +97,5 @@ def test_partial_mongo_dry_run_returns_one_command_without_database_discovery(tm
     assert all(isinstance(argument, str) for argument in result["command"])
 
 
-def test_agent_backup_timeout_is_thirty_days():
-    assert agent_routes.BACKUP_TIMEOUT_SECONDS == 2_592_000
+def test_agent_backup_timeout_is_seven_days():
+    assert agent_routes.BACKUP_TIMEOUT_SECONDS == 604_800

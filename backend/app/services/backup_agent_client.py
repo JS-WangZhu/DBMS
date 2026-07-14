@@ -152,6 +152,12 @@ def _resolve_s3_upload_options(policy: BackupPolicy) -> dict:
     }
 
 
+def _mongo_auth_database(instance: DatabaseInstance) -> str:
+    """Read MongoDB auth DB from the managed asset connection settings."""
+    extra = instance.extra_json if isinstance(instance.extra_json, dict) else {}
+    return str(extra.get("auth_source") or extra.get("auth_db") or "admin").strip() or "admin"
+
+
 def _build_payload_from_policy(policy: BackupPolicy, instance: DatabaseInstance) -> dict:
     """Build payload from policy and instance data"""
     tool_config = None
@@ -170,6 +176,11 @@ def _build_payload_from_policy(policy: BackupPolicy, instance: DatabaseInstance)
     if compress_method not in {"none", "gzip", "zstd"}:
         compress_method = "gzip" if policy.compress else "none"
 
+    mongo_backup = dict((policy.extra_json or {}).get("mongo_backup") or {"mode": "full", "exclusions": []})
+    if policy.db_type == "mongodb":
+        # The remote agent needs the asset-derived value, not a policy form field.
+        mongo_backup["auth_database"] = _mongo_auth_database(instance)
+
     policy_data = {
         "db_type": policy.db_type,
         "tool_path": tool_config.tool_path if tool_config else policy.tool_name,
@@ -177,7 +188,7 @@ def _build_payload_from_policy(policy: BackupPolicy, instance: DatabaseInstance)
         "compress": compress_method != "none",
         "compress_method": compress_method,
         "encrypt": encrypt_payload,
-        "mongo_backup": (policy.extra_json or {}).get("mongo_backup", {"mode": "full", "exclusions": []}),
+        "mongo_backup": mongo_backup,
     }
     if policy.s3_storage_config_id and _is_policy_s3_upload_enabled(policy):
         s3_config = S3StorageConfig.query.get(policy.s3_storage_config_id)

@@ -62,7 +62,7 @@ export function deleteBackupLog(logId, deleteFile = false) {
   });
 }
 
-export function backupOverview(hours = 24) {
+export function backupOverview(hours = 48) {
   return client.get("/backups/overview", { params: { hours } });
 }
 

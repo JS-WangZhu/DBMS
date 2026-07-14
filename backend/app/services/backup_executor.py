@@ -148,7 +148,9 @@ def _compress_with_zstd(source_file: str, target_file: str = None, remove_source
     return target_file
 
 
-def _build_mongo_command(instance, password, output_file, compress, tool_path, archive_to_stdout=False):
+def _build_mongo_command(
+    instance, password, output_file, compress, tool_path, archive_to_stdout=False, auth_database="admin"
+):
     command = [
         tool_path,
         f"--host={instance.resolved_ip or instance.host_input}",
@@ -163,11 +165,18 @@ def _build_mongo_command(instance, password, output_file, compress, tool_path, a
         command.extend(["--username", instance.username])
     if password:
         command.extend(["--password", password])
+    command.append(f"--authenticationDatabase={str(auth_database or 'admin').strip() or 'admin'}")
 
     if compress:
         command.append("--gzip")
 
     return command
+
+
+def _mongo_auth_database(instance) -> str:
+    """Read MongoDB auth DB from the managed asset connection settings."""
+    extra = instance.extra_json if isinstance(instance.extra_json, dict) else {}
+    return str(extra.get("auth_source") or extra.get("auth_db") or "admin").strip() or "admin"
 
 
 def _build_partial_mongo_command(
@@ -179,6 +188,7 @@ def _build_partial_mongo_command(
     database,
     excluded_collections,
     archive_to_stdout=False,
+    auth_database="admin",
 ):
     command = _build_mongo_command(
         instance,
@@ -187,6 +197,7 @@ def _build_partial_mongo_command(
         compress,
         tool_path,
         archive_to_stdout=archive_to_stdout,
+        auth_database=auth_database,
     )
     command.append(f"--db={database}")
     command.extend(f"--excludeCollection={collection}" for collection in excluded_collections)
@@ -453,6 +464,7 @@ def run_backup_policy(policy_id: int, dry_run: bool = False):
             command = _build_mysql_command(instance, password, str(Path(policy.storage_path) / filename), tool_path)
     elif policy.db_type == "mongodb":
         mongo_cfg = (policy.extra_json or {}).get("mongo_backup") if isinstance(policy.extra_json, dict) else {}
+        auth_database = _mongo_auth_database(instance)
         if isinstance(mongo_cfg, dict) and mongo_cfg.get("mode") == "partial":
             database = str(mongo_cfg.get("database") or "").strip()
             excluded_collections = mongo_cfg.get("excluded_collections") or []
@@ -461,22 +473,22 @@ def run_backup_policy(policy_id: int, dry_run: bool = False):
                 use_zstd_pipe = True
                 command = _build_partial_mongo_command(
                     instance, password, None, False, tool_path,
-                    database, excluded_collections, archive_to_stdout=True,
+                    database, excluded_collections, archive_to_stdout=True, auth_database=auth_database,
                 )
             else:
                 filename = f"mongodb_{instance.id}_{timestamp}.archive"
                 command = _build_partial_mongo_command(
                     instance, password, str(Path(policy.storage_path) / filename),
                     compress_method == "gzip", tool_path, database,
-                    excluded_collections,
+                    excluded_collections, auth_database=auth_database,
                 )
         elif compress_method == "zstd":
             filename = f"mongodb_{instance.id}_{timestamp}.zst"
             use_zstd_pipe = True
-            command = _build_mongo_command(instance, password, None, False, tool_path, archive_to_stdout=True)
+            command = _build_mongo_command(instance, password, None, False, tool_path, archive_to_stdout=True, auth_database=auth_database)
         else:
             filename = f"mongodb_{instance.id}_{timestamp}.archive"
-            command = _build_mongo_command(instance, password, str(Path(policy.storage_path) / filename), compress_method == "gzip", tool_path)
+            command = _build_mongo_command(instance, password, str(Path(policy.storage_path) / filename), compress_method == "gzip", tool_path, auth_database=auth_database)
     else:
         return _build_failed_result(policy, instance, f"unsupported db_type: {policy.db_type}")
 

@@ -4,6 +4,7 @@ from app.api.routes.backups import _normalize_mongo_backup
 from app.extensions import db
 from app.models.backup import BackupPolicy
 from app.models.db_asset import DatabaseInstance
+from app.services import backup_agent_client
 from app.services import backup_executor
 
 
@@ -90,11 +91,12 @@ def test_build_partial_mongo_command_targets_one_database_and_excludes_collectio
     assert "--excludeCollection=audit" in command
     assert "--excludeCollection=temporary_data" in command
     assert "--gzip" in command
+    assert "--authenticationDatabase=admin" in command
     assert all(isinstance(argument, str) for argument in command)
 
 
-def test_backup_timeout_is_thirty_days():
-    assert backup_executor.BACKUP_TIMEOUT_SECONDS == 2_592_000
+def test_backup_timeout_is_seven_days():
+    assert backup_executor.BACKUP_TIMEOUT_SECONDS == 604_800
 
 
 def test_partial_mongo_dry_run_returns_one_command_without_database_discovery(app, tmp_path, monkeypatch):
@@ -106,6 +108,7 @@ def test_partial_mongo_dry_run_returns_one_command_without_database_discovery(ap
             resolved_ip="10.0.0.8",
             port=27017,
             username="backup",
+            extra_json={"auth_source": "backup_auth"},
         )
         db.session.add(instance)
         db.session.flush()
@@ -141,4 +144,32 @@ def test_partial_mongo_dry_run_returns_one_command_without_database_discovery(ap
     assert result["command"].count("--db=app") == 1
     assert "--excludeCollection=audit" in result["command"]
     assert "--excludeCollection=temporary_data" in result["command"]
+    assert "--authenticationDatabase=backup_auth" in result["command"]
     assert all(isinstance(argument, str) for argument in result["command"])
+
+
+def test_remote_backup_payload_uses_asset_connection_auth_database():
+    instance = DatabaseInstance(
+        name="mongo-remote",
+        db_type="mongodb",
+        host_input="mongo.internal",
+        port=27017,
+        username="backup",
+        extra_json={"auth_db": "asset_auth"},
+    )
+    policy = BackupPolicy(
+        name="mongo-remote-policy",
+        target_type="instance",
+        target_id=1,
+        db_type="mongodb",
+        backup_type="full",
+        tool_name="mongodump",
+        cron_expr="0 2 * * *",
+        storage_path="/tmp",
+        retain_days=7,
+        extra_json={"mongo_backup": {"mode": "full", "auth_database": "policy_auth"}},
+    )
+
+    payload = backup_agent_client._build_payload_from_policy(policy, instance)
+
+    assert payload["policy"]["mongo_backup"]["auth_database"] == "asset_auth"

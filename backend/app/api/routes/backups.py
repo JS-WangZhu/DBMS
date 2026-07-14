@@ -112,7 +112,11 @@ def _normalize_mongo_backup(db_type, config):
     if mode not in {"full", "partial"}:
         return None, "invalid mongo backup mode, allowed: full/partial"
 
-    full_scope = {"mode": "full", "database": "", "excluded_collections": []}
+    full_scope = {
+        "mode": "full",
+        "database": "",
+        "excluded_collections": [],
+    }
     if db_type != "mongodb":
         if mode == "partial":
             return None, "mongo partial backup is only available for mongodb"
@@ -157,7 +161,11 @@ def _normalize_mongo_backup(db_type, config):
         seen.add(collection)
         normalized.append(collection)
 
-    return {"mode": "partial", "database": database, "excluded_collections": normalized}, None
+    return {
+        "mode": "partial",
+        "database": database,
+        "excluded_collections": normalized,
+    }, None
 
 
 def _validate_target_binding(target_type, target_id, db_type):
@@ -992,7 +1000,7 @@ def backup_overview():
     # Otherwise the overview can remain stale until the records page is opened.
     sync_running_remote_backups()
 
-    hours = int(request.args.get("hours", "24"))
+    hours = int(request.args.get("hours", "48"))
     hours = max(1, min(hours, 168))
     cutoff = datetime.utcnow() - timedelta(hours=hours)
 

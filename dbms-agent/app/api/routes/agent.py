@@ -123,7 +123,7 @@ def _build_mysql_command(instance: dict, output_file: str, tool_path: str, inclu
     return command
 
 
-def _build_mongo_command(instance: dict, output_file: str, compress: bool, tool_path: str, archive_to_stdout: bool = False):
+def _build_mongo_command(instance: dict, output_file: str, compress: bool, tool_path: str, archive_to_stdout: bool = False, auth_database: str = "admin"):
     """Build mongodump command"""
     command = [
         tool_path,
@@ -141,6 +141,7 @@ def _build_mongo_command(instance: dict, output_file: str, compress: bool, tool_
         command.extend(["--username", username])
     if password:
         command.extend(["--password", password])
+    command.append(f"--authenticationDatabase={str(auth_database or 'admin').strip() or 'admin'}")
     
     if compress:
         command.append("--gzip")
@@ -148,8 +149,8 @@ def _build_mongo_command(instance: dict, output_file: str, compress: bool, tool_
     return command
 
 
-def _build_partial_mongo_command(instance, output_file, compress, tool_path, database, excluded_collections, archive_to_stdout=False):
-    command = _build_mongo_command(instance, output_file, compress, tool_path, archive_to_stdout=archive_to_stdout)
+def _build_partial_mongo_command(instance, output_file, compress, tool_path, database, excluded_collections, archive_to_stdout=False, auth_database="admin"):
+    command = _build_mongo_command(instance, output_file, compress, tool_path, archive_to_stdout=archive_to_stdout, auth_database=auth_database)
     command.append(f"--db={database}")
     command.extend(f"--excludeCollection={collection}" for collection in excluded_collections)
     return command
@@ -429,6 +430,7 @@ def _run_backup(policy: dict, instance: dict, dry_run: bool = False, task_id: st
             command = _build_mysql_command(instance, output_file, tool_path, include_result_file=True)
     elif db_type == "mongodb":
         mongo_cfg = policy.get("mongo_backup") if isinstance(policy.get("mongo_backup"), dict) else {}
+        auth_database = str(mongo_cfg.get("auth_database") or "admin").strip() or "admin"
         if mongo_cfg.get("mode") == "partial":
             database = str(mongo_cfg.get("database") or "").strip()
             excluded_collections = mongo_cfg.get("excluded_collections") or []
@@ -437,7 +439,7 @@ def _run_backup(policy: dict, instance: dict, dry_run: bool = False, task_id: st
                 use_zstd_pipe = True
                 command = _build_partial_mongo_command(
                     instance, output_file, False, tool_path,
-                    database, excluded_collections, archive_to_stdout=True,
+                    database, excluded_collections, archive_to_stdout=True, auth_database=auth_database,
                 )
             else:
                 output_file = os.path.join(storage_path, f"{instance_name}_{timestamp}.archive")
@@ -447,17 +449,17 @@ def _run_backup(policy: dict, instance: dict, dry_run: bool = False, task_id: st
                     compress_method == "gzip",
                     tool_path,
                     database,
-                    excluded_collections,
+                    excluded_collections, auth_database=auth_database,
                 )
         elif compress_method == "zstd":
             output_file = os.path.join(storage_path, f"{instance_name}_{timestamp}.zst")
             zstd_source_file = None
             use_zstd_pipe = True
-            command = _build_mongo_command(instance, output_file, False, tool_path, archive_to_stdout=True)
+            command = _build_mongo_command(instance, output_file, False, tool_path, archive_to_stdout=True, auth_database=auth_database)
         else:
             output_file = os.path.join(storage_path, f"{instance_name}_{timestamp}.archive")
             zstd_source_file = None
-            command = _build_mongo_command(instance, output_file, compress_method == "gzip", tool_path)
+            command = _build_mongo_command(instance, output_file, compress_method == "gzip", tool_path, auth_database=auth_database)
     else:
         return {"ok": False, "message": f"unsupported db_type: {db_type}"}
     

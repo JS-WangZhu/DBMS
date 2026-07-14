@@ -41,7 +41,7 @@
         <div class="header-row">
           <div>
             <div class="header-title">集群备份详情</div>
-            <div class="header-subtitle">统计最近 24 小时；集群内任意节点存在成功备份即视为备份正常</div>
+            <div class="header-subtitle">统计最近 48 小时；集群内任意节点存在成功备份即视为备份正常</div>
           </div>
           <el-button type="primary" :icon="Refresh" :loading="loading" @click="loadOverview">刷新</el-button>
         </div>
@@ -103,7 +103,7 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="24 小时内最新备份情况" min-width="310">
+        <el-table-column label="48 小时内最新备份情况" min-width="310">
           <template #default="{ row }">
             <div v-if="row.latest_backup" class="latest-backup">
               <el-tag :type="latestStatusType(row.latest_backup.status)" size="small">
@@ -124,7 +124,7 @@
                 </el-tooltip>
               </div>
             </div>
-            <span v-else class="no-backup">24 小时内无备份记录</span>
+            <span v-else class="no-backup">48 小时内无备份记录</span>
           </template>
         </el-table-column>
         <el-table-column prop="successful_backup_count" label="成功次数" width="100" align="center" />
@@ -260,7 +260,7 @@ function formatDateTime(value) {
 async function loadOverview() {
   loading.value = true;
   try {
-    const { data } = await backupOverview(24);
+    const { data } = await backupOverview(48);
     const result = data.data || {};
     summary.total_clusters = result.total_clusters || 0;
     summary.normal_backup_sets = result.normal_backup_sets || 0;
