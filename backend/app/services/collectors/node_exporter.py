@@ -38,6 +38,7 @@ IGNORED_MOUNT_PREFIXES = ("/proc", "/sys", "/dev", "/run")
 CPU_SNAPSHOT_CACHE = {}
 NET_SNAPSHOT_CACHE = {}
 DISK_IO_SNAPSHOT_CACHE = {}
+DISK_IO_LATENCY_WINDOW_SECONDS = 10 * 60
 
 
 def _clamp_pct(value):
@@ -340,14 +341,22 @@ def _disk_io_latency_ms(metrics, cache_key, target_device=None):
         for device in devices
         if not str(device).startswith(("loop", "ram", "fd", "sr"))
     }
+    now = time.monotonic()
     snapshot = DISK_IO_SNAPSHOT_CACHE.get(cache_key) or {}
-    previous = snapshot.get("counters")
-    last_result = snapshot.get("result")
-    if not previous:
-        DISK_IO_SNAPSHOT_CACHE[cache_key] = {"counters": current, "result": None}
+    history = snapshot.get("history", [])
+    history.append({"timestamp": now, "counters": current})
+    cutoff = now - DISK_IO_LATENCY_WINDOW_SECONDS
+    # Retain the latest sample preceding the window as a baseline, along with
+    # the samples inside it, so the metric is always a rolling ten-minute mean.
+    before_window = [item for item in history if item["timestamp"] <= cutoff]
+    in_window = [item for item in history if item["timestamp"] > cutoff]
+    baseline = before_window[-1] if before_window else None
+    history = ([baseline] if baseline else []) + in_window
+    if not baseline:
+        DISK_IO_SNAPSHOT_CACHE[cache_key] = {"history": history}
         return None
-    if current == previous:
-        return last_result
+
+    previous = baseline["counters"]
 
     candidates = []
     for device, counters in current.items():
@@ -363,17 +372,17 @@ def _disk_io_latency_ms(metrics, cache_key, target_device=None):
             "latency_ms": round(seconds_delta * 1000 / operation_delta, 2),
         })
     if not candidates:
-        DISK_IO_SNAPSHOT_CACHE[cache_key] = {"counters": current, "result": None}
+        DISK_IO_SNAPSHOT_CACHE[cache_key] = {"history": history}
         return None
 
     target = str(target_device or "").strip().rsplit("/", 1)[-1]
     if target:
         matched = next((item for item in candidates if item["device"] == target), None)
         if matched:
-            DISK_IO_SNAPSHOT_CACHE[cache_key] = {"counters": current, "result": matched}
+            DISK_IO_SNAPSHOT_CACHE[cache_key] = {"history": history}
             return matched
     result = max(candidates, key=lambda item: item["latency_ms"])
-    DISK_IO_SNAPSHOT_CACHE[cache_key] = {"counters": current, "result": result}
+    DISK_IO_SNAPSHOT_CACHE[cache_key] = {"history": history}
     return result
 
 

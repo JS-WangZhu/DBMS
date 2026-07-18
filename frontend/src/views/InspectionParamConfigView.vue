@@ -227,7 +227,7 @@
             <el-col :xs="24" :sm="12">
               <el-form-item label="磁盘 I/O 延迟（ms）">
                 <el-input-number v-model="form.thresholds.host_disk_io_latency_ms" :min="1" :precision="1" controls-position="right" style="width: 180px" />
-                <el-tag size="small" type="info" effect="plain" class="hint-tag">按相邻采集周期平均值告警</el-tag>
+                <el-tag size="small" type="info" effect="plain" class="hint-tag">按近 10 分钟平均值告警</el-tag>
               </el-form-item>
             </el-col>
           </el-row>
