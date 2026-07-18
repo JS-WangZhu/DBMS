@@ -19,3 +19,7 @@ export function getInstancesHealth(dbType, instanceIds = []) {
     instance_ids: instanceIds,
   });
 }
+
+export function getInstancePerformance(instanceId, hours = 24) {
+  return client.get(`/monitoring/instance/${instanceId}/performance`, { params: { hours } });
+}

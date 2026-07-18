@@ -28,6 +28,8 @@ import InspectionParamConfigView from "../views/InspectionParamConfigView.vue";
 import LoginView from "../views/LoginView.vue";
 import McpPlatformView from "../views/McpPlatformView.vue";
 import MysqlConnectionManageView from "../views/MysqlConnectionManageView.vue";
+import MysqlInstanceDetailView from "../views/MysqlInstanceDetailView.vue";
+import MysqlSessionProbeView from "../views/MysqlSessionProbeView.vue";
 import MongoConnectionManageView from "../views/MongoConnectionManageView.vue";
 import RedisConnectionManageView from "../views/RedisConnectionManageView.vue";
 import DatabaseApplyView from "../views/DatabaseApplyView.vue";
@@ -69,7 +71,9 @@ const routes = [
       { path: "/databases/mysql", redirect: "/databases/mysql/instances" },
       { path: "/databases/mysql/clusters", component: ClusterManageView, meta: { title: "MySQL 集群管理", dbType: "mysql", dbLabel: "MySQL" } },
       { path: "/databases/mysql/instances", component: InstanceManageView, meta: { title: "MySQL 实例管理", dbType: "mysql", dbLabel: "MySQL" } },
+      { path: "/databases/mysql/instance-detail", component: MysqlInstanceDetailView, meta: { title: "MySQL 实例详情", dbType: "mysql", dbLabel: "MySQL" } },
       { path: "/databases/mysql/connections", component: MysqlConnectionManageView, meta: { title: "MySQL 连接管理", dbType: "mysql", dbLabel: "MySQL" } },
+      { path: "/databases/mysql/session-probe", component: MysqlSessionProbeView, meta: { title: "MySQL 会话探测", dbType: "mysql", dbLabel: "MySQL" } },
 
       { path: "/databases/mongodb", redirect: "/databases/mongodb/instances" },
       { path: "/databases/mongodb/clusters", component: ClusterManageView, meta: { title: "MongoDB 集群管理", dbType: "mongodb", dbLabel: "MongoDB" } },

@@ -1,6 +1,17 @@
 from datetime import datetime, timedelta
 import json
+import math
+import re
 import socket
+import time
+from urllib.request import Request, urlopen
+
+
+METRIC_LINE_RE = re.compile(
+    r"^([a-zA-Z_:][a-zA-Z0-9_:]*)(?:\{([^}]*)\})?\s+([-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?)"
+)
+METRIC_LABEL_RE = re.compile(r'([a-zA-Z_][a-zA-Z0-9_]*)="([^"]*)"')
+HOST_RATE_CACHE = {}
 
 
 def _safe_int(value):
@@ -52,10 +63,137 @@ def _resolve_host(host):
         return None
 
 
+def _metric_rows(text):
+    metrics = {}
+    for raw in str(text or "").splitlines():
+        match = METRIC_LINE_RE.match(raw.strip())
+        if not match:
+            continue
+        name, labels_raw, value_raw = match.groups()
+        try:
+            value = float(value_raw)
+        except (TypeError, ValueError):
+            continue
+        if math.isnan(value):
+            continue
+        labels = {item.group(1): item.group(2) for item in METRIC_LABEL_RE.finditer(labels_raw or "")}
+        metrics.setdefault(name, []).append((labels, value))
+    return metrics
+
+
+def _node_exporter_endpoint(instance):
+    extra = instance.get("extra_json") if isinstance(instance.get("extra_json"), dict) else {}
+    config = extra.get("node_exporter") if isinstance(extra.get("node_exporter"), dict) else {}
+    enabled = _as_bool(config.get("enabled"), default=True)
+    mode = str(config.get("mode") or "same_host").strip().lower()
+    if mode == "custom":
+        endpoint = str(config.get("address") or "").strip()
+        if endpoint and not endpoint.startswith(("http://", "https://")):
+            endpoint = f"http://{endpoint}"
+    else:
+        host = instance.get("resolved_ip") or instance.get("host_input") or ""
+        try:
+            port = int(config.get("port") or 9100)
+        except (TypeError, ValueError):
+            port = 9100
+        endpoint = f"http://{host}:{port}" if host else ""
+    if endpoint and not endpoint.endswith("/metrics"):
+        endpoint = endpoint.rstrip("/") + "/metrics"
+    return enabled, endpoint
+
+
+def _collect_host_metrics(instance):
+    enabled, endpoint = _node_exporter_endpoint(instance)
+    result = {
+        "node_exporter_enabled": enabled,
+        "node_exporter_endpoint": endpoint,
+        "node_exporter_status": "disabled" if not enabled else "unknown",
+        "node_exporter_error": None,
+        "host_cpu_usage_pct": None,
+        "host_memory_usage_pct": None,
+        "host_data_disk_usage_pct": None,
+        "host_data_disk_mountpoint": None,
+        "host_data_disk_device": None,
+        "host_net_rates": [],
+    }
+    if not enabled:
+        return result
+    if not endpoint:
+        result.update({"node_exporter_status": "error", "node_exporter_error": "node_exporter endpoint is empty"})
+        return result
+    try:
+        with urlopen(Request(endpoint, headers={"User-Agent": "dbms-agent/1.0"}), timeout=2) as response:
+            metrics = _metric_rows(response.read().decode("utf-8", errors="replace"))
+    except Exception as exc:
+        result.update({"node_exporter_status": "error", "node_exporter_error": f"node_exporter collect failed: {exc}"})
+        return result
+
+    cpu_rows = metrics.get("node_cpu_seconds_total", [])
+    total = sum(value for _labels, value in cpu_rows)
+    idle = sum(value for labels, value in cpu_rows if labels.get("mode") == "idle")
+    if total > 0:
+        result["host_cpu_usage_pct"] = round(max(0.0, min((1 - idle / total) * 100, 100.0)), 2)
+
+    def single(name):
+        rows = metrics.get(name) or []
+        return rows[0][1] if rows else None
+    memory_total = single("node_memory_MemTotal_bytes")
+    memory_available = single("node_memory_MemAvailable_bytes")
+    if memory_total and memory_available is not None:
+        result["host_memory_usage_pct"] = round(max(0.0, min((memory_total - memory_available) / memory_total * 100, 100.0)), 2)
+
+    available_by_key = {
+        (labels.get("device"), labels.get("mountpoint")): value
+        for labels, value in metrics.get("node_filesystem_avail_bytes", [])
+    }
+    disks = []
+    for labels, size in metrics.get("node_filesystem_size_bytes", []):
+        mountpoint = labels.get("mountpoint") or ""
+        device = labels.get("device") or ""
+        fstype = labels.get("fstype") or ""
+        if not size or not mountpoint or mountpoint.startswith(("/proc", "/sys", "/dev", "/run")):
+            continue
+        if fstype in {"tmpfs", "devtmpfs", "overlay", "squashfs"}:
+            continue
+        available = available_by_key.get((device, mountpoint))
+        if available is not None:
+            disks.append((size, device, mountpoint, round(max(0.0, min((size - available) / size * 100, 100.0)), 2)))
+    if disks:
+        _size, device, mountpoint, usage = max(disks, key=lambda item: item[0])
+        result.update({
+            "host_data_disk_usage_pct": usage,
+            "host_data_disk_device": device,
+            "host_data_disk_mountpoint": mountpoint,
+        })
+
+    now = time.time()
+    rx = {labels.get("device"): value for labels, value in metrics.get("node_network_receive_bytes_total", []) if labels.get("device") != "lo"}
+    tx = {labels.get("device"): value for labels, value in metrics.get("node_network_transmit_bytes_total", []) if labels.get("device") != "lo"}
+    previous = HOST_RATE_CACHE.get(endpoint)
+    HOST_RATE_CACHE[endpoint] = {"time": now, "rx": rx, "tx": tx}
+    if previous and now > previous["time"]:
+        elapsed = now - previous["time"]
+        for device in sorted(set(rx) | set(tx)):
+            old_rx = previous["rx"].get(device)
+            old_tx = previous["tx"].get(device)
+            rx_bps = (rx.get(device) - old_rx) / elapsed if rx.get(device) is not None and old_rx is not None else None
+            tx_bps = (tx.get(device) - old_tx) / elapsed if tx.get(device) is not None and old_tx is not None else None
+            result["host_net_rates"].append({
+                "device": device,
+                "rx_bps": round(rx_bps, 2) if rx_bps is not None and rx_bps >= 0 else None,
+                "tx_bps": round(tx_bps, 2) if tx_bps is not None and tx_bps >= 0 else None,
+            })
+    result["node_exporter_status"] = "ok"
+    return result
+
+
 def _mysql(instance, password):
     import pymysql
 
     warnings = []
+    host_metrics = _collect_host_metrics(instance)
+    if host_metrics.get("node_exporter_error"):
+        warnings.append(host_metrics["node_exporter_error"])
     conn = pymysql.connect(
         host=instance.get("resolved_ip") or instance.get("host_input"),
         port=int(instance.get("port") or 3306),
@@ -191,6 +329,7 @@ def _mysql(instance, password):
                 elif effective_read_only is False:
                     payload["replication_role"] = "master"
             payload["warnings"] = warnings
+            payload.update(host_metrics)
             return payload
     finally:
         conn.close()

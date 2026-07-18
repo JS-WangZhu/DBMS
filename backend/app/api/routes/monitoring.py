@@ -1,8 +1,10 @@
 ﻿from datetime import datetime
 
+import math
+
 from flask import Blueprint, current_app, request
 
-from app.api.routes.common import active_user_required
+from app.api.routes.common import active_user_required, require_menu_permission
 from app.extensions import db
 from app.models.db_asset import DatabaseInstance
 from app.services.monitor_snapshot_service import (
@@ -10,6 +12,7 @@ from app.services.monitor_snapshot_service import (
     latest_snapshots_by_instance_ids,
     latest_success_snapshot_for_instance,
     latest_success_snapshots_by_instance_ids,
+    snapshot_history_for_instance,
 )
 from app.services.collectors import collect_instance_metrics
 from app.services.instance_service import list_instances as list_instances_by_type
@@ -77,6 +80,74 @@ def latest_snapshot(instance_id):
     if not snapshot:
         return error_response("snapshot not found", code=404)
     return ok_response(data=snapshot.to_dict())
+
+
+@bp.get("/instance/<int:instance_id>/performance")
+@require_menu_permission("mysql_instance_detail")
+def get_instance_performance(instance_id):
+    instance = DatabaseInstance.query.get_or_404(instance_id)
+    if instance.db_type != "mysql":
+        return error_response("performance detail currently supports mysql only", code=400)
+    try:
+        hours = int(request.args.get("hours", "24"))
+    except (TypeError, ValueError):
+        return error_response("hours must be an integer", code=400)
+    hours = min(max(hours, 1), 168)
+    rows = snapshot_history_for_instance(
+        instance_id=instance.id,
+        db_type=instance.db_type,
+        metric_type="status",
+        hours=hours,
+    )
+    # Seven days at a 30-second interval can exceed 20,000 rows. Preserve the
+    # time range while bounding the response size rendered by the browser.
+    if len(rows) > 2000:
+        step = math.ceil(len(rows) / 2000)
+        sampled = rows[::step]
+        if sampled[-1].id != rows[-1].id:
+            sampled.append(rows[-1])
+        rows = sampled
+    points = []
+    for row in rows:
+        payload = row.payload_json if isinstance(row.payload_json, dict) else {}
+        net_rates = payload.get("host_net_rates") if isinstance(payload.get("host_net_rates"), list) else []
+        def _sum_rate(key):
+            total = 0.0
+            found = False
+            for item in net_rates:
+                if not isinstance(item, dict) or item.get(key) is None:
+                    continue
+                try:
+                    total += float(item[key])
+                    found = True
+                except (TypeError, ValueError):
+                    continue
+            return round(total, 2) if found else None
+
+        rx_bps = _sum_rate("rx_bps")
+        tx_bps = _sum_rate("tx_bps")
+        points.append({
+            "collected_at": row.collected_at.isoformat() if row.collected_at else None,
+            "cpu_usage_pct": payload.get("host_cpu_usage_pct"),
+            "memory_usage_pct": payload.get("host_memory_usage_pct"),
+            "disk_usage_pct": payload.get("host_data_disk_usage_pct"),
+            "disk_io_latency_ms": payload.get("host_disk_io_latency_ms"),
+            "network_rx_bps": rx_bps,
+            "network_tx_bps": tx_bps,
+            "sessions": payload.get("threads_connected"),
+            "running_sessions": payload.get("threads_running"),
+            "lock_waits": payload.get("lock_waits"),
+        })
+    return ok_response(data={
+        "instance": {
+            "id": instance.id,
+            "name": instance.name,
+            "host": instance.resolved_ip or instance.host_input,
+            "port": instance.port,
+        },
+        "hours": hours,
+        "points": points,
+    })
 
 
 @bp.get("/instance/<int:instance_id>/health")

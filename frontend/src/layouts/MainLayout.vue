@@ -24,13 +24,13 @@
           </el-menu-item>
         </el-sub-menu>
 
-        <el-sub-menu v-if="hasAnyMenu(['mysql_instances','mysql_clusters','mysql_connections','mongodb_instances','mongodb_clusters','mongodb_connections','redis_instances','redis_clusters','redis_connections','postgresql_instances','postgresql_clusters','doris_instances','doris_clusters','inspection_manage'])" index="service-manage">
+        <el-sub-menu v-if="hasAnyMenu(['mysql_instances','mysql_instance_detail','mysql_clusters','mysql_connections','mysql_session_probe','mongodb_instances','mongodb_clusters','mongodb_connections','redis_instances','redis_clusters','redis_connections','postgresql_instances','postgresql_clusters','doris_instances','doris_clusters','inspection_manage'])" index="service-manage">
           <template #title>
             <el-icon><Menu /></el-icon>
             <span>服务管理</span>
           </template>
 
-          <el-sub-menu v-if="hasAnyMenu(['mysql_instances','mysql_clusters','mysql_connections'])" index="db-mysql">
+          <el-sub-menu v-if="hasAnyMenu(['mysql_instances','mysql_instance_detail','mysql_clusters','mysql_connections','mysql_session_probe'])" index="db-mysql">
             <template #title>
               <el-icon class="db-brand-icon"><MysqlIcon /></el-icon>
               <span>MySQL</span>
@@ -39,6 +39,10 @@
               <el-icon class="db-brand-icon"><MysqlIcon /></el-icon>
               <span>实例管理</span>
             </el-menu-item>
+            <el-menu-item v-if="hasMenu('mysql_instance_detail')" index="/databases/mysql/instance-detail">
+              <el-icon><TrendCharts /></el-icon>
+              <span>实例详情</span>
+            </el-menu-item>
             <el-menu-item v-if="hasMenu('mysql_clusters')" index="/databases/mysql/clusters">
               <el-icon><Share /></el-icon>
               <span>集群管理</span>
@@ -46,6 +50,10 @@
             <el-menu-item v-if="hasMenu('mysql_connections')" index="/databases/mysql/connections">
               <el-icon><Connection /></el-icon>
               <span>连接管理</span>
+            </el-menu-item>
+            <el-menu-item v-if="hasMenu('mysql_session_probe')" index="/databases/mysql/session-probe">
+              <el-icon><View /></el-icon>
+              <span>会话探测</span>
             </el-menu-item>
           </el-sub-menu>
 
@@ -435,8 +443,10 @@ const routePermissionMap = {
   "/resources/database-recycle": "database_recycle",
   "/resources/application-history": "application_history",
   "/databases/mysql/instances": "mysql_instances",
+  "/databases/mysql/instance-detail": "mysql_instance_detail",
   "/databases/mysql/clusters": "mysql_clusters",
   "/databases/mysql/connections": "mysql_connections",
+  "/databases/mysql/session-probe": "mysql_session_probe",
   "/databases/mongodb/instances": "mongodb_instances",
   "/databases/mongodb/clusters": "mongodb_clusters",
   "/databases/mongodb/connections": "mongodb_connections",

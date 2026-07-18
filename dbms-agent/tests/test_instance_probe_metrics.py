@@ -88,6 +88,12 @@ def install_fake_pymysql(monkeypatch, cursor):
 
 
 def test_mysql_agent_collects_operational_and_replication_metrics(monkeypatch):
+    monkeypatch.setattr(instance_probe, "_collect_host_metrics", lambda _instance: {
+        "host_cpu_usage_pct": 35.0,
+        "host_memory_usage_pct": 62.0,
+        "host_data_disk_usage_pct": 71.0,
+        "host_net_rates": [{"device": "eth0", "rx_bps": 1024.0, "tx_bps": 512.0}],
+    })
     connection = install_fake_pymysql(monkeypatch, FakeMysqlCursor())
     payload = instance_probe._mysql(
         {"host_input": "127.0.0.1", "port": 3306, "username": "monitor"},
@@ -107,10 +113,14 @@ def test_mysql_agent_collects_operational_and_replication_metrics(monkeypatch):
     assert payload["replica_source_host"] == "mysql-primary"
     assert payload["started_at"]
     assert connection.closed is True
-    assert not any(key.startswith("host_") for key in payload)
+    assert payload["host_cpu_usage_pct"] == 35.0
+    assert payload["host_memory_usage_pct"] == 62.0
+    assert payload["host_data_disk_usage_pct"] == 71.0
+    assert payload["host_net_rates"][0]["rx_bps"] == 1024.0
 
 
 def test_mysql_agent_preserves_unknown_read_only_state(monkeypatch):
+    monkeypatch.setattr(instance_probe, "_collect_host_metrics", lambda _instance: {})
     install_fake_pymysql(monkeypatch, FakeMysqlCursor(read_only=None, super_read_only=None, replica=False))
     payload = instance_probe._mysql(
         {"host_input": "127.0.0.1", "port": 3306, "username": "monitor"},

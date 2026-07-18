@@ -2,7 +2,7 @@ from flask import Blueprint, request
 
 from datetime import datetime, timedelta
 
-from app.api.routes.common import active_user_required
+from app.api.routes.common import active_user_required, get_current_user, require_menu_permission
 from app.extensions import db
 from app.models.db_asset import DatabaseInstance
 from app.models.monitor_snapshot import snapshot_model_for_instance
@@ -11,10 +11,28 @@ from app.services.redis_cache import set_latest_snapshot
 from app.services.audit import log_audit
 from app.services.collectors import collect_instance_metrics
 from app.services.instance_service import create_instance, list_instances_paginated
+from app.services.mysql_session_probe import (
+    SessionProbeError,
+    close_probe_session,
+    fetch_processlist,
+    kill_process,
+    start_probe_session,
+)
 from app.utils.crypto import decrypt_secret
 from app.utils.response import error_response, ok_response
 
 bp = Blueprint("mysql", __name__, url_prefix="/mysql")
+
+
+def _session_probe_error(exc):
+    message = str(exc)
+    if "does not belong" in message:
+        return error_response(message, code=403)
+    if "not found or expired" in message or message.endswith("expired"):
+        return error_response(message, code=410)
+    if "connect failed" in message or "fetch failed" in message or "kill mysql" in message:
+        return error_response(message, code=502)
+    return error_response(message, code=400)
 
 
 def _store_manual_status_snapshot(instance, collected_payload):
@@ -267,3 +285,71 @@ def mysql_instance_detail(instance_id):
     if snapshot_payload:
         return ok_response(data=_instance_detail_view(instance.id, snapshot_payload, source="snapshot", running_status=instance.running_status or "unknown"))
     return ok_response(data=_instance_detail_view(instance.id, {}, source="none", running_status="unknown"))
+
+
+@bp.post("/session-probes")
+@require_menu_permission("mysql_session_probe")
+def start_mysql_session_probe():
+    payload = request.get_json(silent=True) or {}
+    try:
+        instance_id = int(payload.get("instance_id"))
+    except (TypeError, ValueError):
+        return error_response("instance_id is required", code=400)
+    instance = DatabaseInstance.query.filter_by(id=instance_id, db_type="mysql", enabled=True).first()
+    if not instance:
+        return error_response("mysql instance not found", code=404)
+    password = decrypt_secret(instance.password_encrypted) if instance.password_encrypted else ""
+    user = get_current_user()
+    try:
+        data = start_probe_session(instance=instance, password=password, user_id=user.id)
+    except SessionProbeError as exc:
+        return _session_probe_error(exc)
+    log_audit(
+        user_id=user.id,
+        action="mysql.session_probe.start",
+        target_type="instance",
+        target_id=str(instance.id),
+        detail={"expires_at": data.get("expires_at")},
+    )
+    return ok_response(data=data, code=201)
+
+
+@bp.get("/session-probes/<string:token>/processlist")
+@require_menu_permission("mysql_session_probe")
+def get_mysql_processlist(token):
+    try:
+        data = fetch_processlist(token=token, user_id=get_current_user().id)
+    except SessionProbeError as exc:
+        return _session_probe_error(exc)
+    return ok_response(data=data)
+
+
+@bp.post("/session-probes/<string:token>/kill")
+@require_menu_permission("mysql_session_probe")
+def kill_mysql_process(token):
+    payload = request.get_json(silent=True) or {}
+    try:
+        process_id = int(payload.get("process_id"))
+        data = kill_process(token=token, user_id=get_current_user().id, process_id=process_id)
+    except (TypeError, ValueError):
+        return error_response("process_id is required", code=400)
+    except SessionProbeError as exc:
+        return _session_probe_error(exc)
+    log_audit(
+        user_id=get_current_user().id,
+        action="mysql.session_probe.kill",
+        target_type="mysql_process",
+        target_id=str(process_id),
+        detail={"probe_token_prefix": token[:8]},
+    )
+    return ok_response(data=data)
+
+
+@bp.post("/session-probes/<string:token>/stop")
+@require_menu_permission("mysql_session_probe")
+def stop_mysql_session_probe(token):
+    try:
+        closed = close_probe_session(token=token, user_id=get_current_user().id)
+    except SessionProbeError as exc:
+        return _session_probe_error(exc)
+    return ok_response(data={"closed": closed})

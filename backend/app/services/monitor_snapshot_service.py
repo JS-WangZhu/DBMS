@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta
 from typing import Dict, Iterable, List
 
 from app.extensions import db
@@ -35,6 +36,35 @@ def latest_snapshot_for_instance(instance_id: int, db_type: str, metric_type: st
             collected_at=snapshot.collected_at,
         )
     return snapshot
+
+
+def snapshot_history_for_instance(
+    instance_id: int,
+    db_type: str,
+    metric_type: str = "status",
+    hours: int = 24,
+    limit: int = 30000,
+):
+    """Return chronological snapshots for performance trend pages."""
+    model = snapshot_model_for_db(db_type)
+    if not model:
+        return []
+    safe_hours = min(max(int(hours or 24), 1), 168)
+    safe_limit = min(max(int(limit or 30000), 1), 50000)
+    since = datetime.now() - timedelta(hours=safe_hours)
+    rows = (
+        model.query
+        .filter(
+            model.instance_id == int(instance_id),
+            model.metric_type == metric_type,
+            model.collected_at >= since,
+        )
+        .order_by(model.collected_at.desc(), model.id.desc())
+        .limit(safe_limit)
+        .all()
+    )
+    rows.reverse()
+    return rows
 
 
 def latest_payload_by_instance_ids(
