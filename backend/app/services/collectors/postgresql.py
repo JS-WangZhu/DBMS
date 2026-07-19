@@ -82,25 +82,62 @@ def collect_postgresql_status(instance, password):
                 warnings.append(f"database_stats:{exc}")
 
             replication_lag_seconds = None
+            replication_lag_bytes = None
+            receive_lag_bytes = None
+            replay_lag_bytes = None
+            wal_source_lsn = None
+            wal_receive_lsn = None
+            wal_replay_lsn = None
+            wal_current_lsn = None
+            wal_receiver_status = None
+            wal_last_message_at = None
             replay_paused = False
             replica_count = 0
             if in_recovery:
                 try:
                     cursor.execute(
-                        "SELECT CASE WHEN pg_last_xact_replay_timestamp() IS NULL THEN NULL "
-                        "ELSE EXTRACT(EPOCH FROM (now() - pg_last_xact_replay_timestamp())) END, "
-                        "pg_is_wal_replay_paused()"
+                        "WITH receiver AS ("
+                        " SELECT status, latest_end_lsn, last_msg_receipt_time"
+                        " FROM pg_stat_wal_receiver LIMIT 1"
+                        "), positions AS ("
+                        " SELECT (SELECT status FROM receiver) AS receiver_status,"
+                        " (SELECT latest_end_lsn FROM receiver) AS source_lsn,"
+                        " pg_last_wal_receive_lsn() AS receive_lsn,"
+                        " pg_last_wal_replay_lsn() AS replay_lsn,"
+                        " (SELECT last_msg_receipt_time FROM receiver) AS last_message_at"
+                        ") SELECT receiver_status, source_lsn::text, receive_lsn::text, replay_lsn::text,"
+                        " CASE WHEN receiver_status IS NULL OR source_lsn IS NULL THEN NULL ELSE GREATEST(COALESCE(pg_wal_lsn_diff(GREATEST(source_lsn, receive_lsn), replay_lsn), 0), 0)::bigint END,"
+                        " CASE WHEN source_lsn IS NULL THEN NULL ELSE GREATEST(COALESCE(pg_wal_lsn_diff(GREATEST(source_lsn, receive_lsn), receive_lsn), 0), 0)::bigint END,"
+                        " GREATEST(COALESCE(pg_wal_lsn_diff(receive_lsn, replay_lsn), 0), 0)::bigint,"
+                        " CASE WHEN receiver_status IS NULL OR source_lsn IS NULL THEN NULL WHEN GREATEST(COALESCE(pg_wal_lsn_diff(GREATEST(source_lsn, receive_lsn), replay_lsn), 0), 0) > 0"
+                        " AND pg_last_xact_replay_timestamp() IS NOT NULL"
+                        " THEN EXTRACT(EPOCH FROM (now() - pg_last_xact_replay_timestamp())) ELSE 0 END,"
+                        " pg_is_wal_replay_paused(), last_message_at"
+                        " FROM positions"
                     )
                     repl = cursor.fetchone()
-                    replication_lag_seconds = round(_safe_float(repl[0]), 3) if repl and repl[0] is not None else None
-                    replay_paused = bool(repl[1]) if repl else False
+                    if repl:
+                        wal_receiver_status = repl[0]
+                        wal_source_lsn = repl[1]
+                        wal_receive_lsn = repl[2]
+                        wal_replay_lsn = repl[3]
+                        replication_lag_bytes = _safe_int(repl[4])
+                        receive_lag_bytes = _safe_int(repl[5])
+                        replay_lag_bytes = _safe_int(repl[6])
+                        replication_lag_seconds = round(_safe_float(repl[7]), 3) if repl[7] is not None else None
+                        replay_paused = bool(repl[8])
+                        wal_last_message_at = repl[9].isoformat() if hasattr(repl[9], "isoformat") else repl[9]
                 except Exception as exc:
                     warnings.append(f"replication:{exc}")
             else:
                 try:
-                    cursor.execute("SELECT count(*)::bigint FROM pg_stat_replication WHERE state = 'streaming'")
+                    cursor.execute(
+                        "SELECT pg_current_wal_lsn()::text, "
+                        "(SELECT count(*)::bigint FROM pg_stat_replication WHERE state = 'streaming')"
+                    )
                     row = cursor.fetchone()
-                    replica_count = _safe_int(row[0]) if row else 0
+                    wal_current_lsn = row[0] if row else None
+                    replica_count = _safe_int(row[1]) if row else 0
                 except Exception as exc:
                     warnings.append(f"replication:{exc}")
 
@@ -114,6 +151,11 @@ def collect_postgresql_status(instance, password):
             "database": database, "uptime": uptime,
             "replication_role": "standby" if in_recovery else "primary",
             "in_recovery": in_recovery, "replication_lag_seconds": replication_lag_seconds,
+            "replication_lag_bytes": replication_lag_bytes,
+            "receive_lag_bytes": receive_lag_bytes, "replay_lag_bytes": replay_lag_bytes,
+            "wal_current_lsn": wal_current_lsn, "wal_source_lsn": wal_source_lsn,
+            "wal_receive_lsn": wal_receive_lsn, "wal_replay_lsn": wal_replay_lsn,
+            "wal_receiver_status": wal_receiver_status, "wal_last_message_at": wal_last_message_at,
             "replay_paused": replay_paused, "replica_count": replica_count,
             "connections": connections, "active_connections": active_connections,
             "lock_waiting_connections": lock_waiting_connections,

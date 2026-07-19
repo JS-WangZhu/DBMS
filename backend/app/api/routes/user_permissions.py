@@ -50,6 +50,7 @@ MENU_CATALOG = [
     {"key": "task_schedule", "label": "调度管理"},
     {"key": "task_results", "label": "结果查询"},
     {"key": "backup_mysql_policies", "label": "MySQL策略"},
+    {"key": "backup_postgresql_policies", "label": "PostgreSQL策略"},
     {"key": "backup_mongo_policies", "label": "MongoDB策略"},
     {"key": "backup_records", "label": "备份记录"},
     {"key": "backup_tool_configs", "label": "备份工具管理"},

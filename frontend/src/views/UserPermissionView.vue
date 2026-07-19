@@ -270,7 +270,7 @@ function buildMenuTree(catalog, disabled) {
     { key: "data_access", label: "数据访问", children: ["data_query", "data_change", "data_history"] },
     { key: "task_management", label: "任务管理", children: ["task_schedule", "task_results"] },
     { key: "backup", label: "备份管理", children: [
-      { key: "backup_policies", label: "策略管理", children: ["backup_mysql_policies", "backup_mongo_policies"] },
+      { key: "backup_policies", label: "策略管理", children: ["backup_mysql_policies", "backup_postgresql_policies", "backup_mongo_policies"] },
       "backup_records",
       { key: "backup_config", label: "配置管理", children: ["backup_tool_configs", "backup_s3_storage", "backup_keys"] },
     ] },

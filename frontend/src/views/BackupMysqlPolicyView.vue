@@ -3,7 +3,7 @@
     <el-card>
       <template #header>
         <div class="header-row">
-          <span>MySQL 策略</span>
+          <span>{{ dbLabel }} 策略</span>
           <div class="header-actions">
             <el-input v-model="policyKeyword" clearable placeholder="搜索策略名称、实例或 cron" style="width: 260px" @input="mysqlPage.current = 1" />
             <el-button type="primary" @click="openCreatePolicyDialog">新建策略</el-button>
@@ -17,6 +17,9 @@
         <el-table-column prop="name" label="名称" min-width="160" />
         <el-table-column label="备份实例" min-width="200">
           <template #default="scope">{{ getInstanceLabel(scope.row.target_id) }}</template>
+        </el-table-column>
+        <el-table-column v-if="postgresqlMode" label="备份库" min-width="180">
+          <template #default="scope">{{ getPostgresqlDatabaseSummary(scope.row) }}</template>
         </el-table-column>
         <el-table-column prop="cron_expr" label="调度" min-width="140" />
         <el-table-column prop="retain_days" label="保留天数" width="100" />
@@ -48,12 +51,12 @@
       </div>
     </el-card>
 
-    <el-dialog v-model="dialogVisible" :title="dialogTitle" width="760px">
+    <el-dialog v-model="dialogVisible" :title="dialogTitle" :width="postgresqlMode ? '960px' : '760px'">
       <el-form :model="form" label-width="130px">
         <el-form-item label="策略名称"><el-input v-model="form.name" /></el-form-item>
         <el-form-item label="数据库类型">
           <el-select v-model="form.db_type" style="width: 100%" disabled>
-            <el-option label="MySQL" value="mysql" />
+            <el-option :label="dbLabel" :value="DB_TYPE" />
           </el-select>
         </el-form-item>
         <el-form-item label="目标类型">
@@ -62,10 +65,59 @@
           </el-select>
         </el-form-item>
         <el-form-item label="备份实例">
-          <el-select v-model="form.target_id" filterable style="width: 100%" placeholder="请选择已纳管实例">
+          <el-select v-model="form.target_id" filterable style="width: 100%" placeholder="请选择已纳管实例" @change="onTargetInstanceChange">
             <el-option v-for="item in managedInstances" :key="item.id" :label="item.label" :value="item.id" />
           </el-select>
         </el-form-item>
+        <template v-if="postgresqlMode">
+          <el-form-item label="备份格式">
+            <el-tag type="success">Custom 二进制（pg_restore）</el-tag>
+            <span class="hint-text pg-format-hint">多库分别生成 .dump 后统一打包</span>
+          </el-form-item>
+          <el-form-item label="需要备份的库" required>
+            <el-select
+              v-model="form.postgresql_databases"
+              multiple
+              filterable
+              allow-create
+              default-first-option
+              style="width: 100%"
+              placeholder="请选择或手工输入一个或多个数据库"
+              :loading="postgresqlDatabasesLoading"
+              @change="onPostgresqlDatabasesChange"
+            >
+              <el-option v-for="database in postgresqlDatabaseOptions" :key="database" :label="database" :value="database" />
+            </el-select>
+            <el-button link type="primary" :loading="postgresqlDatabasesLoading" @click="loadPostgresqlDatabases">刷新数据库</el-button>
+          </el-form-item>
+          <el-form-item v-if="form.postgresql_databases.length" label="排除表">
+            <div class="pg-database-scopes">
+              <el-card v-for="database in form.postgresql_databases" :key="database" shadow="never" class="pg-database-card">
+                <template #header>
+                  <div class="pg-database-header">
+                    <strong>{{ database }}</strong>
+                    <el-button link type="primary" :loading="!!postgresqlTableLoading[database]" @click="loadPostgresqlTables(database)">刷新表</el-button>
+                  </div>
+                </template>
+                <el-select
+                  v-model="form.postgresql_excluded_tables[database]"
+                  multiple
+                  filterable
+                  allow-create
+                  default-first-option
+                  collapse-tags
+                  collapse-tags-tooltip
+                  style="width: 100%"
+                  :loading="!!postgresqlTableLoading[database]"
+                  placeholder="可选；未选择时备份该库全部表"
+                  @visible-change="visible => visible && ensurePostgresqlTables(database)"
+                >
+                  <el-option v-for="table in (postgresqlTableOptions[database] || [])" :key="table" :label="table" :value="table" />
+                </el-select>
+              </el-card>
+            </div>
+          </el-form-item>
+        </template>
         <el-form-item label="备份工具">
           <el-select v-model="form.backup_tool_config_id" style="width: 100%" placeholder="选择已配置工具" clearable @change="onBackupToolConfigChange">
             <el-option v-for="tool in currentDbTypeTools" :key="tool.id" :label="`${tool.name} (${tool.tool_path})`" :value="tool.id" />
@@ -74,12 +126,22 @@
         <el-form-item label="调度(cron)"><el-input v-model="form.cron_expr" placeholder="例如: 0 2 * * *" /></el-form-item>
         <el-form-item label="本地存储路径"><el-input v-model="form.storage_path" /></el-form-item>
         <el-form-item label="保留天数"><el-input-number v-model="form.retain_days" :min="1" style="width: 100%" /></el-form-item>
-        <el-form-item label="压缩方式">
+        <el-form-item :label="postgresqlMode ? 'pg_dump 压缩' : '压缩方式'">
           <el-select v-model="form.compress_method" style="width: 100%">
-            <el-option label="不压缩" value="none" />
-            <el-option label="gzip" value="gzip" />
-            <el-option label="zstd" value="zstd" />
+            <template v-if="postgresqlMode">
+              <el-option label="默认（pg_dump 默认 gzip）" value="default" />
+              <el-option label="gzip" value="gzip" />
+              <el-option label="lz4" value="lz4" />
+              <el-option label="zstd" value="zstd" />
+              <el-option label="不压缩" value="none" />
+            </template>
+            <template v-else>
+              <el-option label="不压缩" value="none" />
+              <el-option label="gzip" value="gzip" />
+              <el-option label="zstd" value="zstd" />
+            </template>
           </el-select>
+          <div v-if="postgresqlMode" class="hint-text">压缩由 pg_dump 在写入每个 Custom .dump 时完成；多库外层 tar 不再重复压缩。</div>
         </el-form-item>
         <el-form-item label="备份加密"><el-switch v-model="form.encrypt_enabled" /></el-form-item>
         <el-form-item v-if="form.encrypt_enabled" label="公钥">
@@ -160,6 +222,8 @@ import {
   listBackupPoliciesByType,
   listBackupToolConfigs,
   listManagedInstances,
+  listPostgresqlBackupDatabases,
+  listPostgresqlBackupTables,
   listNotifyTargets,
   listBackupKeys,
   listS3StorageConfigs,
@@ -167,7 +231,17 @@ import {
   updateBackupPolicy,
 } from "../api/modules/backups";
 
-const DB_TYPE = "mysql";
+const props = defineProps({
+  dbType: { type: String, default: "mysql" },
+  dbLabel: { type: String, default: "MySQL" },
+  toolName: { type: String, default: "mysqldump" },
+  postgresqlMode: { type: Boolean, default: false },
+});
+
+const DB_TYPE = props.dbType;
+const dbLabel = props.dbLabel;
+const DEFAULT_TOOL = props.toolName;
+const postgresqlMode = props.postgresqlMode;
 
 const mysqlPolicies = ref([]);
 const policyKeyword = ref("");
@@ -187,20 +261,24 @@ const s3StorageConfigs = ref([]);
 const backupToolConfigs = ref([]);
 const agents = ref([]);
 const backupKeys = ref([]);
+const postgresqlDatabaseOptions = ref([]);
+const postgresqlDatabasesLoading = ref(false);
+const postgresqlTableOptions = reactive({});
+const postgresqlTableLoading = reactive({});
 
   const form = reactive({
     name: "",
-    db_type: "mysql",
+    db_type: DB_TYPE,
     target_type: "instance",
     target_id: null,
   backup_type: "full",
-  tool_name: "mysqldump",
+  tool_name: DEFAULT_TOOL,
   backup_tool_config_id: null,
   cron_expr: "0 2 * * *",
     storage_path: "/tmp",
     retain_days: 7,
     compress: true,
-    compress_method: "gzip",
+    compress_method: postgresqlMode ? "default" : "gzip",
     encrypt_enabled: false,
     encrypt_key_id: null,
     encrypt_public_key: "",
@@ -213,6 +291,8 @@ const backupKeys = ref([]);
   s3_storage_config_id: null,
   s3_upload_mode: "native",
   us3_cli_path: "/data/us3cli-linux64",
+  postgresql_databases: [],
+  postgresql_excluded_tables: {},
 });
 
 const enabledNotifyTargets = computed(() => notifyTargets.value.filter((item) => item.enabled));
@@ -242,22 +322,22 @@ const mysqlPoliciesData = computed(() => {
   return filteredMysqlPolicies.value.slice(start, end);
 });
 
-const dialogTitle = computed(() => (editingPolicyId.value ? "编辑 MySQL 备份策略" : "新建 MySQL 备份策略"));
+const dialogTitle = computed(() => (editingPolicyId.value ? `编辑 ${dbLabel} 备份策略` : `新建 ${dbLabel} 备份策略`));
 
 function resetPolicyForm() {
   editingPolicyId.value = null;
   form.name = "";
-  form.db_type = "mysql";
+  form.db_type = DB_TYPE;
   form.target_type = "instance";
   form.target_id = null;
   form.backup_type = "full";
-  form.tool_name = "mysqldump";
+  form.tool_name = DEFAULT_TOOL;
   form.backup_tool_config_id = null;
   form.cron_expr = "0 2 * * *";
     form.storage_path = "/tmp";
     form.retain_days = 7;
     form.compress = true;
-    form.compress_method = "gzip";
+    form.compress_method = postgresqlMode ? "default" : "gzip";
     form.encrypt_enabled = false;
     form.encrypt_key_id = null;
     form.encrypt_public_key = "";
@@ -270,6 +350,10 @@ function resetPolicyForm() {
   form.s3_storage_config_id = null;
   form.s3_upload_mode = "native";
   form.us3_cli_path = "/data/us3cli-linux64";
+  form.postgresql_databases = [];
+  form.postgresql_excluded_tables = {};
+  postgresqlDatabaseOptions.value = [];
+  Object.keys(postgresqlTableOptions).forEach((key) => delete postgresqlTableOptions[key]);
 }
 
 function formatNotifyTarget(target) {
@@ -293,6 +377,60 @@ async function loadManagedInstances() {
   } catch (error) {
     console.error("加载实例失败", error);
   }
+}
+
+async function loadPostgresqlDatabases() {
+  if (!postgresqlMode || !form.target_id) return;
+  postgresqlDatabasesLoading.value = true;
+  try {
+    const params = { instance_id: form.target_id };
+    if (form.backup_agent_id) params.backup_agent_id = form.backup_agent_id;
+    const { data } = await listPostgresqlBackupDatabases(params);
+    postgresqlDatabaseOptions.value = data.data || [];
+  } catch (error) {
+    ElMessage.error(error.response?.data?.message || "加载 PostgreSQL 数据库失败");
+  } finally {
+    postgresqlDatabasesLoading.value = false;
+  }
+}
+
+async function loadPostgresqlTables(database) {
+  if (!postgresqlMode || !form.target_id || !database) return;
+  postgresqlTableLoading[database] = true;
+  try {
+    const params = { instance_id: form.target_id, database };
+    if (form.backup_agent_id) params.backup_agent_id = form.backup_agent_id;
+    const { data } = await listPostgresqlBackupTables(params);
+    postgresqlTableOptions[database] = data.data || [];
+  } catch (error) {
+    ElMessage.error(error.response?.data?.message || `加载数据库 ${database} 的表失败`);
+  } finally {
+    postgresqlTableLoading[database] = false;
+  }
+}
+
+function ensurePostgresqlTables(database) {
+  if (!postgresqlTableOptions[database]) loadPostgresqlTables(database);
+}
+
+function onPostgresqlDatabasesChange(databases) {
+  const next = {};
+  databases.forEach((database) => {
+    next[database] = form.postgresql_excluded_tables[database] || [];
+  });
+  form.postgresql_excluded_tables = next;
+}
+
+async function onTargetInstanceChange() {
+  if (!postgresqlMode) return;
+  form.postgresql_databases = [];
+  form.postgresql_excluded_tables = {};
+  await loadPostgresqlDatabases();
+}
+
+function getPostgresqlDatabaseSummary(policy) {
+  const rows = policy.extra_json?.postgresql_backup?.databases;
+  return Array.isArray(rows) && rows.length ? rows.map((row) => row.name).join(", ") : "未配置";
 }
 
 async function loadPolicies() {
@@ -367,19 +505,20 @@ async function refreshAll() {
     const notify = extra.notify || {};
     const s3 = extra.s3 || {};
     const encrypt = extra.encrypt || {};
+    const postgresql = extra.postgresql_backup || {};
   editingPolicyId.value = policy.id;
   form.name = policy.name || "";
-  form.db_type = policy.db_type || "mysql";
+  form.db_type = policy.db_type || DB_TYPE;
   form.target_type = policy.target_type || "instance";
   form.target_id = policy.target_id || null;
   form.backup_type = policy.backup_type || "full";
-  form.tool_name = policy.tool_name || "mysqldump";
+  form.tool_name = policy.tool_name || DEFAULT_TOOL;
   form.backup_tool_config_id = policy.backup_tool_config_id || null;
   form.cron_expr = policy.cron_expr || "0 2 * * *";
     form.storage_path = policy.storage_path || "/tmp";
     form.retain_days = policy.retain_days || 7;
     form.compress = !!policy.compress;
-    form.compress_method = policy.compress_method || (policy.compress ? "gzip" : "none");
+    form.compress_method = policy.compress_method || (policy.compress ? (postgresqlMode ? "default" : "gzip") : "none");
     form.encrypt_enabled = !!encrypt.enabled;
     form.encrypt_key_id = encrypt.key_id ?? null;
     form.encrypt_public_key = encrypt.public_key || "";
@@ -392,6 +531,12 @@ async function refreshAll() {
   form.s3_storage_config_id = policy.s3_storage_config_id || null;
   form.s3_upload_mode = s3.upload_mode === "us3" ? "us3" : "native";
   form.us3_cli_path = s3.us3_cli_path || "/data/us3cli-linux64";
+  const databaseRows = Array.isArray(postgresql.databases) ? postgresql.databases : [];
+  form.postgresql_databases = databaseRows.map((row) => row.name).filter(Boolean);
+  form.postgresql_excluded_tables = Object.fromEntries(databaseRows.map((row) => [
+    row.name,
+    row.table_filter?.mode === "exclude" && Array.isArray(row.table_filter.tables) ? row.table_filter.tables : [],
+  ]));
 }
 
 async function openCreatePolicyDialog() {
@@ -400,6 +545,7 @@ async function openCreatePolicyDialog() {
   if (managedInstances.value.length > 0) {
     form.target_id = managedInstances.value[0].id;
   }
+  if (postgresqlMode) await loadPostgresqlDatabases();
   dialogVisible.value = true;
 }
 
@@ -407,6 +553,10 @@ async function openEditPolicyDialog(policy) {
   resetPolicyForm();
   await loadManagedInstances();
   applyPolicyToForm(policy);
+  if (postgresqlMode) {
+    await loadPostgresqlDatabases();
+    await Promise.all(form.postgresql_databases.filter((database) => form.postgresql_excluded_tables[database]?.length).map(loadPostgresqlTables));
+  }
   dialogVisible.value = true;
 }
 
@@ -444,6 +594,18 @@ function buildPolicyPayload() {
           key_id: form.encrypt_key_id,
           public_key: form.encrypt_public_key,
         },
+        ...(postgresqlMode ? {
+          postgresql_backup: {
+            format: "custom",
+            databases: form.postgresql_databases.map((database) => {
+              const tables = form.postgresql_excluded_tables[database] || [];
+              return {
+                name: database,
+                table_filter: { mode: tables.length ? "exclude" : "all", tables },
+              };
+            }),
+          },
+        } : {}),
       },
     };
   }
@@ -451,6 +613,10 @@ function buildPolicyPayload() {
   async function onSavePolicy() {
     if (!form.target_id) {
       ElMessage.warning("请选择备份实例");
+      return;
+    }
+    if (postgresqlMode && !form.postgresql_databases.length) {
+      ElMessage.warning("请至少选择一个需要备份的数据库");
       return;
     }
     if (form.encrypt_enabled && !form.encrypt_key_id && !form.encrypt_public_key) {
@@ -521,15 +687,18 @@ function onBackupToolConfigChange(configId) {
   if (configId) {
     const tool = backupToolConfigs.value.find((t) => t.id === configId);
     if (tool) {
-      form.tool_name = tool.db_type === "mysql" ? "mysqldump" : "mongodump";
+      form.tool_name = DEFAULT_TOOL;
     }
   }
 }
 
-function onBackupAgentChange() {
-  if (!form.backup_tool_config_id) {
-    return;
+async function onBackupAgentChange() {
+  if (postgresqlMode) {
+    form.postgresql_databases = [];
+    form.postgresql_excluded_tables = {};
+    await loadPostgresqlDatabases();
   }
+  if (!form.backup_tool_config_id) return;
   const keep = currentDbTypeTools.value.some((item) => item.id === form.backup_tool_config_id);
   if (!keep) {
     form.backup_tool_config_id = null;
@@ -567,6 +736,11 @@ onMounted(refreshAll);
     display: flex;
     justify-content: flex-end;
   }
+
+  .pg-format-hint { margin-left: 10px; color: var(--el-text-color-secondary); }
+.pg-database-scopes { display: flex; flex-direction: column; gap: 10px; width: 100%; }
+.pg-database-card { width: 100%; }
+.pg-database-header { display: flex; justify-content: space-between; align-items: center; }
 
   .encrypt-box {
     display: flex;

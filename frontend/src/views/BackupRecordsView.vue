@@ -254,7 +254,7 @@ const dbTypeFilters = computed(() => {
       return;
     }
     seen.add(value);
-    const label = value === "mysql" ? "MySQL" : value === "mongodb" ? "MongoDB" : String(value);
+    const label = value === "mysql" ? "MySQL" : value === "mongodb" ? "MongoDB" : value === "postgresql" ? "PostgreSQL" : String(value);
     options.push({ text: label, value });
   });
   if (hasEmpty) {

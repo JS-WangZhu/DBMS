@@ -115,6 +115,35 @@ def probe_instance_on_agent(instance, password):
     except Exception as exc:
         return {"ok": False, "error": f"agent probe failed: {exc}"}
 
+def fetch_postgresql_metadata_on_agent(instance, password, agent_id, database=None):
+    url = get_agent_url(agent_id)
+    api_key = get_agent_api_key(agent_id)
+    headers = {"X-Agent-API-Key": api_key} if api_key else {}
+    response = requests.post(
+        f"{url.rstrip('/')}/api/agent/postgresql/metadata",
+        json={
+            "instance": {
+                "host_input": instance.host_input,
+                "resolved_ip": instance.resolved_ip,
+                "port": instance.port,
+                "username": instance.username,
+                "extra_json": instance.extra_json if isinstance(instance.extra_json, dict) else {},
+                "password": password or "",
+            },
+            "database": database,
+        },
+        headers=headers,
+        timeout=(5, 15),
+    )
+    body = response.json() if response.content else {}
+    if response.status_code >= 400:
+        raise BackupAgentError(body.get("message") or f"Agent metadata error({response.status_code})")
+    data = body.get("data") if isinstance(body, dict) else None
+    if not isinstance(data, list):
+        raise BackupAgentError("invalid postgresql metadata response")
+    return data
+
+
 def _resolve_encrypt_public_key(encrypt_cfg: dict) -> str:
     public_key = (encrypt_cfg.get("public_key") or "").strip()
     if public_key:
@@ -173,8 +202,9 @@ def _build_payload_from_policy(policy: BackupPolicy, instance: DatabaseInstance)
         encrypt_payload["public_key"] = _resolve_encrypt_public_key(encrypt_cfg)
 
     compress_method = (policy.extra_json or {}).get("compress_method") if isinstance(policy.extra_json, dict) else None
-    if compress_method not in {"none", "gzip", "zstd"}:
-        compress_method = "gzip" if policy.compress else "none"
+    allowed_methods = {"default", "gzip", "lz4", "zstd", "none"} if policy.db_type == "postgresql" else {"none", "gzip", "zstd"}
+    if compress_method not in allowed_methods:
+        compress_method = ("default" if policy.compress else "none") if policy.db_type == "postgresql" else ("gzip" if policy.compress else "none")
 
     mongo_backup = dict((policy.extra_json or {}).get("mongo_backup") or {"mode": "full", "exclusions": []})
     if policy.db_type == "mongodb":
@@ -189,6 +219,7 @@ def _build_payload_from_policy(policy: BackupPolicy, instance: DatabaseInstance)
         "compress_method": compress_method,
         "encrypt": encrypt_payload,
         "mongo_backup": mongo_backup,
+        "postgresql_backup": dict((policy.extra_json or {}).get("postgresql_backup") or {}),
     }
     if policy.s3_storage_config_id and _is_policy_s3_upload_enabled(policy):
         s3_config = S3StorageConfig.query.get(policy.s3_storage_config_id)
@@ -205,6 +236,7 @@ def _build_payload_from_policy(policy: BackupPolicy, instance: DatabaseInstance)
         "port": instance.port,
         "username": instance.username,
         "password": password,
+        "extra_json": instance.extra_json if isinstance(instance.extra_json, dict) else {},
     }
     
     return {

@@ -12,7 +12,7 @@ from app.models.backup_agent import BackupAgent
 from app.utils.response import error_response, ok_response
 
 bp = Blueprint("backup_tools", __name__, url_prefix="/backup-tools")
-VALID_DB_TYPES = {"mysql", "mongodb"}
+VALID_DB_TYPES = {"mysql", "mongodb", "postgresql"}
 
 
 @bp.route("", methods=["GET"])
@@ -38,7 +38,7 @@ def create_backup_tool():
     if not name:
         return error_response("name is required", code=400)
     if not db_type or db_type not in VALID_DB_TYPES:
-        return error_response("db_type must be mysql or mongodb", code=400)
+        return error_response("db_type must be mysql, mongodb or postgresql", code=400)
     if not tool_path:
         return error_response("tool_path is required", code=400)
 
@@ -156,6 +156,8 @@ def verify_backup_tool(config_id):
         return error_response(f"对于MySQL备份，工具名称应为 mysqldump，当前为 {base_name}", code=400)
     if config.db_type == "mongodb" and base_name != "mongodump":
         return error_response(f"对于MongoDB备份，工具名称应为 mongodump，当前为 {base_name}", code=400)
+    if config.db_type == "postgresql" and base_name != "pg_dump":
+        return error_response(f"对于PostgreSQL备份，工具名称应为 pg_dump，当前为 {base_name}", code=400)
     # 尝试获取版本信息
     try:
         result = subprocess.run([tool_path, "--version"], capture_output=True, text=True, timeout=5)
@@ -198,6 +200,8 @@ def verify_tool_path():
         return error_response(f"对于MySQL备份，工具名称应为 mysqldump，当前为 {base_name}", code=400)
     if db_type == "mongodb" and base_name != "mongodump":
         return error_response(f"对于MongoDB备份，工具名称应为 mongodump，当前为 {base_name}", code=400)
+    if db_type == "postgresql" and base_name != "pg_dump":
+        return error_response(f"对于PostgreSQL备份，工具名称应为 pg_dump，当前为 {base_name}", code=400)
     # 尝试获取版本信息
     try:
         result = subprocess.run([tool_path, "--version"], capture_output=True, text=True, timeout=5)

@@ -37,7 +37,8 @@
     <div class="table-wrap">
       <el-table
         class="instance-table"
-        :data="displayRows"        stripe
+        :data="displayRows"
+        stripe
         border
         size="small"
         table-layout="fixed"
@@ -169,6 +170,12 @@
             <span v-else>-</span>
           </template>
         </el-table-column>
+        <el-table-column v-if="dbType === 'postgresql'" label="复制延迟" min-width="88">
+          <template #default="scope">{{ postgresqlReplicationLagText(scope.row) }}</template>
+        </el-table-column>
+        <el-table-column v-if="dbType === 'postgresql'" label="WAL积压" min-width="92" show-overflow-tooltip>
+          <template #default="scope">{{ postgresqlReplicationLagBytesText(scope.row) }}</template>
+        </el-table-column>
         <el-table-column v-if="dbType === 'redis'" label="实例内存使用率" min-width="132" show-overflow-tooltip>
           <template #default="scope">
             <div v-if="redisContainerMemoryText(scope.row) !== '-'" class="redis-memory-cell">
@@ -182,7 +189,7 @@
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column min-width="70">
+        <el-table-column v-if="dbType !== 'postgresql'" min-width="70">
           <template #header>
             <span class="metric-header">
               CPU
@@ -206,7 +213,7 @@
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column min-width="70">
+        <el-table-column v-if="dbType !== 'postgresql'" min-width="70">
           <template #header>
             <span class="metric-header">
               内存
@@ -230,7 +237,7 @@
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column min-width="78">
+        <el-table-column v-if="dbType !== 'postgresql'" min-width="78">
           <template #header>
             <span class="metric-header">
               数据盘
@@ -424,6 +431,18 @@
           <el-input v-model.trim="form.physical_address" :disabled="form.physical_discovery_mode === 'auto'" placeholder="自动发现返回 vSAN 或当前物理节点 IP" />
         </el-form-item>
         <el-form-item label="端口"><el-input-number v-model="form.port" :min="1" :max="65535" style="width: 100%" /></el-form-item>
+        <el-form-item v-if="dbType === 'postgresql'" label="数据库名">
+          <el-input v-model.trim="form.postgresql_database" placeholder="默认 postgres；pg_dump 将备份该数据库" />
+        </el-form-item>
+        <el-form-item v-if="dbType === 'postgresql'" label="SSL 模式">
+          <el-select v-model="form.postgresql_sslmode" style="width: 100%">
+            <el-option label="prefer" value="prefer" />
+            <el-option label="disable" value="disable" />
+            <el-option label="require" value="require" />
+            <el-option label="verify-ca" value="verify-ca" />
+            <el-option label="verify-full" value="verify-full" />
+          </el-select>
+        </el-form-item>
         <el-form-item label="Node Exporter">
           <el-radio-group v-model="form.node_exporter_mode">
             <el-radio-button label="same_host">同主机:9100</el-radio-button>
@@ -616,6 +635,8 @@ const form = reactive({
   port: 3306,
   node_exporter_mode: "same_host",
   node_exporter_address: "",
+  postgresql_database: "postgres",
+  postgresql_sslmode: "prefer",
   username: "",
   password: "",
 });
@@ -956,6 +977,8 @@ function resetForm() {
   form.port = pageCfg.value.defaultPort;
   form.node_exporter_mode = "same_host";
   form.node_exporter_address = "";
+  form.postgresql_database = "postgres";
+  form.postgresql_sslmode = "prefer";
   form.username = "";
   form.password = "";
 }
@@ -982,6 +1005,8 @@ function openEditDialog(row) {
   form.port = row.port || pageCfg.value.defaultPort;
   form.node_exporter_mode = mode;
   form.node_exporter_address = mode === "custom" ? (exporter.address || exporter.endpoint || "") : "";
+  form.postgresql_database = rawExtra.database || rawExtra.dbname || "postgres";
+  form.postgresql_sslmode = rawExtra.sslmode || "prefer";
   form.username = row.username || "";
   form.password = "";
   dialogVisible.value = true;
@@ -1019,6 +1044,11 @@ function buildExtraJsonPayload() {
     delete base.physical_address;
   }
   base.node_exporter = buildNodeExporterPayload();
+  if (dbType.value === "postgresql") {
+    base.database = (form.postgresql_database || "postgres").trim() || "postgres";
+    base.sslmode = form.postgresql_sslmode || "prefer";
+    delete base.dbname;
+  }
   return base;
 }
 
@@ -1139,10 +1169,21 @@ function postgresqlRoleTagType(role) {
 
 function postgresqlConnectionUsageText(row) {
   const value = Number(postgresqlPayload(row).connection_usage_pct);
-  if (!Number.isFinite(value)) {
-    return "-";
-  }
+  if (!Number.isFinite(value)) return "-";
   return `${value.toFixed(2)}%`;
+}
+
+function postgresqlReplicationLagText(row) {
+  const payload = postgresqlPayload(row);
+  if (payload.replication_role !== "standby") return "-";
+  const value = Number(payload.replication_lag_seconds);
+  return Number.isFinite(value) && value >= 0 ? `${value.toFixed(3)}s` : "-";
+}
+
+function postgresqlReplicationLagBytesText(row) {
+  const payload = postgresqlPayload(row);
+  if (payload.replication_role !== "standby") return "-";
+  return formatBytes(payload.replication_lag_bytes);
 }
   function mongoRole(row) {
     const payload = commonHealthMap[row.id]?.payload_json || {};
@@ -1800,6 +1841,98 @@ function openInfoDialog(title, rowsData) {
   infoRows.value = filtered.length ? filtered : [{ label: "结果", value: "-" }];
   infoDialogVisible.value = true;
 }
+
+  function formatPostgresqlUptime(value) {
+    const seconds = Number(value);
+    if (!Number.isFinite(seconds) || seconds < 0) return "-";
+    const total = Math.floor(seconds);
+    const days = Math.floor(total / 86400);
+    const hours = Math.floor((total % 86400) / 3600);
+    const minutes = Math.floor((total % 3600) / 60);
+    const parts = [];
+    if (days) parts.push(`${days}天`);
+    if (hours || days) parts.push(`${hours}小时`);
+    parts.push(`${minutes}分钟`);
+    return parts.join(" ");
+  }
+
+  function buildPostgresqlDetailRows(payload) {
+    const rows = [
+      { label: "运行情况", value: runningText(payload.running_status) },
+      { label: "数据库", value: normalizeInfoValue(payload.database) },
+      { label: "版本", value: normalizeInfoValue(payload.version) },
+      { label: "主从角色", value: postgresqlRoleText(payload.replication_role) },
+      { label: "运行时长", value: formatPostgresqlUptime(payload.uptime) },
+      { label: "当前连接数", value: normalizeInfoValue(payload.connections) },
+      { label: "活动连接数", value: normalizeInfoValue(payload.active_connections) },
+      { label: "最大配置连接数", value: normalizeInfoValue(payload.max_connections) },
+      { label: "连接使用率", value: asPercentText(payload.connection_usage_pct) },
+      { label: "锁等待连接数", value: normalizeInfoValue(payload.lock_waiting_connections) },
+      { label: "提交事务数", value: normalizeInfoValue(payload.xact_commit) },
+      { label: "回滚事务数", value: normalizeInfoValue(payload.xact_rollback) },
+      { label: "死锁数", value: normalizeInfoValue(payload.deadlocks) },
+      { label: "当前数据库大小", value: formatBytes(payload.database_size_bytes) },
+    ];
+
+    if (payload.replication_role === "primary") {
+      rows.push(
+        { label: "当前WAL LSN", value: normalizeInfoValue(payload.wal_current_lsn) },
+        { label: "流复制从库数", value: normalizeInfoValue(payload.replica_count) },
+      );
+    } else if (payload.replication_role === "standby") {
+      rows.push(
+        { label: "WAL Receiver状态", value: normalizeInfoValue(payload.wal_receiver_status) },
+        { label: "上游报告LSN", value: normalizeInfoValue(payload.wal_source_lsn) },
+        { label: "已接收LSN", value: normalizeInfoValue(payload.wal_receive_lsn) },
+        { label: "已回放LSN", value: normalizeInfoValue(payload.wal_replay_lsn) },
+        { label: "总WAL积压", value: formatBytes(payload.replication_lag_bytes) },
+        { label: "接收积压", value: formatBytes(payload.receive_lag_bytes) },
+        { label: "回放积压", value: formatBytes(payload.replay_lag_bytes) },
+        { label: "复制延迟", value: payload.replication_lag_seconds === null || payload.replication_lag_seconds === undefined ? "-" : `${payload.replication_lag_seconds}s` },
+        { label: "WAL回放暂停", value: normalizeInfoValue(payload.replay_paused) },
+        { label: "最后接收消息时间", value: formatDateTime(payload.wal_last_message_at) },
+      );
+    }
+
+    const cpuParts = [];
+    if (payload.host_cpu_cores !== null && payload.host_cpu_cores !== undefined) cpuParts.push(`${payload.host_cpu_cores} 核`);
+    const cpuUsage = asPercentText(payload.host_cpu_usage_pct);
+    if (cpuUsage !== "-") cpuParts.push(`使用率 ${cpuUsage}`);
+    if (cpuParts.length) rows.push({ label: "虚拟机 CPU", value: cpuParts.join("，") });
+
+    const memoryParts = [];
+    const memoryTotal = formatBytes(payload.host_memory_total_bytes);
+    if (memoryTotal !== "-") memoryParts.push(`总量 ${memoryTotal}`);
+    const memoryUsage = asPercentText(payload.host_memory_usage_pct);
+    if (memoryUsage !== "-") memoryParts.push(`使用率 ${memoryUsage}`);
+    if (memoryParts.length) rows.push({ label: "虚拟机内存", value: memoryParts.join("，") });
+
+    const disks = Array.isArray(payload.host_disk_entries) ? payload.host_disk_entries : [];
+    disks.forEach((disk) => {
+      const mount = disk.mountpoint || "-";
+      const parts = [];
+      if (disk.device) parts.push(`设备 ${disk.device}`);
+      const size = formatBytes(disk.size_bytes);
+      const used = formatBytes(disk.used_bytes);
+      const usage = asPercentText(disk.usage_pct);
+      if (size !== "-") parts.push(`容量 ${size}`);
+      if (used !== "-") parts.push(`已用 ${used}`);
+      if (usage !== "-") parts.push(`使用率 ${usage}`);
+      const inodeUsed = formatCount(disk.inode_used);
+      const inodeTotal = formatCount(disk.inode_total);
+      const inodeFree = formatCount(disk.inode_free);
+      const inodeUsage = asPercentText(disk.inode_usage_pct);
+      if (inodeUsed !== "-" || inodeTotal !== "-") parts.push(`inode 已用 ${inodeUsed}/${inodeTotal}`);
+      if (inodeFree !== "-") parts.push(`inode 可用 ${inodeFree}`);
+      if (inodeUsage !== "-") parts.push(`inode 使用率 ${inodeUsage}`);
+      rows.push({ label: `磁盘目录 ${mount}`, value: parts.length ? parts.join("，") : "-" });
+    });
+
+    rows.push(...buildNetworkRows(payload));
+    if (payload.node_exporter_error) rows.push({ label: "主机指标采集错误", value: normalizeInfoValue(payload.node_exporter_error) });
+    rows.push({ label: "采集时间", value: formatDateTime(payload.collected_at) });
+    return rows;
+  }
 
   function buildGenericInfoRows(payload) {
   const obj = payload && typeof payload === "object" ? payload : {};
@@ -2586,7 +2719,8 @@ async function removeInstance(row) {
         return;
       }
       const genericPayload = payload.payload_json && typeof payload.payload_json === "object" ? payload.payload_json : payload;
-      openInfoDialog(`${row.name} - 实例详情`, [...buildAccessModeDetailRows(row), ...buildGenericInfoRows(genericPayload)]);
+      const detailRows = dbType.value === "postgresql" ? buildPostgresqlDetailRows(genericPayload) : buildGenericInfoRows(genericPayload);
+      openInfoDialog(`${row.name} - 实例详情`, [...buildAccessModeDetailRows(row), ...detailRows]);
     } catch (error) {
       const fallback = mysqlStatus(row);
       if (fallback && Object.keys(fallback).length) {

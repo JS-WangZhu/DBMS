@@ -14,12 +14,16 @@ from app.models.notify_target import BackupNotifyTarget
 from app.models.s3_storage_config import S3StorageConfig
 from app.services.audit import log_audit
 from app.services.backup_executor import run_backup_policy
-from app.services.backup_agent_client import BackupAgentError, cancel_backup_on_agent, download_backup_file_from_agent
+from app.services.backup_agent_client import (
+    BackupAgentError, cancel_backup_on_agent, download_backup_file_from_agent,
+    fetch_postgresql_metadata_on_agent,
+)
 from app.services.remote_backup_service import submit_remote_backup, sync_running_remote_backups
 from app.services.monitor_snapshot_service import latest_payload_by_instance_ids
 from app.services.notifier import test_notify_target, notify_backup_failure
 from app.services.s3_storage import upload_file_to_s3, generate_presigned_download_url
 from app.tasks.scheduler import sync_backup_jobs
+from app.utils.crypto import decrypt_secret
 from app.utils.response import error_response, ok_response
 
 bp = Blueprint("backups", __name__, url_prefix="/backups")
@@ -33,7 +37,7 @@ CRON_ALIAS_MAP = {
     "@monthly": "0 0 1 * *",
 }
 S3_DOWNLOAD_LIFECYCLE_DAYS = 30
-BACKUP_OVERVIEW_DB_TYPES = {"mysql", "mongodb"}
+BACKUP_OVERVIEW_DB_TYPES = {"mysql", "mongodb", "postgresql"}
 
 
 def _parse_datetime(value: str):
@@ -168,6 +172,46 @@ def _normalize_mongo_backup(db_type, config):
     }, None
 
 
+def _normalize_postgresql_backup(db_type, config):
+    if db_type != "postgresql":
+        return {"databases": []}, None
+    config = config if isinstance(config, dict) else {}
+    rows = config.get("databases")
+    if not isinstance(rows, list) or not rows:
+        return None, "postgresql backup requires at least one database"
+    normalized = []
+    seen = set()
+    for row in rows:
+        if isinstance(row, str):
+            row = {"name": row}
+        if not isinstance(row, dict):
+            return None, "postgresql database scope must be an object"
+        name = str(row.get("name") or "").strip()
+        if not name:
+            return None, "postgresql database name is required"
+        if name in seen:
+            return None, f"duplicate postgresql database: {name}"
+        seen.add(name)
+        table_filter = row.get("table_filter") if isinstance(row.get("table_filter"), dict) else {}
+        mode = str(table_filter.get("mode") or "all").strip().lower()
+        if mode not in {"all", "include", "exclude"}:
+            return None, "postgresql table filter mode must be all/include/exclude"
+        tables = table_filter.get("tables") or []
+        if not isinstance(tables, list):
+            return None, "postgresql table filters must be a list"
+        table_names = []
+        table_seen = set()
+        for table in tables:
+            value = str(table or "").strip()
+            if value and value not in table_seen:
+                table_seen.add(value)
+                table_names.append(value)
+        if mode != "all" and not table_names:
+            return None, f"postgresql {mode} table filter requires tables"
+        normalized.append({"name": name, "table_filter": {"mode": mode, "tables": table_names}})
+    return {"format": "custom", "databases": normalized}, None
+
+
 def _validate_target_binding(target_type, target_id, db_type):
     if target_type != "instance":
         return "backup currently supports instance target only"
@@ -207,8 +251,8 @@ def _apply_policy_fields(policy: BackupPolicy, payload: dict, is_create: bool = 
         if missing:
             return f"missing fields: {', '.join(missing)}"
 
-    if "db_type" in payload and payload["db_type"] not in {"mysql", "mongodb"}:
-        return "backup currently supports mysql and mongodb"
+    if "db_type" in payload and payload["db_type"] not in {"mysql", "mongodb", "postgresql"}:
+        return "backup currently supports mysql, mongodb and postgresql"
 
     if "target_type" in payload and payload["target_type"] not in {"instance", "cluster"}:
         return "invalid target_type"
@@ -261,14 +305,22 @@ def _apply_policy_fields(policy: BackupPolicy, payload: dict, is_create: bool = 
     requested_compress_method = None
     if "compress_method" in payload:
         requested_compress_method = str(payload.get("compress_method") or "").strip().lower()
-        if requested_compress_method not in {"none", "gzip", "zstd"}:
-            return "invalid compress_method, allowed: none/gzip/zstd"
+        allowed_methods = {"default", "gzip", "lz4", "zstd", "none"} if effective_db_type == "postgresql" else {"none", "gzip", "zstd"}
+        if requested_compress_method not in allowed_methods:
+            return f"invalid compress_method, allowed: {'/'.join(sorted(allowed_methods))}"
 
-    if "extra_json" in payload:
+    if "extra_json" in payload or (is_create and effective_db_type == "postgresql"):
         extra = _normalize_extra_json(payload.get("extra_json") or {})
         mongo_backup, mongo_error = _normalize_mongo_backup(effective_db_type, extra.get("mongo_backup"))
         if mongo_error: return mongo_error
         extra["mongo_backup"] = mongo_backup
+        if effective_db_type == "postgresql":
+            postgresql_backup, postgresql_error = _normalize_postgresql_backup(
+                effective_db_type, extra.get("postgresql_backup")
+            )
+            if postgresql_error:
+                return postgresql_error
+            extra["postgresql_backup"] = postgresql_backup
         policy.extra_json = extra
 
     if requested_compress_method is not None:
@@ -278,7 +330,8 @@ def _apply_policy_fields(policy: BackupPolicy, payload: dict, is_create: bool = 
         policy.compress = requested_compress_method != "none"
     elif "extra_json" in payload:
         method = policy.extra_json.get("compress_method")
-        if method in {"none", "gzip", "zstd"}:
+        allowed_methods = {"default", "gzip", "lz4", "zstd", "none"} if effective_db_type == "postgresql" else {"none", "gzip", "zstd"}
+        if method in allowed_methods:
             policy.compress = method != "none"
 
     return None
@@ -386,6 +439,17 @@ def _mysql_role_text(role: str):
     return "未知"
 
 
+def _postgresql_role_text(payload: dict, fallback: str = None):
+    role = str((payload or {}).get("replication_role") or "").strip().lower()
+    if role == "primary":
+        return "主库"
+    if role == "standby":
+        return "从库"
+    if fallback:
+        return fallback
+    return "未知"
+
+
 def _instance_key(item: DatabaseInstance):
     host = (item.resolved_ip or item.host_input or "").strip().lower()
     if not host:
@@ -431,7 +495,7 @@ def list_managed_instances():
     if db_type:
         query = query.filter_by(db_type=db_type)
     else:
-        query = query.filter(DatabaseInstance.db_type.in_(["mysql", "mongodb"]))
+        query = query.filter(DatabaseInstance.db_type.in_(["mysql", "mongodb", "postgresql"]))
 
     rows = query.order_by(DatabaseInstance.db_type.asc(), DatabaseInstance.id.asc()).all()
     payload_by_instance = {}
@@ -481,6 +545,9 @@ def list_managed_instances():
                 role_text = item.role_label
             else:
                 role_text = "未知"
+        elif item.db_type == "postgresql":
+            payload = payload_by_instance.get(item.id) or {}
+            role_text = _postgresql_role_text(payload, fallback=item.role_label)
         elif item.role_label:
             role_text = item.role_label
         elif item.is_read_only:
@@ -491,6 +558,49 @@ def list_managed_instances():
         items.append(data)
 
     return ok_response(data=items)
+
+
+@bp.get("/postgresql/metadata/databases")
+@active_user_required
+def postgresql_backup_databases():
+    instance_id = request.args.get("instance_id", type=int)
+    agent_id = request.args.get("backup_agent_id", type=int)
+    instance = DatabaseInstance.query.filter_by(id=instance_id, db_type="postgresql").first() if instance_id else None
+    if not instance:
+        return error_response("postgresql instance not found", code=404)
+    password = decrypt_secret(instance.password_encrypted) if instance.password_encrypted else ""
+    try:
+        if agent_id:
+            rows = fetch_postgresql_metadata_on_agent(instance, password, agent_id, database=None)
+        else:
+            from app.services.postgresql_backup import list_databases
+            rows = list_databases(instance, password)
+        return ok_response(data=rows)
+    except Exception as exc:
+        return error_response(f"load postgresql databases failed: {exc}", code=502)
+
+
+@bp.get("/postgresql/metadata/tables")
+@active_user_required
+def postgresql_backup_tables():
+    instance_id = request.args.get("instance_id", type=int)
+    database = str(request.args.get("database") or "").strip()
+    agent_id = request.args.get("backup_agent_id", type=int)
+    instance = DatabaseInstance.query.filter_by(id=instance_id, db_type="postgresql").first() if instance_id else None
+    if not instance:
+        return error_response("postgresql instance not found", code=404)
+    if not database:
+        return error_response("database is required", code=400)
+    password = decrypt_secret(instance.password_encrypted) if instance.password_encrypted else ""
+    try:
+        if agent_id:
+            rows = fetch_postgresql_metadata_on_agent(instance, password, agent_id, database=database)
+        else:
+            from app.services.postgresql_backup import list_tables
+            rows = list_tables(instance, password, database)
+        return ok_response(data=rows)
+    except Exception as exc:
+        return error_response(f"load postgresql tables failed: {exc}", code=502)
 
 
 @bp.get("/notify-targets")

@@ -6,6 +6,14 @@ export function listManagedInstances(dbType) {
   return client.get("/backups/managed-instances", { params });
 }
 
+export function listPostgresqlBackupDatabases(params) {
+  return client.get("/backups/postgresql/metadata/databases", { params });
+}
+
+export function listPostgresqlBackupTables(params) {
+  return client.get("/backups/postgresql/metadata/tables", { params });
+}
+
 export function listNotifyTargets(params = {}) {
   return client.get("/backups/notify-targets", { params });
 }

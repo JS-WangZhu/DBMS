@@ -44,9 +44,11 @@ def ensure_backup_extra_columns():
     statements = []
     if engine.dialect.name == "mysql":
         asset_types = "'mysql','redis','postgresql','doris','mongodb'"
+        backup_types = "'mysql','mongodb','postgresql'"
         statements.extend([
             f"ALTER TABLE db_clusters MODIFY COLUMN db_type ENUM({asset_types}) NOT NULL",
             f"ALTER TABLE db_instances MODIFY COLUMN db_type ENUM({asset_types}) NOT NULL",
+            f"ALTER TABLE backup_policies MODIFY COLUMN db_type ENUM({backup_types}) NOT NULL",
         ])
 
     if table_columns["db_instances"] and "access_mode" not in table_columns["db_instances"]:

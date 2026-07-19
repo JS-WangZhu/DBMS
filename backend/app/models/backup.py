@@ -13,7 +13,7 @@ def _utc_isoformat(value):
 TARGET_TYPE_ENUM = db.Enum("instance", "cluster", name="backup_target_type", native_enum=False)
 BACKUP_TYPE_ENUM = db.Enum("full", "incremental", name="backup_type_enum", native_enum=False)
 BACKUP_STATUS_ENUM = db.Enum("running", "success", "failed", "cancelled", name="backup_status_enum", native_enum=False)
-DB_TYPE_BACKUP_ENUM = db.Enum("mysql", "mongodb", name="backup_db_type", native_enum=False)
+DB_TYPE_BACKUP_ENUM = db.Enum("mysql", "mongodb", "postgresql", name="backup_db_type", native_enum=False)
 
 
 class BackupPolicy(db.Model, TimestampMixin):
@@ -44,8 +44,9 @@ class BackupPolicy(db.Model, TimestampMixin):
     def to_dict(self) -> dict:
         extra = self.extra_json if isinstance(self.extra_json, dict) else {}
         compress_method = extra.get("compress_method")
-        if compress_method not in {"none", "gzip", "zstd"}:
-            compress_method = "gzip" if self.compress else "none"
+        allowed_methods = {"default", "gzip", "lz4", "zstd", "none"} if self.db_type == "postgresql" else {"none", "gzip", "zstd"}
+        if compress_method not in allowed_methods:
+            compress_method = ("default" if self.compress else "none") if self.db_type == "postgresql" else ("gzip" if self.compress else "none")
         return {
             "id": self.id,
             "name": self.name,
@@ -88,7 +89,7 @@ class BackupLog(db.Model, TimestampMixin):
     def to_dict(self) -> dict:
         extra = self.extra_json or {}
         compress_method = extra.get("compress_method")
-        if compress_method not in {"none", "gzip", "zstd"}:
+        if compress_method not in {"default", "none", "gzip", "lz4", "zstd"}:
             path = (self.file_path or "").lower()
             if path.endswith(".gz"):
                 compress_method = "gzip"

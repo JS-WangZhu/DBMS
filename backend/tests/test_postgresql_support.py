@@ -86,3 +86,39 @@ def test_postgresql_healthy_payload_has_no_database_issue():
     }
 
     assert _extract_issues(instance, payload, dict(DEFAULT_THRESHOLDS)) == []
+
+
+def test_postgresql_idle_standby_does_not_report_time_lag():
+    instance = SimpleNamespace(db_type="postgresql")
+    payload = {
+        "replication_role": "standby",
+        "replication_lag_seconds": 4281.151,
+        "replication_lag_bytes": 0,
+        "wal_receiver_status": "streaming",
+        "replay_paused": False,
+        "lock_waiting_connections": 0,
+    }
+    issues = _extract_issues(instance, payload, dict(DEFAULT_THRESHOLDS))
+    assert "postgresql_replication_lag" not in {item["issue_key"] for item in issues}
+
+
+def test_postgresql_wal_backlog_and_receiver_failure_are_reported():
+    instance = SimpleNamespace(db_type="postgresql")
+    backlog = {
+        "replication_role": "standby",
+        "replication_lag_seconds": 90,
+        "replication_lag_bytes": 8192,
+        "wal_receiver_status": "streaming",
+    }
+    issues = _extract_issues(instance, backlog, dict(DEFAULT_THRESHOLDS))
+    assert "postgresql_replication_lag" in {item["issue_key"] for item in issues}
+    assert "8192 bytes" in str(next(item for item in issues if item["issue_key"] == "postgresql_replication_lag"))
+
+    disconnected = {
+        "replication_role": "standby",
+        "replication_lag_seconds": None,
+        "replication_lag_bytes": None,
+        "wal_receiver_status": None,
+    }
+    issues = _extract_issues(instance, disconnected, dict(DEFAULT_THRESHOLDS))
+    assert "postgresql_replication_receiver" in {item["issue_key"] for item in issues}

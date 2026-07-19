@@ -66,6 +66,7 @@ class Config:
     # Backup tools configuration
     MYSQLDUMP_PATH = os.getenv("MYSQLDUMP_PATH", "mysqldump")
     MONGODUMP_PATH = os.getenv("MONGODUMP_PATH", "mongodump")
+    PGDUMP_PATH = os.getenv("PGDUMP_PATH", "pg_dump")
 
     # Backup Agent configuration
     BACKUP_AGENT_URL = os.getenv("BACKUP_AGENT_URL", "http://localhost:5001")

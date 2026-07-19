@@ -93,3 +93,38 @@ Backup task state is intentionally process-local memory. Run one agent worker
 per endpoint (the built-in `python manage.py` setup already does this). If a
 multi-worker process manager is used, requests for one endpoint must be pinned
 to the same worker or the task store must be replaced with a shared store.
+
+
+## Docker multi-architecture build
+
+The image supports `linux/amd64` and `linux/arm64` and includes `pg_dump` 18,
+`mysqldump`, and `mongodump`.
+
+Build and load an image for the current machine:
+
+```bash
+docker buildx build --platform linux/amd64 -t dbms-agent:local --load .
+# On an ARM64 machine, use: --platform linux/arm64
+```
+
+Publish one multi-architecture tag:
+
+```bash
+docker buildx build \
+  --platform linux/amd64,linux/arm64 \
+  -t registry.example.com/dbms-agent:latest \
+  --push .
+```
+
+Run the agent with a persistent backup directory and a required API key:
+
+```bash
+docker run -d --name dbms-agent \
+  -p 5001:5001 \
+  -e AGENT_API_KEY=replace-with-a-strong-shared-key \
+  -v /data/dbms-backups:/data/backups \
+  registry.example.com/dbms-agent:latest
+```
+
+Remote backup policies must use `/data/backups` (or a subdirectory) as their
+storage path so backup files are written to the mounted volume.

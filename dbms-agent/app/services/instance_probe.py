@@ -191,9 +191,6 @@ def _mysql(instance, password):
     import pymysql
 
     warnings = []
-    host_metrics = _collect_host_metrics(instance)
-    if host_metrics.get("node_exporter_error"):
-        warnings.append(host_metrics["node_exporter_error"])
     conn = pymysql.connect(
         host=instance.get("resolved_ip") or instance.get("host_input"),
         port=int(instance.get("port") or 3306),
@@ -329,7 +326,6 @@ def _mysql(instance, password):
                 elif effective_read_only is False:
                     payload["replication_role"] = "master"
             payload["warnings"] = warnings
-            payload.update(host_metrics)
             return payload
     finally:
         conn.close()
@@ -555,21 +551,48 @@ def _postgresql(instance, password):
             connections = _safe_int(activity[0])
             max_connections = _safe_int(base[4])
             lag = None
+            lag_bytes = receive_lag_bytes = replay_lag_bytes = None
+            wal_source_lsn = wal_receive_lsn = wal_replay_lsn = wal_current_lsn = None
+            wal_receiver_status = wal_last_message_at = None
             replay_paused = False
             replica_count = 0
             if in_recovery:
                 cursor.execute(
-                    "SELECT CASE WHEN pg_last_xact_replay_timestamp() IS NULL THEN NULL "
-                    "ELSE EXTRACT(EPOCH FROM (now() - pg_last_xact_replay_timestamp())) END, "
-                    "pg_is_wal_replay_paused()"
+                    "WITH receiver AS ("
+                    " SELECT status, latest_end_lsn, last_msg_receipt_time"
+                    " FROM pg_stat_wal_receiver LIMIT 1"
+                    "), positions AS ("
+                    " SELECT (SELECT status FROM receiver) AS receiver_status,"
+                    " (SELECT latest_end_lsn FROM receiver) AS source_lsn,"
+                    " pg_last_wal_receive_lsn() AS receive_lsn,"
+                    " pg_last_wal_replay_lsn() AS replay_lsn,"
+                    " (SELECT last_msg_receipt_time FROM receiver) AS last_message_at"
+                    ") SELECT receiver_status, source_lsn::text, receive_lsn::text, replay_lsn::text,"
+                    " CASE WHEN receiver_status IS NULL OR source_lsn IS NULL THEN NULL ELSE GREATEST(COALESCE(pg_wal_lsn_diff(GREATEST(source_lsn, receive_lsn), replay_lsn), 0), 0)::bigint END,"
+                    " CASE WHEN source_lsn IS NULL THEN NULL ELSE GREATEST(COALESCE(pg_wal_lsn_diff(GREATEST(source_lsn, receive_lsn), receive_lsn), 0), 0)::bigint END,"
+                    " GREATEST(COALESCE(pg_wal_lsn_diff(receive_lsn, replay_lsn), 0), 0)::bigint,"
+                    " CASE WHEN receiver_status IS NULL OR source_lsn IS NULL THEN NULL WHEN GREATEST(COALESCE(pg_wal_lsn_diff(GREATEST(source_lsn, receive_lsn), replay_lsn), 0), 0) > 0"
+                    " AND pg_last_xact_replay_timestamp() IS NOT NULL"
+                    " THEN EXTRACT(EPOCH FROM (now() - pg_last_xact_replay_timestamp())) ELSE 0 END,"
+                    " pg_is_wal_replay_paused(), last_message_at FROM positions"
                 )
                 repl = cursor.fetchone()
-                lag = round(float(repl[0]), 3) if repl and repl[0] is not None else None
-                replay_paused = bool(repl[1]) if repl else False
+                if repl:
+                    wal_receiver_status, wal_source_lsn, wal_receive_lsn, wal_replay_lsn = repl[:4]
+                    lag_bytes = _safe_int(repl[4])
+                    receive_lag_bytes = _safe_int(repl[5])
+                    replay_lag_bytes = _safe_int(repl[6])
+                    lag = round(float(repl[7]), 3) if repl[7] is not None else None
+                    replay_paused = bool(repl[8])
+                    wal_last_message_at = repl[9].isoformat() if hasattr(repl[9], "isoformat") else repl[9]
             else:
-                cursor.execute("SELECT count(*)::bigint FROM pg_stat_replication WHERE state = 'streaming'")
+                cursor.execute(
+                    "SELECT pg_current_wal_lsn()::text, "
+                    "count(*) FILTER (WHERE state = 'streaming')::bigint FROM pg_stat_replication"
+                )
                 repl = cursor.fetchone()
-                replica_count = _safe_int(repl[0]) if repl else 0
+                wal_current_lsn = repl[0] if repl else None
+                replica_count = _safe_int(repl[1]) if repl else 0
             cursor.execute(
                 "SELECT xact_commit, xact_rollback, deadlocks, pg_database_size(datname) "
                 "FROM pg_stat_database WHERE datname = current_database()"
@@ -585,6 +608,15 @@ def _postgresql(instance, password):
                 "replication_role": "standby" if in_recovery else "primary",
                 "in_recovery": in_recovery,
                 "replication_lag_seconds": lag,
+                "replication_lag_bytes": lag_bytes,
+                "receive_lag_bytes": receive_lag_bytes,
+                "replay_lag_bytes": replay_lag_bytes,
+                "wal_current_lsn": wal_current_lsn,
+                "wal_source_lsn": wal_source_lsn,
+                "wal_receive_lsn": wal_receive_lsn,
+                "wal_replay_lsn": wal_replay_lsn,
+                "wal_receiver_status": wal_receiver_status,
+                "wal_last_message_at": wal_last_message_at,
                 "replay_paused": replay_paused,
                 "replica_count": replica_count,
                 "connections": connections,

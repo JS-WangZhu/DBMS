@@ -4,6 +4,8 @@ import secrets
 import shutil
 import subprocess
 import tempfile
+import tarfile
+import re
 import struct
 import gzip
 import threading
@@ -123,6 +125,75 @@ def _build_mysql_command(instance: dict, output_file: str, tool_path: str, inclu
     return command
 
 
+def _build_postgresql_command(instance: dict, output_file: str, tool_path: str, database=None, table_filter=None, compress_method="default"):
+    extra = instance.get("extra_json") if isinstance(instance.get("extra_json"), dict) else {}
+    database = str(database or extra.get("database") or extra.get("dbname") or "postgres").strip() or "postgres"
+    command = [
+        tool_path,
+        f"--host={instance.get('resolved_ip') or instance.get('host_input')}",
+        f"--port={instance.get('port')}",
+        f"--username={instance.get('username') or ''}",
+        f"--dbname={database}",
+        "--format=custom",
+        "--no-password",
+        f"--file={output_file}",
+    ]
+    compress_method = str(compress_method or "default").strip().lower()
+    if compress_method in {"gzip", "lz4", "zstd", "none"}:
+        command.append(f"--compress={compress_method}")
+    table_filter = table_filter if isinstance(table_filter, dict) else {}
+    mode = str(table_filter.get("mode") or "all").lower()
+    tables = table_filter.get("tables") if isinstance(table_filter.get("tables"), list) else []
+    option = "--table" if mode == "include" else "--exclude-table" if mode == "exclude" else None
+    if option:
+        command.extend(f"{option}={table}" for table in tables if str(table).strip())
+    return command
+
+
+def _postgresql_backup_rows(policy, instance):
+    config = policy.get("postgresql_backup") if isinstance(policy.get("postgresql_backup"), dict) else {}
+    rows = config.get("databases") if isinstance(config.get("databases"), list) else []
+    if rows:
+        return rows
+    extra = instance.get("extra_json") if isinstance(instance.get("extra_json"), dict) else {}
+    database = str(extra.get("database") or extra.get("dbname") or "postgres").strip() or "postgres"
+    return [{"name": database, "table_filter": {"mode": "all", "tables": []}}]
+
+
+def _safe_dump_name(value, index):
+    safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(value)).strip("._") or "database"
+    return f"{index:03d}_{safe}.dump"
+
+
+def _run_postgresql_bundle(commands, staging_dir, output_file, _compress_method, task_id, env):
+    os.makedirs(staging_dir, exist_ok=False)
+    try:
+        for command in commands:
+            proc = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
+            _register_task_process(task_id, proc)
+            try:
+                stdout, stderr = proc.communicate(timeout=BACKUP_TIMEOUT_SECONDS)
+                if proc.returncode != 0:
+                    raise subprocess.CalledProcessError(proc.returncode, command, output=stdout, stderr=stderr)
+            finally:
+                _unregister_task_process(task_id, proc)
+        with tarfile.open(output_file, "w") as archive:
+            for command in commands:
+                dump_file = next(arg.split("=", 1)[1] for arg in command if arg.startswith("--file="))
+                archive.add(dump_file, arcname=os.path.basename(dump_file))
+    finally:
+        shutil.rmtree(staging_dir, ignore_errors=True)
+
+
+def _postgresql_env(instance: dict):
+    extra = instance.get("extra_json") if isinstance(instance.get("extra_json"), dict) else {}
+    env = os.environ.copy()
+    env["PGSSLMODE"] = str(extra.get("sslmode") or "prefer").strip() or "prefer"
+    if instance.get("password"):
+        env["PGPASSWORD"] = instance["password"]
+    return env
+
+
 def _build_mongo_command(instance: dict, output_file: str, compress: bool, tool_path: str, archive_to_stdout: bool = False, auth_database: str = "admin"):
     """Build mongodump command"""
     command = [
@@ -156,8 +227,8 @@ def _build_partial_mongo_command(instance, output_file, compress, tool_path, dat
     return command
 
 
-def _run_mysqldump_gzip(command, output_file, task_id=None):
-    proc = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+def _run_dump_gzip(command, output_file, task_id=None, env=None):
+    proc = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
     _register_task_process(task_id, proc)
     try:
         with gzip.open(output_file, "wb") as gz:
@@ -172,8 +243,8 @@ def _run_mysqldump_gzip(command, output_file, task_id=None):
         _unregister_task_process(task_id, proc)
 
 
-def _run_mysqldump_zstd(command, output_file, task_id=None):
-    dump_proc = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+def _run_dump_zstd(command, output_file, task_id=None, env=None):
+    dump_proc = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
     zstd_proc = None
     _register_task_process(task_id, dump_proc)
     try:
@@ -392,7 +463,8 @@ def _encrypt_backup_file(file_path: str, public_key_pem: str):
 def _run_backup(policy: dict, instance: dict, dry_run: bool = False, task_id: str = None):
     """Execute backup based on policy and instance data"""
     db_type = policy.get("db_type")
-    default_tool = "mysqldump" if db_type == "mysql" else "mongodump"
+    default_tools = {"mysql": "mysqldump", "mongodb": "mongodump", "postgresql": "pg_dump"}
+    default_tool = default_tools.get(db_type)
     tool_path = policy.get("tool_path") or current_app.config.get(f"{db_type.upper()}_DUMP_PATH", default_tool)
     
     storage_path = policy.get("storage_path") or os.environ.get("BACKUP_ROOT", "/tmp/backups")
@@ -405,17 +477,19 @@ def _run_backup(policy: dict, instance: dict, dry_run: bool = False, task_id: st
     instance_name = instance.get("name", "unknown").replace(" ", "_")
     
     compress_method = str(policy.get("compress_method") or "").strip().lower()
-    if compress_method not in {"none", "gzip", "zstd"}:
-        compress_method = "gzip" if bool(policy.get("compress", True)) else "none"
+    allowed_compress_methods = {"default", "gzip", "lz4", "zstd", "none"} if db_type == "postgresql" else {"none", "gzip", "zstd"}
+    if compress_method not in allowed_compress_methods:
+        compress_method = ("default" if bool(policy.get("compress", True)) else "none") if db_type == "postgresql" else ("gzip" if bool(policy.get("compress", True)) else "none")
     compress = compress_method != "none"
     encrypt_cfg = policy.get("encrypt") if isinstance(policy.get("encrypt"), dict) else None
     encrypt_enabled = bool(encrypt_cfg and encrypt_cfg.get("enabled"))
 
     use_gzip = False
     use_zstd = False
-    use_mysql_zstd_pipe = False
+    use_dump_zstd_pipe = False
     use_zstd_pipe = False
     zstd_source_file = None
+    command_env = None
     if db_type == "mysql":
         if compress_method == "gzip":
             output_file = os.path.join(storage_path, f"{instance_name}_{timestamp}.sql.gz")
@@ -423,11 +497,24 @@ def _run_backup(policy: dict, instance: dict, dry_run: bool = False, task_id: st
             command = _build_mysql_command(instance, output_file, tool_path, include_result_file=False)
         elif compress_method == "zstd":
             output_file = os.path.join(storage_path, f"{instance_name}_{timestamp}.sql.zst")
-            use_mysql_zstd_pipe = True
+            use_dump_zstd_pipe = True
             command = _build_mysql_command(instance, output_file, tool_path, include_result_file=False)
         else:
             output_file = os.path.join(storage_path, f"{instance_name}_{timestamp}.sql")
             command = _build_mysql_command(instance, output_file, tool_path, include_result_file=True)
+    elif db_type == "postgresql":
+        command_env = _postgresql_env(instance)
+        output_file = os.path.join(storage_path, f"{instance_name}_{timestamp}.tar")
+        postgresql_staging_dir = os.path.join(storage_path, f".{instance_name}_{timestamp}")
+        postgresql_commands = []
+        for index, row in enumerate(_postgresql_backup_rows(policy, instance), 1):
+            database = str(row.get("name") or "").strip()
+            dump_file = os.path.join(postgresql_staging_dir, _safe_dump_name(database, index))
+            postgresql_commands.append(_build_postgresql_command(
+                instance, dump_file, tool_path, database=database,
+                table_filter=row.get("table_filter"), compress_method=compress_method,
+            ))
+        command = postgresql_commands[0]
     elif db_type == "mongodb":
         mongo_cfg = policy.get("mongo_backup") if isinstance(policy.get("mongo_backup"), dict) else {}
         auth_database = str(mongo_cfg.get("auth_database") or "admin").strip() or "admin"
@@ -464,22 +551,30 @@ def _run_backup(policy: dict, instance: dict, dry_run: bool = False, task_id: st
         return {"ok": False, "message": f"unsupported db_type: {db_type}"}
     
     if dry_run:
-        return {
+        result = {
             "ok": True,
             "message": "dry run mode",
             "command": command,
             "output_file": output_file,
         }
+        if db_type == "postgresql":
+            result["commands"] = postgresql_commands
+        return result
     
     try:
-        if db_type == "mysql" and use_gzip:
-            _run_mysqldump_gzip(command, output_file, task_id=task_id)
-        elif db_type == "mysql" and use_mysql_zstd_pipe:
-            _run_mysqldump_zstd(command, output_file, task_id=task_id)
+        if db_type == "postgresql":
+            _run_postgresql_bundle(
+                postgresql_commands, postgresql_staging_dir, output_file,
+                compress_method, task_id, command_env,
+            )
+        elif db_type == "mysql" and use_gzip:
+            _run_dump_gzip(command, output_file, task_id=task_id, env=command_env)
+        elif db_type == "mysql" and use_dump_zstd_pipe:
+            _run_dump_zstd(command, output_file, task_id=task_id, env=command_env)
         elif db_type == "mongodb" and use_zstd_pipe:
             _run_mongodump_zstd(command, output_file, task_id=task_id)
         else:
-            proc = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            proc = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=command_env)
             _register_task_process(task_id, proc)
             try:
                 stdout, stderr = proc.communicate(timeout=BACKUP_TIMEOUT_SECONDS)
@@ -567,6 +662,56 @@ def _run_backup_task(app, task_id, policy, instance):
                 task["result"] = result
                 task["finished_at"] = datetime.utcnow().isoformat() + "Z"
         _prune_backup_tasks()
+
+
+def _postgresql_metadata(instance, database=None):
+    import psycopg2
+
+    extra = instance.get("extra_json") if isinstance(instance.get("extra_json"), dict) else {}
+    conn = psycopg2.connect(
+        host=instance.get("resolved_ip") or instance.get("host_input"),
+        port=int(instance.get("port") or 5432),
+        user=instance.get("username") or "",
+        password=instance.get("password") or "",
+        dbname=database or extra.get("database") or extra.get("dbname") or "postgres",
+        sslmode=extra.get("sslmode") or "prefer",
+        connect_timeout=5,
+        options="-c statement_timeout=5000",
+    )
+    try:
+        conn.autocommit = True
+        with conn.cursor() as cursor:
+            if database:
+                cursor.execute(
+                    "SELECT n.nspname, c.relname "
+                    "FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
+                    "WHERE c.relkind IN ('r', 'p') "
+                    "AND n.nspname NOT IN ('pg_catalog', 'information_schema') "
+                    "AND n.nspname NOT LIKE 'pg_toast%%' "
+                    "ORDER BY n.nspname, c.relname"
+                )
+                return [f"{row[0]}.{row[1]}" for row in cursor.fetchall()]
+            cursor.execute(
+                "SELECT datname FROM pg_database "
+                "WHERE datallowconn AND NOT datistemplate ORDER BY datname"
+            )
+            return [row[0] for row in cursor.fetchall()]
+    finally:
+        conn.close()
+
+
+@bp.route("/postgresql/metadata", methods=["POST"])
+@_require_api_key
+def postgresql_metadata():
+    payload = request.get_json(silent=True) or {}
+    instance = payload.get("instance")
+    database = str(payload.get("database") or "").strip() or None
+    if not isinstance(instance, dict):
+        return error_response("instance is required", code=400)
+    try:
+        return ok_response(data=_postgresql_metadata(instance, database))
+    except Exception as exc:
+        return error_response(f"load postgresql metadata failed: {exc}", code=502)
 
 
 @bp.route("/instances/probe", methods=["POST"])

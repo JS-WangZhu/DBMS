@@ -178,7 +178,7 @@
           </el-menu-item>
         </el-sub-menu>
 
-        <el-sub-menu v-if="hasAnyMenu(['backup_mysql_policies','backup_mongo_policies','backup_records','backup_tool_configs','backup_s3_storage','backup_keys','backup_overview'])" index="backup">
+        <el-sub-menu v-if="hasAnyMenu(['backup_mysql_policies','backup_postgresql_policies','backup_mongo_policies','backup_records','backup_tool_configs','backup_s3_storage','backup_keys','backup_overview'])" index="backup">
           <template #title>
             <el-icon><Collection /></el-icon>
             <span>备份管理</span>
@@ -187,7 +187,7 @@
             <el-icon><Notebook /></el-icon>
             <span>备份总览</span>
           </el-menu-item>
-          <el-sub-menu v-if="hasAnyMenu(['backup_mysql_policies','backup_mongo_policies'])" index="backup-policies">
+          <el-sub-menu v-if="hasAnyMenu(['backup_mysql_policies','backup_postgresql_policies','backup_mongo_policies'])" index="backup-policies">
             <template #title>
               <el-icon><PieChart /></el-icon>
               <span>策略管理</span>
@@ -195,6 +195,10 @@
             <el-menu-item v-if="hasMenu('backup_mysql_policies')" index="/backups/mysql-policies">
               <el-icon class="db-brand-icon"><MysqlIcon /></el-icon>
               <span>MySQL策略</span>
+            </el-menu-item>
+            <el-menu-item v-if="hasMenu('backup_postgresql_policies')" index="/backups/postgresql-policies">
+              <el-icon class="db-brand-icon"><PostgreSQLIcon /></el-icon>
+              <span>PostgreSQL策略</span>
             </el-menu-item>
             <el-menu-item v-if="hasMenu('backup_mongo_policies')" index="/backups/mongo-policies">
               <el-icon class="db-brand-icon"><MongoIcon /></el-icon>
@@ -466,6 +470,7 @@ const routePermissionMap = {
   "/tasks/results": "task_results",
   "/tools/aliyun-dns": "aliyun_dns_tool",
   "/backups/mysql-policies": "backup_mysql_policies",
+  "/backups/postgresql-policies": "backup_postgresql_policies",
   "/backups/mongo-policies": "backup_mongo_policies",
   "/backups/records": "backup_records",
   "/backups/tool-configs": "backup_tool_configs",

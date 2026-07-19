@@ -14,10 +14,11 @@
       <el-table :data="toolConfigs" stripe>
         <el-table-column prop="id" label="ID" width="60" />
         <el-table-column prop="name" label="名称" min-width="150" />
-        <el-table-column label="数据库类型" width="100">
+        <el-table-column label="数据库类型" width="130">
           <template #default="scope">
             <el-tag v-if="scope.row.db_type === 'mysql'" type="primary">MySQL</el-tag>
             <el-tag v-else-if="scope.row.db_type === 'mongodb'" type="success">MongoDB</el-tag>
+            <el-tag v-else-if="scope.row.db_type === 'postgresql'" type="warning">PostgreSQL</el-tag>
           </template>
         </el-table-column>
         <el-table-column prop="tool_path" label="工具路径" min-width="250" />
@@ -53,6 +54,7 @@
           <el-select v-model="form.db_type" style="width: 100%">
             <el-option label="MySQL" value="mysql" />
             <el-option label="MongoDB" value="mongodb" />
+            <el-option label="PostgreSQL" value="postgresql" />
           </el-select>
         </el-form-item>
         <el-form-item label="工具路径" required>
@@ -110,6 +112,9 @@ const form = reactive({
 const toolPathPlaceholder = computed(() => {
   if (form.db_type === "mongodb") {
     return "/usr/bin/mongodump";
+  }
+  if (form.db_type === "postgresql") {
+    return "/usr/bin/pg_dump";
   }
   return "/usr/bin/mysqldump";
 });
@@ -238,6 +243,12 @@ onMounted(() => {
 </script>
 
 <style scoped>
+:deep(.el-table .el-tag) {
+  max-width: none;
+  overflow: visible;
+  text-overflow: clip;
+}
+
 .page {
   padding: 20px;
 }

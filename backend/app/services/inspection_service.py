@@ -402,13 +402,18 @@ def _extract_issues(instance: DatabaseInstance, payload: dict, thresholds: dict)
     if instance.db_type == "postgresql":
         connection_pct = _safe_float(payload.get("connection_usage_pct"))
         lag = _safe_float(payload.get("replication_lag_seconds"))
+        lag_bytes = _safe_int(payload.get("replication_lag_bytes"))
         if connection_pct is not None and connection_pct >= thresholds["postgresql_connection_usage_pct"]:
             issues.append(_build_issue("postgresql_connection_high", "PostgreSQL\u8fde\u63a5\u6570\u9ad8", f"\u8fde\u63a5\u4f7f\u7528\u7387 {connection_pct}%"))
         if payload.get("replication_role") == "standby":
+            receiver_status = str(payload.get("wal_receiver_status") or "").strip().lower()
+            if "wal_receiver_status" in payload and receiver_status != "streaming":
+                issues.append(_build_issue("postgresql_replication_receiver", "PostgreSQL复制接收异常", f"WAL Receiver状态: {receiver_status or '未运行'}", "critical"))
             if payload.get("replay_paused") is True:
                 issues.append(_build_issue("postgresql_replay_paused", "PostgreSQL\u590d\u5236\u56de\u653e\u6682\u505c", "WAL replay \u5df2\u6682\u505c", "critical"))
-            if lag is not None and lag >= thresholds["postgresql_replication_lag_seconds"]:
-                issues.append(_build_issue("postgresql_replication_lag", "PostgreSQL\u590d\u5236\u5ef6\u8fdf\u9ad8", f"\u590d\u5236\u5ef6\u8fdf {lag}s"))
+            if lag is not None and lag >= thresholds["postgresql_replication_lag_seconds"] and (lag_bytes is None or lag_bytes > 0):
+                byte_detail = f"，WAL积压 {lag_bytes} bytes" if lag_bytes is not None else ""
+                issues.append(_build_issue("postgresql_replication_lag", "PostgreSQL\u590d\u5236\u5ef6\u8fdf\u9ad8", f"\u590d\u5236\u5ef6\u8fdf {lag}s{byte_detail}"))
         lock_waiters = _safe_int(payload.get("lock_waiting_connections"))
         if lock_waiters and lock_waiters > 0:
             issues.append(_build_issue("postgresql_lock_wait", "PostgreSQL\u9501\u7b49\u5f85", f"\u5b58\u5728 {lock_waiters} \u4e2a\u9501\u7b49\u5f85\u8fde\u63a5"))
