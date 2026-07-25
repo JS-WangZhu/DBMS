@@ -1162,7 +1162,9 @@ function logout() {
 }
 
 .layout-shell > .el-container {
+  height: 100%;
   min-width: 0;
+  overflow: hidden;
 }
 
 .sidebar {
@@ -1436,10 +1438,13 @@ function logout() {
   padding: 0 20px 24px;
   background: var(--bg-primary);
   overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .tabs-wrap {
-  position: relative;
+  position: sticky;
+  z-index: 10;
+  top: 0;
   margin: 0 -20px 20px;
   padding: 8px 20px 0;
   border-bottom: 1px solid var(--border-soft);
@@ -1506,8 +1511,34 @@ function logout() {
 }
 
 :deep(.tabs-wrap .el-tabs__item .is-icon-close) {
-  margin-left: 6px;
+  width: 0;
+  margin-left: 0;
+  overflow: hidden;
   color: #98a2b3;
+  opacity: 0;
+  transform: scale(0.75);
+  transform-origin: center;
+  transition:
+    width 180ms linear,
+    margin-left 180ms linear,
+    opacity 180ms linear,
+    transform 180ms linear,
+    color 150ms linear,
+    background-color 150ms linear;
+}
+
+:deep(.tabs-wrap .el-tabs__item.is-closable:hover .is-icon-close),
+:deep(.tabs-wrap .el-tabs__item.is-active.is-closable .is-icon-close) {
+  width: 14px;
+  margin-left: 6px;
+  opacity: 1;
+  transform: scale(1);
+}
+
+:deep(.tabs-wrap .el-tabs__item .is-icon-close:hover) {
+  color: #fff;
+  background: #ef4444;
+  transform: scale(1.12);
 }
 
 .context-menu {

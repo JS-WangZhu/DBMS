@@ -26,7 +26,7 @@
           <el-button v-if="selectedClusterId" type="warning" size="small" :loading="healthChecking" @click="runClusterHealthCheck">
             集群检活
           </el-button>
-          <el-input v-model="keyword" clearable placeholder="关键字搜索" class="keyword-input" size="small" />
+          <el-input v-model="keyword" clearable placeholder="实例名 / 集群 / IP / 域名" class="keyword-input" size="small" />
           <el-button v-if="isAdmin" type="primary" size="small" @click="openCreateDialog">新增{{ dbLabel }}实例</el-button>
           <el-button size="small" :icon="Download" @click="exportRows">导出</el-button>
           <el-button size="small" @click="reloadAll(true)">刷新</el-button>

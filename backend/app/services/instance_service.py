@@ -217,8 +217,10 @@ def list_instances_paginated(
     business_line_text = str(business_line or "").strip()
     environment_text = str(environment or "").strip()
     needs_cluster_filter = bool(namespace_text or business_line_text or environment_text)
+    cluster_joined = False
     if needs_cluster_filter:
         query = query.join(DatabaseCluster, DatabaseCluster.id == DatabaseInstance.cluster_id)
+        cluster_joined = True
         if namespace_text:
             query = query.filter(DatabaseCluster.namespace == namespace_text)
         if business_line_text:
@@ -230,9 +232,12 @@ def list_instances_paginated(
     keyword_text = str(keyword or "").strip()
     if keyword_text:
         pattern = f"%{keyword_text}%"
+        if not cluster_joined:
+            query = query.outerjoin(DatabaseCluster, DatabaseCluster.id == DatabaseInstance.cluster_id)
         query = query.filter(
             or_(
                 DatabaseInstance.name.ilike(pattern),
+                DatabaseCluster.name.ilike(pattern),
                 DatabaseInstance.host_input.ilike(pattern),
                 DatabaseInstance.resolved_ip.ilike(pattern),
                 DatabaseInstance.username.ilike(pattern),

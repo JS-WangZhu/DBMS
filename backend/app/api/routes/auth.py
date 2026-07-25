@@ -24,11 +24,11 @@ def login():
     password = payload.get("password") or ""
 
     if not username or not password:
-        return error_response("username and password are required", code=400)
+        return error_response("请输入用户名和密码", code=400)
 
     user = authenticate_user(username=username, password=password)
     if not user:
-        return error_response("invalid credentials", code=401)
+        return error_response("用户名或密码错误", code=401)
 
     token = create_access_token(identity=str(user.id), additional_claims={"role": user.role})
     log_audit(user_id=user.id, action="auth.login", detail={"auth_source": user.auth_source})
