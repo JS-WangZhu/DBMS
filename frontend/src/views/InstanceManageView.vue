@@ -178,12 +178,25 @@
         </el-table-column>
         <el-table-column v-if="dbType === 'redis'" label="实例内存使用率" min-width="132" show-overflow-tooltip>
           <template #default="scope">
-            <div v-if="redisContainerMemoryText(scope.row) !== '-'" class="redis-memory-cell">
+            <div v-if="redisContainerMemoryText(scope.row) !== '-'" class="redis-usage-cell">
               <el-tag size="small" :class="usageTagClass(redisContainerMemoryValue(scope.row))">
                 {{ redisContainerMemoryText(scope.row) }}
               </el-tag>
-              <el-tag size="small" class="redis-memory-subtag">
+              <el-tag size="small" class="redis-usage-subtag">
                 {{ redisContainerMemoryPercentText(scope.row) }}
+              </el-tag>
+            </div>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
+        <el-table-column v-if="dbType === 'redis'" label="连接数使用率" min-width="112" show-overflow-tooltip>
+          <template #default="scope">
+            <div v-if="redisConnectionText(scope.row) !== '-'" class="redis-usage-cell">
+              <el-tag size="small" :class="usageTagClass(redisConnectionUsageValue(scope.row))">
+                {{ redisConnectionText(scope.row) }}
+              </el-tag>
+              <el-tag size="small" class="redis-usage-subtag">
+                {{ redisConnectionUsageText(scope.row) }}
               </el-tag>
             </div>
             <span v-else>-</span>
@@ -1387,6 +1400,51 @@ function postgresqlReplicationLagBytesText(row) {
 
   function redisContainerMemoryValue(row) {
     return asPercent(redisPayload(row).memory_usage_pct);
+  }
+
+  function redisMetricNumber(value) {
+    if (value === null || value === undefined || value === "") {
+      return null;
+    }
+    const num = Number(value);
+    return Number.isFinite(num) ? num : null;
+  }
+
+  function redisConnectionSummary(payload) {
+    const connected = redisMetricNumber(payload.connected_clients);
+    const maximum = redisMetricNumber(payload.maxclients);
+    if (connected === null && maximum === null) {
+      return "-";
+    }
+    const connectedText = connected === null ? "-" : formatCount(connected);
+    const maximumText = maximum === null ? "-" : formatCount(maximum);
+    return `${connectedText}/${maximumText}`;
+  }
+
+  function redisConnectionUsageFromPayload(payload) {
+    const collectedValue = redisMetricNumber(payload.connection_usage_pct);
+    if (collectedValue !== null) {
+      return asPercent(collectedValue);
+    }
+    const connected = redisMetricNumber(payload.connected_clients);
+    const maximum = redisMetricNumber(payload.maxclients);
+    if (connected === null || maximum === null || maximum <= 0) {
+      return null;
+    }
+    return asPercent((connected / maximum) * 100);
+  }
+
+  function redisConnectionText(row) {
+    return redisConnectionSummary(redisPayload(row));
+  }
+
+  function redisConnectionUsageValue(row) {
+    return redisConnectionUsageFromPayload(redisPayload(row));
+  }
+
+  function redisConnectionUsageText(row) {
+    const pct = redisConnectionUsageValue(row);
+    return pct === null ? "-" : `${pct.toFixed(1)}%`;
   }
 
 function asPercent(value) {
@@ -3195,7 +3253,7 @@ watch(
   text-overflow: ellipsis;
 }
 
-.redis-memory-cell {
+.redis-usage-cell {
   display: inline-flex;
   flex-direction: column;
   align-items: flex-start;
@@ -3203,7 +3261,7 @@ watch(
   line-height: 1.15;
 }
 
-.redis-memory-subtag {
+.redis-usage-subtag {
   color: #64748b;
   background: #f4f6f8;
   border-color: #d8e0e8;

@@ -198,6 +198,10 @@ def _is_probe_operation(item: dict, app_name: str) -> bool:
     return str(application.get("name") or "") == app_name
 
 
+def _is_hidden_operation(item: dict) -> bool:
+    return str(item.get("ns") or "").strip() == "local.oplog.rs"
+
+
 def _normalize_operation(item: dict, app_name: str) -> dict | None:
     operation_id = item.get("opid")
     if operation_id is None:
@@ -219,17 +223,24 @@ def _normalize_operation(item: dict, app_name: str) -> dict | None:
     }
 
 
+def _current_op_command() -> dict:
+    # allUsers/idleConnections/truncateOps belong to the $currentOp aggregation
+    # stage. The legacy currentOp database command uses the special $all option.
+    return {"currentOp": 1, "$all": True}
+
+
 def fetch_operations(token: str, user_id: int) -> dict:
     session = _get_probe_session(token, user_id)
     try:
         with session.lock:
-            result = session.connection.admin.command({"currentOp": 1, "$allUsers": True, "idleConnections": False, "truncateOps": False})
+            result = session.connection.admin.command(_current_op_command())
     except Exception as exc:
         close_probe_session(token, user_id=user_id)
         raise SessionProbeError(f"currentOp fetch failed: {exc}") from exc
     items = [
         normalized for raw in (result.get("inprog") or [])
         if isinstance(raw, dict)
+        if not _is_hidden_operation(raw)
         for normalized in [_normalize_operation(raw, session.app_name)]
         if normalized is not None
     ]
@@ -244,7 +255,7 @@ def kill_operation(token: str, user_id: int, operation_id) -> dict:
         raise SessionProbeError("invalid operation id")
     try:
         with session.lock:
-            current = session.connection.admin.command({"currentOp": 1, "$allUsers": True, "idleConnections": False})
+            current = session.connection.admin.command(_current_op_command())
             target = next((item for item in current.get("inprog") or [] if str(item.get("opid")) == target_id), None)
             if target and _is_probe_operation(target, session.app_name):
                 raise SessionProbeError("cannot kill the session probe operation")

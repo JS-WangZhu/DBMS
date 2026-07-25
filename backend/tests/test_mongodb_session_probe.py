@@ -19,6 +19,7 @@ class FakeAdmin:
             return {"inprog": [
                 {"opid": 10, "op": "command", "ns": "orders.$cmd", "client": "10.0.0.5:50000", "appName": "orders-api", "secs_running": 65, "active": True, "command": {"find": "orders", "filter": {"status": "open"}}},
                 {"opid": 11, "op": "command", "ns": "admin.$cmd", "appName": self.connection.appname, "secs_running": 0, "active": True, "command": {"currentOp": 1}},
+                {"opid": 12, "op": "getmore", "ns": "local.oplog.rs", "appName": "replication", "secs_running": 120, "active": True, "command": {"getMore": 123}},
             ]}
         return {"ok": 1}
 
@@ -59,6 +60,11 @@ def test_session_probe_fetches_formats_kills_and_closes(monkeypatch):
     assert result["sessions"][0]["command"] == {"find": "orders", "filter": {"status": "open"}}
     assert result["sessions"][1]["is_probe_connection"] is True
     assert probe.kill_operation(started["token"], user_id=11, operation_id="10") == {"operation_id": "10", "killed": True}
+    current_op_commands = [command for command in clients[0].commands if isinstance(command, dict) and command.get("currentOp")]
+    assert current_op_commands == [
+        {"currentOp": 1, "$all": True},
+        {"currentOp": 1, "$all": True},
+    ]
     assert {"killOp": 1, "op": 10} in clients[0].commands
     assert probe.close_probe_session(started["token"], user_id=11) is True
     assert clients[0].closed is True
