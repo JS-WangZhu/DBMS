@@ -1,7 +1,7 @@
 <template>
   <div class="login-wrap">
     <div class="panel">
-      <h2>DBMS 管理平台</h2>
+      <h2>DBMS 数据库管理平台</h2>
       <el-form :model="form" @submit.prevent="onLogin">
         <el-form-item>
           <el-input v-model="form.username" placeholder="用户名" />

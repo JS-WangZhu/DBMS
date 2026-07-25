@@ -17,7 +17,7 @@ class FakeAdmin:
             return {"ok": 1}
         if command.get("currentOp"):
             return {"inprog": [
-                {"opid": 10, "op": "command", "ns": "orders.$cmd", "client": "10.0.0.5:50000", "appName": "orders-api", "secs_running": 65, "active": True, "command": {"find": "orders", "filter": {"status": "open"}}},
+                {"opid": 10, "op": "command", "ns": "orders.$cmd", "client": "10.0.0.5:50000", "effectiveUsers": [{"user": "orders_app", "db": "admin"}], "appName": "orders-api", "secs_running": 65, "active": True, "command": {"find": "orders", "filter": {"status": "open"}}},
                 {"opid": 11, "op": "command", "ns": "admin.$cmd", "appName": self.connection.appname, "secs_running": 0, "active": True, "command": {"currentOp": 1}},
                 {"opid": 12, "op": "getmore", "ns": "local.oplog.rs", "appName": "replication", "secs_running": 120, "active": True, "command": {"getMore": 123}},
             ]}
@@ -58,6 +58,8 @@ def test_session_probe_fetches_formats_kills_and_closes(monkeypatch):
     result = probe.fetch_operations(started["token"], user_id=11)
     assert [item["id"] for item in result["sessions"]] == ["10", "11"]
     assert result["sessions"][0]["command"] == {"find": "orders", "filter": {"status": "open"}}
+    assert result["sessions"][0]["user"] == "orders_app@admin"
+    assert result["sessions"][1]["user"] == ""
     assert result["sessions"][1]["is_probe_connection"] is True
     assert probe.kill_operation(started["token"], user_id=11, operation_id="10") == {"operation_id": "10", "killed": True}
     current_op_commands = [command for command in clients[0].commands if isinstance(command, dict) and command.get("currentOp")]
@@ -81,3 +83,15 @@ def test_session_probe_protects_user_and_probe_operation(monkeypatch):
 def test_session_probe_rejects_agent_access_mode():
     with pytest.raises(probe.SessionProbeError, match="Agent"):
         probe.start_probe_session(SimpleNamespace(id=8, name="remote", access_mode="agent"), "secret", user_id=11)
+
+
+def test_operation_user_supports_authenticated_users_and_legacy_values():
+    assert probe._format_operation_user({
+        "authenticatedUsers": [
+            {"user": "reporter", "db": "admin"},
+            {"user": "reporter", "db": "admin"},
+            {"user": "reader", "db": "analytics"},
+        ]
+    }) == "reporter@admin, reader@analytics"
+    assert probe._format_operation_user({"user": "legacy_user"}) == "legacy_user"
+    assert probe._format_operation_user({}) == ""

@@ -23,6 +23,7 @@
         <el-table-column prop="operation" label="类型" width="90"><template #default="{ row }"><el-tag size="small" :type="operationTag(row.operation)">{{ row.operation || '-' }}</el-tag></template></el-table-column>
         <el-table-column prop="namespace" label="命名空间" min-width="160" show-overflow-tooltip><template #default="{ row }">{{ row.namespace || '-' }}</template></el-table-column>
         <el-table-column prop="client" label="客户端" min-width="160" show-overflow-tooltip><template #default="{ row }">{{ row.client || '-' }}</template></el-table-column>
+        <el-table-column prop="user" label="连接用户" min-width="150" show-overflow-tooltip><template #default="{ row }">{{ row.user || '-' }}</template></el-table-column>
         <el-table-column prop="app_name" label="应用" min-width="120" show-overflow-tooltip><template #default="{ row }">{{ row.app_name || '-' }}</template></el-table-column>
         <el-table-column prop="time_seconds" label="持续时间" width="110" sortable><template #default="{ row }">{{ duration(row.time_seconds) }}</template></el-table-column>
         <el-table-column label="状态" width="100"><template #default="{ row }"><el-tag size="small" :type="row.waiting_for_lock ? 'danger' : row.active ? 'success' : 'info'">{{ row.waiting_for_lock ? '等待锁' : row.active ? '执行中' : '空闲' }}</el-tag></template></el-table-column>

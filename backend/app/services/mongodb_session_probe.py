@@ -202,6 +202,29 @@ def _is_hidden_operation(item: dict) -> bool:
     return str(item.get("ns") or "").strip() == "local.oplog.rs"
 
 
+def _format_operation_user(item: dict) -> str:
+    raw_users = item.get("effectiveUsers")
+    if raw_users in (None, "", []):
+        raw_users = item.get("authenticatedUsers")
+    if raw_users in (None, "", []):
+        raw_users = item.get("user")
+    if raw_users in (None, "", []):
+        return ""
+
+    users = raw_users if isinstance(raw_users, list) else [raw_users]
+    labels = []
+    for value in users:
+        if isinstance(value, dict):
+            username = str(value.get("user") or value.get("username") or "").strip()
+            auth_database = str(value.get("db") or value.get("authSource") or "").strip()
+            label = f"{username}@{auth_database}" if username and auth_database else username or auth_database
+        else:
+            label = str(value).strip()
+        if label and label not in labels:
+            labels.append(label)
+    return ", ".join(labels)
+
+
 def _normalize_operation(item: dict, app_name: str) -> dict | None:
     operation_id = item.get("opid")
     if operation_id is None:
@@ -212,7 +235,7 @@ def _normalize_operation(item: dict, app_name: str) -> dict | None:
         "operation": item.get("op"),
         "namespace": item.get("ns"),
         "client": item.get("client"),
-        "user": item.get("effectiveUsers") or item.get("user"),
+        "user": _format_operation_user(item),
         "app_name": item.get("appName"),
         "description": item.get("desc"),
         "time_seconds": max(0, int(item.get("secs_running") or item.get("microsecs_running", 0) / 1000000 or 0)),

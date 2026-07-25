@@ -4,7 +4,7 @@
       <div class="logo">
         <div class="logo-mark">D</div>
         <div v-show="!sidebarCollapsed" class="logo-copy">
-          <strong>DBMS 数据库统一管理平台</strong>
+          <strong>DBMS 数据库管理平台</strong>
         </div>
       </div>
       <el-menu
@@ -322,7 +322,7 @@
           </el-button>
           <div class="page-identity">
             <div class="title">{{ currentPageTitle }}</div>
-            <div class="subtitle">DBMS 数据库统一管理平台</div>
+            <div class="subtitle">DBMS 数据库管理平台</div>
           </div>
         </div>
         <div class="user-block">
