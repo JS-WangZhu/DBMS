@@ -18,7 +18,7 @@
             <div class="metric-icon" :style="{ color: card.color, backgroundColor: card.softColor }">
               <component :is="card.icon" />
             </div>
-            <el-tag size="small" type="info" effect="light">状态统计</el-tag>
+            <!-- <el-tag size="small" type="info" effect="light">状态统计</el-tag> -->
           </div>
           <div class="metric-value">{{ card.value }}</div>
           <div class="metric-label">{{ card.label }}</div>
