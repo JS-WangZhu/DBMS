@@ -4,6 +4,13 @@ from flask_jwt_extended import create_access_token
 from app.api.routes.common import active_user_required, get_current_user
 from app.extensions import db
 from app.services.audit import log_audit
+from app.services.auth_session import (
+    create_auth_session,
+    current_auth_session,
+    revoke_auth_session,
+    revoke_user_sessions,
+    touch_auth_session,
+)
 from app.services.auth import (
     authenticate_sso_code,
     authenticate_sso_token,
@@ -30,10 +37,15 @@ def login():
     if not user:
         return error_response("用户名或密码错误", code=401)
 
-    token = create_access_token(identity=str(user.id), additional_claims={"role": user.role})
+    session = create_auth_session(user.id)
+    token = create_access_token(
+        identity=str(user.id),
+        additional_claims={"role": user.role, "sid": session.id},
+    )
     log_audit(user_id=user.id, action="auth.login", detail={"auth_source": user.auth_source})
 
-    return ok_response(data={"access_token": token, "user": user.to_dict()})
+    session_data = touch_auth_session(session)
+    return ok_response(data={"access_token": token, "user": user.to_dict(), "session": session_data})
 
 
 @bp.get("/me")
@@ -41,6 +53,30 @@ def login():
 def me():
     user = get_current_user()
     return ok_response(data=user.to_dict())
+
+
+@bp.post("/activity")
+@active_user_required
+def activity():
+    session = current_auth_session()
+    if not session:
+        return error_response("登录会话无效，请重新登录", code=401, data={"reason": "SESSION_INVALID"})
+    return ok_response(data=touch_auth_session(session))
+
+
+@bp.post("/logout")
+@active_user_required
+def logout():
+    session = current_auth_session()
+    if session:
+        revoke_auth_session(session, "logout")
+        log_audit(
+            user_id=session.user_id,
+            action="auth.logout",
+            target_type="auth_session",
+            target_id=session.id,
+        )
+    return ok_response(message="已退出登录")
 
 
 @bp.get("/sso/meta")
@@ -72,13 +108,18 @@ def sso_callback():
             user = authenticate_sso_code(code=code, state=state, redirect_uri=redirect_uri)
     except ValueError as exc:
         return error_response(str(exc), code=401)
-    token = create_access_token(identity=str(user.id), additional_claims={"role": user.role})
+    session = create_auth_session(user.id)
+    token = create_access_token(
+        identity=str(user.id),
+        additional_claims={"role": user.role, "sid": session.id},
+    )
     log_audit(user_id=user.id, action="auth.login.sso", detail={"auth_source": user.auth_source})
     user_data = user.to_dict()
     avatar_url = getattr(user, "_sso_avatar_url", None)
     if avatar_url:
         user_data["avatar_url"] = avatar_url
-    return ok_response(data={"access_token": token, "user": user_data})
+    session_data = touch_auth_session(session)
+    return ok_response(data={"access_token": token, "user": user_data, "session": session_data})
 
 
 @bp.patch("/password")
@@ -98,6 +139,7 @@ def change_password():
         return error_response("old password is incorrect", code=400)
 
     user.set_password(new_password)
+    revoke_user_sessions(user.id, "password_changed", commit=False)
     db.session.commit()
     log_audit(user_id=user.id, action="auth.password.change", target_type="user", target_id=str(user.id))
     return ok_response(message="password updated")

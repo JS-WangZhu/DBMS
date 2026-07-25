@@ -12,6 +12,14 @@ export function changePassword(payload) {
   return client.patch("/auth/password", payload);
 }
 
+export function reportActivity() {
+  return client.post("/auth/activity");
+}
+
+export function logout() {
+  return client.post("/auth/logout");
+}
+
 export function getSsoMeta(redirectUri) {
   return client.get("/auth/sso/meta", { params: { redirect_uri: redirectUri } });
 }

@@ -12,7 +12,7 @@
       <div class="brand-content">
         <div class="brand-eyebrow">DATABASE OPERATIONS</div>
         <h1>统一、可靠的<br />数据库运维工作台</h1>
-        <p>集中管理数据库资产、运行状态、会话、备份与审计，让日常运维保持清晰可控。</p>
+        <p>集中管理数据库资产、运行状态、备份审计，让日常运维保持清晰可控。</p>
         <div class="feature-list">
           <div class="feature-item"><span>01</span><div><strong>统一资产管理</strong><p>集中维护实例、集群和访问配置</p></div></div>
           <div class="feature-item"><span>02</span><div><strong>运行状态洞察</strong><p>实时掌握指标、巡检与会话状态</p></div></div>
@@ -70,11 +70,13 @@
 import { onMounted, reactive, ref } from "vue";
 import { ElMessage } from "element-plus";
 import { ArrowRight, Lock, User } from "@element-plus/icons-vue";
-import { useRouter } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 
 import { getSsoLoginUrl, getSsoMeta, login } from "../api/modules/auth";
+import { saveLoginSession } from "../services/sessionState";
 
 const router = useRouter();
+const route = useRoute();
 const loading = ref(false);
 const ssoLoading = ref(false);
 const ssoEnabled = ref(false);
@@ -93,8 +95,7 @@ async function onLogin() {
   loading.value = true;
   try {
     const { data } = await login(form);
-    localStorage.setItem("dbms_token", data.data.access_token);
-    localStorage.setItem("dbms_user", JSON.stringify(data.data.user));
+    saveLoginSession(data.data);
     ElMessage.success("登录成功");
     router.push("/dashboard");
   } catch (error) {
@@ -140,7 +141,20 @@ async function onSsoLogin() {
   }
 }
 
-onMounted(loadSsoMeta);
+onMounted(() => {
+  loadSsoMeta();
+  const reason = String(route.query.reason || "");
+  const messages = {
+    SESSION_IDLE_TIMEOUT: "登录会话已超过8小时未操作，请重新登录",
+    TOKEN_EXPIRED: "登录凭证已过期，请重新登录",
+    SESSION_REVOKED: "登录会话已失效，请重新登录",
+    SESSION_INVALID: "登录会话无效，请重新登录",
+  };
+  if (messages[reason]) {
+    ElMessage.warning(messages[reason]);
+    router.replace({ path: "/login" });
+  }
+});
 </script>
 
 <style scoped>

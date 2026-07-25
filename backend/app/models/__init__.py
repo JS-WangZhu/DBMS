@@ -1,6 +1,7 @@
 from app.models.ai_config import AIModelConfig
 from app.models.aliyun_dns import AliyunDomainConfig
 from app.models.audit_log import AuditLog
+from app.models.auth_session import AuthSession
 from app.models.backup import BackupLog, BackupPolicy
 from app.models.backup_agent import AgentInspectionStatus, BackupAgent
 from app.models.backup_tool_config import BackupToolConfig
@@ -42,6 +43,7 @@ __all__ = [
     "AIModelConfig",
     "AliyunDomainConfig",
     "AuditLog",
+    "AuthSession",
     "BackupLog",
     "BackupPolicy",
     "BackupAgent",

@@ -1,5 +1,7 @@
 ﻿import axios from "axios";
 
+import { terminateSession } from "../services/sessionState";
+
 const client = axios.create({
   baseURL: "/api/v1",
   timeout: 10000,
@@ -17,11 +19,8 @@ client.interceptors.response.use(
   (res) => res,
   (error) => {
     if (error.response?.status === 401) {
-      localStorage.removeItem("dbms_token");
-      localStorage.removeItem("dbms_user");
-      if (window.location.pathname !== "/login") {
-        window.location.href = "/login";
-      }
+      const reason = error.response?.data?.data?.reason || "SESSION_REVOKED";
+      terminateSession(reason);
     }
     return Promise.reject(error);
   },

@@ -21,6 +21,9 @@ def create_app(config_object=None):
     db.init_app(app)
     migrate.init_app(app, db)
     jwt.init_app(app)
+    from app.services.auth_session import configure_jwt_session_callbacks
+
+    configure_jwt_session_callbacks(jwt)
 
     register_blueprints(app)
 

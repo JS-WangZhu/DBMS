@@ -14,6 +14,7 @@ import { ElMessage } from "element-plus";
 import { useRoute, useRouter } from "vue-router";
 
 import { loginBySsoCallback } from "../api/modules/auth";
+import { saveLoginSession } from "../services/sessionState";
 
 const route = useRoute();
 const router = useRouter();
@@ -35,8 +36,7 @@ async function completeSsoLogin() {
   try {
     const params = { ...callbackParams, redirect_uri: getSsoRedirectUri() };
     const { data } = await loginBySsoCallback(params);
-    localStorage.setItem("dbms_token", data.data.access_token);
-    localStorage.setItem("dbms_user", JSON.stringify(data.data.user));
+    saveLoginSession(data.data);
     ElMessage.success("登录成功");
     router.replace("/dashboard");
   } catch (error) {

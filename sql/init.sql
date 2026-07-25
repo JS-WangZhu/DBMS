@@ -11,7 +11,7 @@
  Target Server Version : 80046 (8.0.46-0ubuntu0.24.04.3)
  File Encoding         : 65001
 
- Date: 07/07/2026 00:17:51
+ Date: 26/07/2026 00:54:36
 */
 
 SET NAMES utf8mb4;
@@ -107,7 +107,27 @@ CREATE TABLE `audit_logs`  (
   INDEX `idx_audit_logs_time`(`created_at` ASC) USING BTREE,
   INDEX `fk_audit_user`(`user_id` ASC) USING BTREE,
   CONSTRAINT `fk_audit_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT
-) ENGINE = InnoDB AUTO_INCREMENT = 704 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = DYNAMIC;
+) ENGINE = InnoDB AUTO_INCREMENT = 823 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = DYNAMIC;
+
+-- ----------------------------
+-- Table structure for auth_sessions
+-- ----------------------------
+DROP TABLE IF EXISTS `auth_sessions`;
+CREATE TABLE `auth_sessions`  (
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `id` varchar(36) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL,
+  `user_id` bigint NOT NULL,
+  `last_activity_at` datetime NOT NULL,
+  `revoked_at` datetime NULL DEFAULT NULL,
+  `revoke_reason` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL,
+  `ip_address` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL,
+  `user_agent` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL,
+  PRIMARY KEY (`id`) USING BTREE,
+  INDEX `ix_auth_sessions_last_activity_at`(`last_activity_at` ASC) USING BTREE,
+  INDEX `ix_auth_sessions_user_id`(`user_id` ASC) USING BTREE,
+  CONSTRAINT `auth_sessions_ibfk_1` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
+) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = Dynamic;
 
 -- ----------------------------
 -- Table structure for backup_agents
@@ -163,7 +183,7 @@ CREATE TABLE `backup_logs`  (
   PRIMARY KEY (`id`) USING BTREE,
   INDEX `idx_backup_logs_policy_time`(`policy_id` ASC, `created_at` ASC) USING BTREE,
   CONSTRAINT `fk_backup_log_policy` FOREIGN KEY (`policy_id`) REFERENCES `backup_policies` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
-) ENGINE = InnoDB AUTO_INCREMENT = 4740 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = DYNAMIC;
+) ENGINE = InnoDB AUTO_INCREMENT = 4753 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = DYNAMIC;
 
 -- ----------------------------
 -- Table structure for backup_notify_targets
@@ -190,7 +210,7 @@ CREATE TABLE `backup_policies`  (
   `name` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL,
   `target_type` enum('instance','cluster') CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL,
   `target_id` bigint NOT NULL,
-  `db_type` enum('mysql','mongodb') CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL,
+  `db_type` enum('mysql','mongodb','postgresql') CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL,
   `backup_type` enum('full','incremental') CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL DEFAULT 'full',
   `tool_name` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL,
   `backup_tool_config_id` int NULL DEFAULT NULL,
@@ -211,7 +231,7 @@ CREATE TABLE `backup_policies`  (
   CONSTRAINT `fk_backup_policy_agent` FOREIGN KEY (`backup_agent_id`) REFERENCES `backup_agents` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT,
   CONSTRAINT `fk_backup_policy_s3_config` FOREIGN KEY (`s3_storage_config_id`) REFERENCES `s3_storage_configs` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT,
   CONSTRAINT `fk_backup_policy_tool_config` FOREIGN KEY (`backup_tool_config_id`) REFERENCES `backup_tool_configs` (`id`) ON DELETE SET NULL ON UPDATE RESTRICT
-) ENGINE = InnoDB AUTO_INCREMENT = 4 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = DYNAMIC;
+) ENGINE = InnoDB AUTO_INCREMENT = 5 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = DYNAMIC;
 
 -- ----------------------------
 -- Table structure for backup_tool_configs
@@ -230,7 +250,7 @@ CREATE TABLE `backup_tool_configs`  (
   PRIMARY KEY (`id`) USING BTREE,
   UNIQUE INDEX `name`(`name` ASC) USING BTREE,
   INDEX `idx_backup_tool_configs_agent`(`backup_agent_id` ASC) USING BTREE
-) ENGINE = InnoDB AUTO_INCREMENT = 5 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = DYNAMIC;
+) ENGINE = InnoDB AUTO_INCREMENT = 6 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = DYNAMIC;
 
 -- ----------------------------
 -- Table structure for data_query_operation_configs
@@ -271,7 +291,7 @@ CREATE TABLE `db_clusters`  (
   `data_access_route_json` json NULL,
   `ha_mode` varchar(16) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL DEFAULT 'none',
   PRIMARY KEY (`id`) USING BTREE
-) ENGINE = InnoDB AUTO_INCREMENT = 6 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = DYNAMIC;
+) ENGINE = InnoDB AUTO_INCREMENT = 7 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = DYNAMIC;
 
 -- ----------------------------
 -- Table structure for db_instances
@@ -300,7 +320,7 @@ CREATE TABLE `db_instances`  (
   INDEX `fk_instance_cluster`(`cluster_id` ASC) USING BTREE,
   INDEX `idx_instances_type`(`db_type` ASC) USING BTREE,
   CONSTRAINT `fk_instance_cluster` FOREIGN KEY (`cluster_id`) REFERENCES `db_clusters` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
-) ENGINE = InnoDB AUTO_INCREMENT = 17 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = DYNAMIC;
+) ENGINE = InnoDB AUTO_INCREMENT = 19 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = DYNAMIC;
 
 -- ----------------------------
 -- Table structure for ha_configs
@@ -351,7 +371,7 @@ CREATE TABLE `inspection_alerts`  (
   INDEX `ix_inspection_alerts_cluster_id`(`cluster_id` ASC) USING BTREE,
   INDEX `ix_inspection_alerts_db_type`(`db_type` ASC) USING BTREE,
   INDEX `ix_inspection_alerts_instance_id`(`instance_id` ASC) USING BTREE
-) ENGINE = InnoDB AUTO_INCREMENT = 26 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = DYNAMIC;
+) ENGINE = InnoDB AUTO_INCREMENT = 33 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = DYNAMIC;
 
 -- ----------------------------
 -- Table structure for inspection_configs
@@ -403,7 +423,7 @@ CREATE TABLE `monitor_snapshots_doris`  (
   INDEX `ix_monitor_snapshots_doris_instance_id`(`instance_id` ASC) USING BTREE,
   INDEX `ix_monitor_snapshots_doris_metric_type`(`metric_type` ASC) USING BTREE,
   INDEX `ix_monitor_snapshots_doris_collected_at`(`collected_at` ASC) USING BTREE
-) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = DYNAMIC;
+) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = DYNAMIC;
 
 -- ----------------------------
 -- Table structure for monitor_snapshots_mongodb
@@ -421,7 +441,7 @@ CREATE TABLE `monitor_snapshots_mongodb`  (
   INDEX `ix_monitor_snapshots_mongodb_metric_type`(`metric_type` ASC) USING BTREE,
   INDEX `ix_monitor_snapshots_mongodb_instance_id`(`instance_id` ASC) USING BTREE,
   INDEX `ix_monitor_snapshots_mongodb_collected_at`(`collected_at` ASC) USING BTREE
-) ENGINE = InnoDB AUTO_INCREMENT = 100249 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = DYNAMIC;
+) ENGINE = InnoDB AUTO_INCREMENT = 116909 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = DYNAMIC;
 
 -- ----------------------------
 -- Table structure for monitor_snapshots_mysql
@@ -439,7 +459,7 @@ CREATE TABLE `monitor_snapshots_mysql`  (
   INDEX `ix_monitor_snapshots_mysql_metric_type`(`metric_type` ASC) USING BTREE,
   INDEX `ix_monitor_snapshots_mysql_collected_at`(`collected_at` ASC) USING BTREE,
   INDEX `ix_monitor_snapshots_mysql_instance_id`(`instance_id` ASC) USING BTREE
-) ENGINE = InnoDB AUTO_INCREMENT = 51030 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = DYNAMIC;
+) ENGINE = InnoDB AUTO_INCREMENT = 59365 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = DYNAMIC;
 
 -- ----------------------------
 -- Table structure for monitor_snapshots_postgresql
@@ -457,7 +477,7 @@ CREATE TABLE `monitor_snapshots_postgresql`  (
   INDEX `ix_monitor_snapshots_postgresql_metric_type`(`metric_type` ASC) USING BTREE,
   INDEX `ix_monitor_snapshots_postgresql_instance_id`(`instance_id` ASC) USING BTREE,
   INDEX `ix_monitor_snapshots_postgresql_collected_at`(`collected_at` ASC) USING BTREE
-) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = Dynamic;
+) ENGINE = InnoDB AUTO_INCREMENT = 1829 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = Dynamic;
 
 -- ----------------------------
 -- Table structure for monitor_snapshots_redis
@@ -475,7 +495,7 @@ CREATE TABLE `monitor_snapshots_redis`  (
   INDEX `ix_monitor_snapshots_redis_metric_type`(`metric_type` ASC) USING BTREE,
   INDEX `ix_monitor_snapshots_redis_collected_at`(`collected_at` ASC) USING BTREE,
   INDEX `ix_monitor_snapshots_redis_instance_id`(`instance_id` ASC) USING BTREE
-) ENGINE = InnoDB AUTO_INCREMENT = 145297 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = DYNAMIC;
+) ENGINE = InnoDB AUTO_INCREMENT = 170271 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = DYNAMIC;
 
 -- ----------------------------
 -- Table structure for physical_discovery_configs
@@ -537,7 +557,7 @@ CREATE TABLE `physical_discovery_runs`  (
   PRIMARY KEY (`id`) USING BTREE,
   INDEX `vcenter_id`(`vcenter_id` ASC) USING BTREE,
   CONSTRAINT `physical_discovery_runs_ibfk_1` FOREIGN KEY (`vcenter_id`) REFERENCES `vcenter_configs` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
-) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = Dynamic;
+) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = Dynamic;
 
 -- ----------------------------
 -- Table structure for role_group_cluster_permissions
@@ -628,7 +648,7 @@ CREATE TABLE `scheduled_task_runs`  (
   INDEX `ix_scheduled_task_runs_task_id`(`task_id` ASC) USING BTREE,
   INDEX `ix_scheduled_task_runs_retry_of_id`(`retry_of_id` ASC) USING BTREE,
   CONSTRAINT `scheduled_task_runs_ibfk_1` FOREIGN KEY (`task_id`) REFERENCES `scheduled_tasks` (`id`) ON DELETE RESTRICT ON UPDATE RESTRICT
-) ENGINE = InnoDB AUTO_INCREMENT = 88 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = DYNAMIC;
+) ENGINE = InnoDB AUTO_INCREMENT = 413 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = DYNAMIC;
 
 -- ----------------------------
 -- Table structure for scheduled_tasks
@@ -671,8 +691,8 @@ CREATE TABLE `sso_configs`  (
   `redirect_uri` varchar(512) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL,
   `username_field` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL,
   `email_field` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL,
-  `display_name_field` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL,
-  `avatar_field` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL,
+  `display_name_field` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL DEFAULT '',
+  `avatar_field` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL DEFAULT '',
   PRIMARY KEY (`id`) USING BTREE
 ) ENGINE = InnoDB AUTO_INCREMENT = 2 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = DYNAMIC;
 
@@ -764,6 +784,6 @@ CREATE TABLE `vcenter_configs`  (
   PRIMARY KEY (`id`) USING BTREE,
   UNIQUE INDEX `uq_vcenter_address_port`(`address` ASC, `port` ASC) USING BTREE,
   UNIQUE INDEX `name`(`name` ASC) USING BTREE
-) ENGINE = InnoDB AUTO_INCREMENT = 1 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = Dynamic;
+) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = Dynamic;
 
 SET FOREIGN_KEY_CHECKS = 1;

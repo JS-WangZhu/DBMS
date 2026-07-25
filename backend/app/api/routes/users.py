@@ -3,9 +3,11 @@ from flask import Blueprint, request
 from app.api.routes.common import admin_required
 from app.extensions import db
 from app.models.audit_log import AuditLog
+from app.models.auth_session import AuthSession
 from app.models.user import User
 from app.models.user_permission import RoleGroup, UserRoleGroup
 from app.services.audit import log_audit
+from app.services.auth_session import revoke_user_sessions
 from app.utils.response import error_response, ok_response
 
 bp = Blueprint("users", __name__, url_prefix="/users")
@@ -117,16 +119,20 @@ def update_user(user_id):
             return error_response("invalid role", code=400)
         user.role = role
 
+    should_revoke_sessions = False
     if "status" in payload:
         status = payload.get("status")
         if status not in {"active", "disabled"}:
             return error_response("invalid status", code=400)
         user.status = status
+        if status == "disabled":
+            should_revoke_sessions = True
 
     if payload.get("password"):
         if len(payload["password"]) < 8:
             return error_response("password must be at least 8 chars", code=400)
         user.set_password(payload["password"])
+        should_revoke_sessions = True
 
     if "role_group_ids" in payload:
         role_group_ids = payload.get("role_group_ids") or []
@@ -140,6 +146,8 @@ def update_user(user_id):
                 continue
             db.session.add(UserRoleGroup(user_id=user.id, role_group_id=parsed_id))
 
+    if should_revoke_sessions:
+        revoke_user_sessions(user.id, "user_updated", commit=False)
     db.session.commit()
 
     log_audit(user_id=None, action="user.update", target_type="user", target_id=str(user.id), detail=payload)
@@ -155,6 +163,7 @@ def delete_user(user_id):
     try:
         # Keep audit history but break FK dependency before deleting user.
         AuditLog.query.filter_by(user_id=user.id).update({"user_id": None}, synchronize_session=False)
+        AuthSession.query.filter_by(user_id=user.id).delete(synchronize_session=False)
         UserRoleGroup.query.filter_by(user_id=user.id).delete(synchronize_session=False)
         db.session.delete(user)
         db.session.commit()

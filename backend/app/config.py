@@ -12,6 +12,7 @@ class Config:
     SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret")
     JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "dev-jwt-secret")
     JWT_ACCESS_TOKEN_EXPIRES = timedelta(days=7)
+    AUTH_IDLE_TIMEOUT_SECONDS = int(os.getenv("AUTH_IDLE_TIMEOUT_SECONDS", "28800"))
     SQLALCHEMY_DATABASE_URI = os.getenv("DATABASE_URL", "sqlite:///dbms_meta.db")
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     SQLALCHEMY_ENGINE_OPTIONS = {

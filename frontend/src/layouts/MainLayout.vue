@@ -435,6 +435,7 @@ import RedisIcon from "../components/icons/RedisIcon.vue";
 import PostgreSQLIcon from "../components/icons/PostgreSQLIcon.vue";
 import DorisIcon from "../components/icons/DorisIcon.vue";
 import { listMyUserPermissions } from "../api/modules/backups";
+import { logoutCurrentSession, startSessionMonitor } from "../services/authSession";
 
 const router = useRouter();
 const route = useRoute();
@@ -444,6 +445,7 @@ const activeTabId = ref("");
 const sidebarCollapsed = ref(false);
 const avatarLoadFailed = ref(false);
 let tabSeq = 0;
+let stopSessionMonitor = null;
 
 const contextMenu = ref({
   visible: false,
@@ -798,17 +800,17 @@ watch(
 
 onMounted(() => {
   window.addEventListener("click", onDocumentClick);
+  stopSessionMonitor = startSessionMonitor();
   loadMenuPermissions();
 });
 
 onUnmounted(() => {
   window.removeEventListener("click", onDocumentClick);
+  if (stopSessionMonitor) stopSessionMonitor();
 });
 
-function logout() {
-  localStorage.removeItem("dbms_token");
-  localStorage.removeItem("dbms_user");
-  router.push("/login");
+async function logout() {
+  await logoutCurrentSession();
 }
 </script>
 
