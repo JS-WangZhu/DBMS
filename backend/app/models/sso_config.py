@@ -20,6 +20,7 @@ class SsoConfig(db.Model, TimestampMixin):
     username_field = db.Column(db.String(64), nullable=False, default="preferred_username")
     email_field = db.Column(db.String(64), nullable=False, default="email")
     display_name_field = db.Column(db.String(64), nullable=False, default="")
+    avatar_field = db.Column(db.String(128), nullable=False, default="")
 
     def to_dict(self, reveal_secret: bool = False):
         secret_view = self.client_secret or ""
@@ -39,6 +40,7 @@ class SsoConfig(db.Model, TimestampMixin):
             "username_field": self.username_field or "preferred_username",
             "email_field": self.email_field or "email",
             "display_name_field": self.display_name_field or "",
+            "avatar_field": self.avatar_field or "",
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }

@@ -1,7 +1,7 @@
 <template>
   <div class="page apply-page">
     <div class="page-heading">
-      <div><div class="eyebrow">RESOURCE DELIVERY</div><h2>数据库申请</h2><p>选择数据库产品与交付架构，提交后将进入资源审批流程。</p></div>
+      <div><h2>数据库申请</h2><p>选择数据库产品与交付架构，提交后将进入资源审批流程。</p></div>
       <el-steps :active="0" simple class="apply-steps"><el-step title="选择产品" /><el-step title="申请预览" /><el-step title="确认提交" /></el-steps>
     </div>
     <el-card shadow="never" class="apply-card">

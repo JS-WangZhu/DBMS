@@ -2,7 +2,6 @@
   <div class="page overview-page">
     <div class="page-heading">
       <div>
-        <div class="eyebrow">RESOURCE DELIVERY</div>
         <h2>申请预览</h2>
         <p>确认申请信息无误后，可以在这里完成提交前确认。当前页面仅做预览和草稿确认。</p>
       </div>

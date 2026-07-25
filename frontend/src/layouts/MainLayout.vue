@@ -1,8 +1,18 @@
 <template>
   <el-container class="layout-shell">
-    <el-aside width="240px" class="sidebar">
-      <div class="logo">DBMS Platform</div>
-      <el-menu :default-active="route.path" @select="onMenuSelect">
+    <el-aside :width="sidebarCollapsed ? '72px' : '248px'" class="sidebar" :class="{ 'is-collapsed': sidebarCollapsed }">
+      <div class="logo">
+        <div class="logo-mark">D</div>
+        <div v-show="!sidebarCollapsed" class="logo-copy">
+          <strong>DBMS 数据库统一管理平台</strong>
+        </div>
+      </div>
+      <el-menu
+        :default-active="route.path"
+        :collapse="sidebarCollapsed"
+        :collapse-transition="false"
+        @select="onMenuSelect"
+      >
         <el-menu-item v-if="hasMenu('dashboard')" index="/dashboard">
           <el-icon><Odometer /></el-icon>
           <span>总览</span>
@@ -306,10 +316,25 @@
 
     <el-container>
       <el-header class="topbar">
-        <div class="title">DBMS</div>
+        <div class="topbar-leading">
+          <el-button class="sidebar-toggle" text circle :aria-label="sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'" @click="sidebarCollapsed = !sidebarCollapsed">
+            <el-icon><Expand v-if="sidebarCollapsed" /><Fold v-else /></el-icon>
+          </el-button>
+          <div class="page-identity">
+            <div class="title">{{ currentPageTitle }}</div>
+            <div class="subtitle">DBMS 数据库统一管理平台</div>
+          </div>
+        </div>
         <div class="user-block">
-          <span>{{ username }}</span>
-          <el-button link type="primary" @click="logout">退出</el-button>
+          <el-avatar :size="34" :src="displayAvatarUrl || undefined" @error="onAvatarError">
+            {{ userInitial }}
+          </el-avatar>
+          <div class="user-copy">
+            <strong>{{ username }}</strong>
+            <span>{{ currentRole }}</span>
+          </div>
+          <span class="user-divider"></span>
+          <el-button class="logout-button" text @click="logout">退出登录</el-button>
         </div>
       </el-header>
       <el-main class="main-area">
@@ -372,7 +397,9 @@ import {
   Delete,
   Document,
   EditPen,
+  Expand,
   Files,
+  Fold,
   FolderOpened,
   Histogram,
   Key,
@@ -414,6 +441,8 @@ const route = useRoute();
 
 const tabs = ref([]);
 const activeTabId = ref("");
+const sidebarCollapsed = ref(false);
+const avatarLoadFailed = ref(false);
 let tabSeq = 0;
 
 const contextMenu = ref({
@@ -432,6 +461,40 @@ const username = computed(() => {
     return "unknown";
   }
 });
+
+const currentPageTitle = computed(() => route.meta?.title || "总览");
+
+const currentRole = computed(() => {
+  try {
+    const user = JSON.parse(localStorage.getItem("dbms_user") || "{}");
+    const roleLabels = { admin: "管理员", api: "API 用户", user: "普通用户" };
+    return roleLabels[user.role] || user.role || "当前用户";
+  } catch {
+    return "当前用户";
+  }
+});
+
+const userInitial = computed(() => String(username.value || "U").slice(0, 1).toUpperCase());
+
+const avatarUrl = computed(() => {
+  try {
+    const user = JSON.parse(localStorage.getItem("dbms_user") || "{}");
+    const value = String(user.avatar_url || "").trim();
+    if (!value) {
+      return "";
+    }
+    const parsed = new URL(value, window.location.origin);
+    return ["http:", "https:"].includes(parsed.protocol) ? parsed.href : "";
+  } catch {
+    return "";
+  }
+});
+
+const displayAvatarUrl = computed(() => (avatarLoadFailed.value ? "" : avatarUrl.value));
+
+function onAvatarError() {
+  avatarLoadFailed.value = true;
+}
 
 const userId = computed(() => {
   try {
@@ -1089,5 +1152,404 @@ function logout() {
 
 .context-menu .menu-item:active {
   background: rgba(45, 127, 249, 0.18);
+}
+</style>
+
+<style scoped>
+.layout-shell {
+  height: 100vh;
+  background: var(--bg-primary);
+}
+
+.layout-shell > .el-container {
+  min-width: 0;
+}
+
+.sidebar {
+  position: relative;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid #1f2937;
+  background: #101828;
+  box-shadow: 4px 0 16px rgba(16, 24, 40, 0.08);
+  overflow-x: hidden;
+  transition: width 0.22s ease;
+}
+
+.logo {
+  flex: 0 0 64px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: transparent;
+  user-select: none;
+}
+
+.logo-mark {
+  flex: 0 0 36px;
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  color: #fff;
+  background: #2563eb;
+  box-shadow: 0 6px 14px rgba(37, 99, 235, 0.28);
+  font-size: 19px;
+  font-weight: 750;
+  -webkit-text-fill-color: currentColor;
+}
+
+.logo-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.logo-copy strong {
+  color: #fff;
+  font-size: 14px;
+  letter-spacing: 0.2px;
+  -webkit-text-fill-color: #fff;
+}
+
+.sidebar.is-collapsed .logo {
+  justify-content: center;
+  padding: 0;
+}
+
+:deep(.sidebar .el-menu) {
+  flex: 1;
+  padding: 8px;
+  border-right: 0;
+  background: transparent;
+  overflow-y: auto;
+  overflow-x: hidden;
+  --el-menu-bg-color: transparent;
+  --el-menu-text-color: #aeb8c7;
+  --el-menu-hover-bg-color: rgba(255, 255, 255, 0.06);
+  --el-menu-active-color: #ffffff;
+}
+
+:deep(.sidebar .el-menu--collapse) {
+  width: auto;
+}
+
+:deep(.sidebar .el-menu-item),
+:deep(.sidebar .el-sub-menu__title) {
+  height: 36px;
+  margin: 1px 0;
+  padding: 0 12px !important;
+  border: 0;
+  border-radius: 7px;
+  color: #aeb8c7;
+  font-size: 13px;
+  transition: color 0.16s ease, background-color 0.16s ease;
+}
+
+:deep(.sidebar > .el-menu > .el-menu-item),
+:deep(.sidebar > .el-menu > .el-sub-menu > .el-sub-menu__title) {
+  height: 40px;
+  margin: 1px 0;
+  padding: 0 12px !important;
+}
+
+:deep(.sidebar .el-sub-menu .el-menu-item) {
+  min-width: 0;
+  padding-left: 28px !important;
+  background: transparent;
+}
+
+:deep(.sidebar .el-sub-menu .el-sub-menu .el-menu-item) {
+  padding-left: 38px !important;
+}
+
+:deep(.sidebar .el-sub-menu .el-sub-menu__title) {
+  padding-left: 28px !important;
+}
+
+:deep(.sidebar .el-menu--collapse .el-menu-item),
+:deep(.sidebar .el-menu--collapse .el-sub-menu__title) {
+  justify-content: center;
+  padding: 0 !important;
+}
+
+:deep(.sidebar .el-menu-item:hover),
+:deep(.sidebar .el-sub-menu__title:hover) {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.07);
+}
+
+:deep(.sidebar .el-menu-item:active),
+:deep(.sidebar .el-sub-menu__title:active) {
+  transform: none;
+}
+
+:deep(.sidebar .el-menu-item.is-active) {
+  color: #fff;
+  background: #2563eb;
+  border: 0;
+  box-shadow: 0 5px 12px rgba(37, 99, 235, 0.18);
+  font-weight: 600;
+}
+
+:deep(.sidebar .el-sub-menu.is-active > .el-sub-menu__title) {
+  color: #d0d5dd;
+  background: transparent;
+  font-weight: 500;
+}
+
+:deep(.sidebar .el-menu-item .el-icon),
+:deep(.sidebar .el-sub-menu__title .el-icon) {
+  width: 18px;
+  font-size: 17px;
+  color: #7f8da3;
+  transition: color 0.16s ease;
+}
+
+:deep(.sidebar .el-menu-item:hover .el-icon),
+:deep(.sidebar .el-sub-menu__title:hover .el-icon),
+:deep(.sidebar .el-menu-item.is-active .el-icon) {
+  color: currentColor;
+  transform: none;
+}
+
+:deep(.sidebar .el-sub-menu__icon-arrow) {
+  color: #667085;
+}
+
+.topbar {
+  position: relative;
+  z-index: 2;
+  flex: 0 0 64px;
+  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 24px 0 16px;
+  border-bottom: 1px solid var(--border-soft);
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.03);
+  backdrop-filter: blur(12px);
+}
+
+.topbar-leading {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.sidebar-toggle {
+  width: 36px;
+  height: 36px;
+  color: #475467;
+  font-size: 18px;
+}
+
+.sidebar-toggle:hover {
+  color: var(--brand);
+  background: var(--brand-soft);
+  box-shadow: none;
+}
+
+.page-identity {
+  min-width: 0;
+}
+
+.title {
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: 16px;
+  font-weight: 650;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: none;
+  -webkit-text-fill-color: currentColor;
+}
+
+.subtitle {
+  margin-top: 2px;
+  color: var(--text-placeholder);
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.user-block {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-regular);
+}
+
+.user-block :deep(.el-avatar) {
+  color: #fff;
+  background: #344054;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.user-copy {
+  display: flex;
+  flex-direction: column;
+  min-width: 80px;
+  line-height: 1.25;
+}
+
+.user-copy strong {
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.user-copy span {
+  margin-top: 2px;
+  color: var(--text-placeholder);
+  font-size: 11px;
+}
+
+.user-divider {
+  width: 1px;
+  height: 22px;
+  margin: 0 2px;
+  background: var(--border-soft);
+}
+
+.logout-button {
+  color: var(--text-soft);
+}
+
+.logout-button:hover {
+  color: var(--danger);
+  background: #fff5f4;
+}
+
+.main-area {
+  min-width: 0;
+  width: 100%;
+  padding: 0 20px 24px;
+  background: var(--bg-primary);
+  overflow-x: hidden;
+}
+
+.tabs-wrap {
+  position: relative;
+  margin: 0 -20px 20px;
+  padding: 8px 20px 0;
+  border-bottom: 1px solid var(--border-soft);
+  border-radius: 0;
+  background: #fff;
+  box-shadow: none;
+}
+
+:deep(.tabs-wrap .el-tabs__header) {
+  margin: 0;
+  border: 0 !important;
+}
+
+:deep(.tabs-wrap .el-tabs__nav),
+:deep(.tabs-wrap .el-tabs__nav-wrap::after) {
+  border: 0 !important;
+  background: transparent;
+}
+
+:deep(.tabs-wrap .el-tabs--card > .el-tabs__header .el-tabs__item) {
+  min-width: auto;
+  max-width: 190px;
+  height: 36px;
+  margin: 0 4px 0 0;
+  padding: 0 14px !important;
+  border: 0 !important;
+  border-radius: 7px 7px 0 0 !important;
+  color: var(--text-soft);
+  background: transparent;
+  box-shadow: none;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+:deep(.tabs-wrap .el-tabs--card > .el-tabs__header .el-tabs__item:hover) {
+  color: var(--brand);
+  background: #f8fafc;
+  border: 0 !important;
+  box-shadow: none;
+}
+
+:deep(.tabs-wrap .el-tabs--card > .el-tabs__header .el-tabs__item.is-active) {
+  color: var(--brand);
+  background: var(--brand-soft);
+  border: 0 !important;
+  box-shadow: none;
+  font-weight: 600;
+}
+
+:deep(.tabs-wrap .el-tabs--card > .el-tabs__header .el-tabs__item.is-active::before) {
+  left: 10px;
+  right: 10px;
+  bottom: 0;
+  height: 2px;
+  border-radius: 2px 2px 0 0;
+  background: var(--brand);
+}
+
+:deep(.tabs-wrap .el-tabs__nav-prev),
+:deep(.tabs-wrap .el-tabs__nav-next) {
+  border: 0;
+  background: #fff;
+  box-shadow: none;
+}
+
+:deep(.tabs-wrap .el-tabs__item .is-icon-close) {
+  margin-left: 6px;
+  color: #98a2b3;
+}
+
+.context-menu {
+  border: 1px solid var(--border-soft);
+  border-radius: 0;
+  box-shadow: var(--shadow-lg);
+  padding: 5px;
+}
+
+.context-menu .menu-item {
+  padding: 8px 12px;
+  border-radius: 0;
+  color: var(--text-regular);
+}
+
+.context-menu .menu-item:hover {
+  padding-left: 12px;
+  color: var(--brand);
+  background: var(--brand-soft);
+}
+
+@media (max-width: 900px) {
+  .subtitle,
+  .user-copy,
+  .user-divider {
+    display: none;
+  }
+
+  .topbar {
+    padding-right: 12px;
+  }
+
+  .main-area {
+    padding-right: 12px;
+    padding-left: 12px;
+  }
+
+  .tabs-wrap {
+    margin-right: -12px;
+    margin-left: -12px;
+    padding-right: 12px;
+    padding-left: 12px;
+  }
 }
 </style>

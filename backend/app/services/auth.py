@@ -23,6 +23,7 @@ _SSO_DB_FIELDS = (
     "username_field",
     "email_field",
     "display_name_field",
+    "avatar_field",
 )
 
 
@@ -219,13 +220,14 @@ def _get_by_path(data, key):
 def _extract_sso_identity(userinfo: dict):
     """从 userinfo 中提取 SSO 身份关键信息。
 
-    返回 dict: {subject, username, email, display_name}
+    返回 dict: {subject, username, email, display_name, avatar_url}
     其中 subject 作为导向 SSO Provider 的唯一绑定 ID，优先 sub。
     """
     info = userinfo if isinstance(userinfo, dict) else {}
     username_field = str(_sso_cfg("username_field", "preferred_username") or "preferred_username").strip()
     email_field = str(_sso_cfg("email_field", "email") or "email").strip()
     display_name_field = str(_sso_cfg("display_name_field", "") or "").strip()
+    avatar_field = str(_sso_cfg("avatar_field", "") or "").strip()
 
     def _pick(keys):
         for k in keys:
@@ -308,12 +310,42 @@ def _extract_sso_identity(userinfo: dict):
             "result.nickname",
         ]
     )
+    avatar_url = _pick(
+        [
+            avatar_field,
+            "picture",
+            "avatar_url",
+            "avatarUrl",
+            "avatar.url",
+            "avatar",
+            "profile_image_url",
+            "headimgurl",
+            "data.picture",
+            "data.avatar_url",
+            "data.avatarUrl",
+            "data.avatar.url",
+            "data.avatar",
+            "data.profile_image_url",
+            "data.headimgurl",
+            "user.picture",
+            "user.avatar_url",
+            "user.avatarUrl",
+            "user.avatar.url",
+            "user.avatar",
+            "result.picture",
+            "result.avatar_url",
+            "result.avatarUrl",
+            "result.avatar.url",
+            "result.avatar",
+        ]
+    )
 
     return {
         "subject": subject,
         "username": username,
         "email": email,
         "display_name": display_name,
+        "avatar_url": avatar_url,
     }
 
 
@@ -337,6 +369,7 @@ def _upsert_sso_user(identity: dict):
     username = (identity or {}).get("username")
     email = (identity or {}).get("email")
     display_name = (identity or {}).get("display_name")
+    avatar_url = (identity or {}).get("avatar_url")
     provider_name = str(_sso_cfg("provider_name", "SSO") or "SSO")
 
     if not username:
@@ -371,6 +404,7 @@ def _upsert_sso_user(identity: dict):
         db.session.flush()
         db.session.add(UserMenuPermission(user_id=user.id, menu_key="dashboard"))
         db.session.commit()
+        user._sso_avatar_url = avatar_url
         return user
 
     if user.status != "active":
@@ -390,6 +424,7 @@ def _upsert_sso_user(identity: dict):
         user.display_name = display_name
     user.last_login_at = datetime.utcnow()
     db.session.commit()
+    user._sso_avatar_url = avatar_url
     return user
 
 

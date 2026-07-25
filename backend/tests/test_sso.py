@@ -6,6 +6,29 @@ from app.models.user import User
 from app.models.user_permission import UserMenuPermission, UserRoleGroup
 
 
+def _admin_headers(client):
+    resp = client.post("/api/v1/auth/login", json={"username": "admin", "password": "admin123"})
+    token = resp.get_json()["data"]["access_token"]
+    return {"Authorization": f"Bearer {token}"}
+
+
+def test_sso_config_supports_avatar_field(app):
+    client = app.test_client()
+    headers = _admin_headers(client)
+
+    resp = client.put(
+        "/api/v1/sso-config",
+        headers=headers,
+        json={"avatar_field": "p.profile.avatar"},
+    )
+
+    assert resp.status_code == 200
+    assert resp.get_json()["data"]["avatar_field"] == "p.profile.avatar"
+
+    with app.app_context():
+        assert SsoConfig.get_current().avatar_field == "p.profile.avatar"
+
+
 def test_sso_meta_enabled_without_client_credentials(app):
     with app.app_context():
         row = SsoConfig.get_current()
@@ -81,6 +104,7 @@ def test_sso_token_callback_creates_plain_user_without_role_groups(app, monkeypa
                 "sub": "u-1001",
                 "preferred_username": "sso.user",
                 "email": "sso.user@example.com",
+                "picture": "https://sso.example.com/avatars/u-1001.png",
             }
 
     captured = {}
@@ -101,6 +125,7 @@ def test_sso_token_callback_creates_plain_user_without_role_groups(app, monkeypa
     assert payload["access_token"]
     assert payload["user"]["username"] == "sso.user"
     assert payload["user"]["role"] == "user"
+    assert payload["user"]["avatar_url"] == "https://sso.example.com/avatars/u-1001.png"
     assert captured["url"] == "https://sso.example.com/token/verify"
     assert captured["data"] == {
         "token": "enterprise-token",
@@ -296,6 +321,7 @@ def test_sso_token_callback_supports_configured_display_name_field(app, monkeypa
         row.username_field = "p.username"
         row.email_field = "p.email"
         row.display_name_field = "p.displayName"
+        row.avatar_field = "p.profile.avatar"
         db.session.commit()
 
     class Response:
@@ -309,6 +335,9 @@ def test_sso_token_callback_supports_configured_display_name_field(app, monkeypa
                     "username": "display.user",
                     "email": "display.user@example.com",
                     "displayName": "Display User",
+                    "profile": {
+                        "avatar": "https://sso.example.com/avatars/display-user.png",
+                    },
                 },
             }
 
@@ -323,3 +352,4 @@ def test_sso_token_callback_supports_configured_display_name_field(app, monkeypa
     payload = resp.get_json()["data"]
     assert payload["user"]["username"] == "display.user"
     assert payload["user"]["display_name"] == "Display User"
+    assert payload["user"]["avatar_url"] == "https://sso.example.com/avatars/display-user.png"

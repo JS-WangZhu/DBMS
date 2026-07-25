@@ -21,6 +21,7 @@ EDITABLE_FIELDS = [
     "username_field",
     "email_field",
     "display_name_field",
+    "avatar_field",
 ]
 
 

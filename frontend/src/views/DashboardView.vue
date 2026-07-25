@@ -1,10 +1,27 @@
 <template>
-  <div>
-    <el-row :gutter="16">
+  <div class="dashboard-page" v-loading="loading">
+    <div class="dashboard-heading">
+      <div>
+        <div class="page-title">运行总览</div>
+        <div class="page-subtitle">集中查看数据库实例运行状态与集群分布</div>
+      </div>
+      <div class="heading-actions">
+        <span v-if="lastUpdated" class="updated-at">最近更新 {{ lastUpdated }}</span>
+        <el-button :icon="Refresh" @click="loadStats">刷新数据</el-button>
+      </div>
+    </div>
+
+    <el-row :gutter="16" class="metric-row">
       <el-col class="metric-col" :xs="24" :sm="12" :md="6" v-for="card in cards" :key="card.key">
         <el-card class="metric-card">
-          <div class="label">{{ card.label }}</div>
-          <div class="value">{{ card.value }}</div>
+          <div class="metric-topline">
+            <div class="metric-icon" :style="{ color: card.color, backgroundColor: card.softColor }">
+              <component :is="card.icon" />
+            </div>
+            <el-tag size="small" type="info" effect="light">状态统计</el-tag>
+          </div>
+          <div class="metric-value">{{ card.value }}</div>
+          <div class="metric-label">{{ card.label }}</div>
         </el-card>
       </el-col>
     </el-row>
@@ -14,8 +31,11 @@
         <el-card class="chart-card">
           <template #header>
             <div class="header-row">
-              <span>业务维度集群分布</span>
-              <el-button link type="primary" @click="loadClusterStats">刷新</el-button>
+              <div>
+                <div class="chart-title">业务维度集群分布</div>
+                <div class="chart-subtitle">按所属业务统计集群数量</div>
+              </div>
+              <span class="chart-unit"></span>
             </div>
           </template>
           <div ref="projectChartRef" class="chart-canvas--pie"></div>
@@ -25,8 +45,11 @@
         <el-card class="chart-card">
           <template #header>
             <div class="header-row">
-              <span>系统维度集群分布</span>
-              <el-button link type="primary" @click="loadClusterStats">刷新</el-button>
+              <div>
+                <div class="chart-title">系统维度集群分布</div>
+                <div class="chart-subtitle">按数据库类型统计集群数量</div>
+              </div>
+              <span class="chart-unit"></span>
             </div>
           </template>
           <div ref="dbTypeChartRef" class="chart-canvas--pie"></div>
@@ -40,20 +63,28 @@
 import * as echarts from "echarts";
 import { nextTick, onBeforeUnmount, onMounted, reactive, ref } from "vue";
 import { ElMessage } from "element-plus";
+import { Refresh } from "@element-plus/icons-vue";
 
 import { listInstances } from "../api/modules/instances";
 import { getClusterStats } from "../api/modules/clusters";
+import MysqlIcon from "../components/icons/MysqlIcon.vue";
+import MongoIcon from "../components/icons/MongoIcon.vue";
+import RedisIcon from "../components/icons/RedisIcon.vue";
+import PostgreSQLIcon from "../components/icons/PostgreSQLIcon.vue";
+import DorisIcon from "../components/icons/DorisIcon.vue";
 
 const cards = reactive([
-  { key: "mysql", label: "MySQL 实例", value: "0/0" },
-  { key: "mongodb", label: "MongoDB 实例", value: "0/0" },
-  { key: "redis", label: "Redis 实例", value: "0/0" },
-  { key: "postgresql", label: "PostgreSQL \u5b9e\u4f8b", value: "0/0" },
-  { key: "doris", label: "Doris 实例", value: "0/0" },
+  { key: "mysql", label: "MySQL 实例", value: "0 / 0", icon: MysqlIcon, color: "#2563eb", softColor: "#eff6ff" },
+  { key: "mongodb", label: "MongoDB 实例", value: "0 / 0", icon: MongoIcon, color: "#12b76a", softColor: "#ecfdf3" },
+  { key: "redis", label: "Redis 实例", value: "0 / 0", icon: RedisIcon, color: "#f04438", softColor: "#fef3f2" },
+  { key: "postgresql", label: "PostgreSQL 实例", value: "0 / 0", icon: PostgreSQLIcon, color: "#0ba5ec", softColor: "#f0f9ff" },
+  { key: "doris", label: "Doris 实例", value: "0 / 0", icon: DorisIcon, color: "#7a5af8", softColor: "#f4f3ff" },
 ]);
 
 const projectChartRef = ref(null);
 const dbTypeChartRef = ref(null);
+const loading = ref(false);
+const lastUpdated = ref("");
 let projectChartInstance = null;
 let dbTypeChartInstance = null;
 
@@ -62,7 +93,7 @@ function setInstanceCard(key, instances) {
   if (card) {
     const total = instances.length;
     const normal = instances.filter((inst) => inst.running_status === "running").length;
-    card.value = `${normal}/${total}`;
+    card.value = `${normal} / ${total}`;
   }
 }
 
@@ -75,11 +106,15 @@ function renderProjectChart(data) {
     tooltip: {
       trigger: "item",
       formatter: "{b}: {c}",
+      backgroundColor: "#101828",
+      borderWidth: 0,
+      textStyle: { color: "#fff" },
     },
     legend: {
       orient: "vertical",
       right: 10,
       top: "center",
+      textStyle: { color: "#667085", fontSize: 12 },
     },
     series: [
       {
@@ -105,7 +140,7 @@ function renderProjectChart(data) {
           name: item.name,
           value: item.value,
           itemStyle: {
-            color: ["#5470c6", "#91cc75", "#fac858", "#ee6666", "#73c0de", "#3ba272", "#fc8452", "#9a60b4", "#ea7ccc"][index % 9],
+            color: ["#2563eb", "#12b76a", "#f79009", "#7a5af8", "#0ba5ec", "#f04438", "#6172f3", "#15b79e", "#ee46bc"][index % 9],
           },
         })),
       },
@@ -129,11 +164,15 @@ function renderDbTypeChart(data) {
     tooltip: {
       trigger: "item",
       formatter: "{b}: {c}",
+      backgroundColor: "#101828",
+      borderWidth: 0,
+      textStyle: { color: "#fff" },
     },
     legend: {
       orient: "vertical",
       right: 10,
       top: "center",
+      textStyle: { color: "#667085", fontSize: 12 },
     },
     series: [
       {
@@ -159,7 +198,7 @@ function renderDbTypeChart(data) {
           name: dbTypeLabels[item.name] || item.name,
           value: item.value,
           itemStyle: {
-            color: ["#5470c6", "#91cc75", "#fac858", "#ee6666"][index % 4],
+            color: ["#2563eb", "#12b76a", "#f04438", "#0ba5ec", "#7a5af8"][index % 5],
           },
         })),
       },
@@ -180,6 +219,7 @@ async function loadClusterStats() {
 }
 
 async function loadStats() {
+  loading.value = true;
   try {
     await loadClusterStats();
 
@@ -190,8 +230,16 @@ async function loadStats() {
     });
 
     await Promise.all(tasks);
+    lastUpdated.value = new Intl.DateTimeFormat("zh-CN", {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    }).format(new Date());
   } catch (error) {
     ElMessage.error(error.response?.data?.message || "加载总览失败");
+  } finally {
+    loading.value = false;
   }
 }
 
@@ -215,8 +263,85 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+.dashboard-page {
+  min-height: 420px;
+}
+
+.dashboard-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: 18px;
+}
+
+.heading-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.updated-at {
+  color: var(--text-placeholder);
+  font-size: 12px;
+}
+
+.metric-row {
+  row-gap: 16px;
+}
+
 .metric-card {
-  margin-bottom: 16px;
+  position: relative;
+  height: 100%;
+  overflow: hidden;
+}
+
+.metric-card :deep(.el-card__body) {
+  position: relative;
+  z-index: 1;
+  padding: 18px;
+}
+
+.metric-topline {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 18px;
+}
+
+.metric-icon {
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border-radius: 9px;
+}
+
+.metric-icon :deep(svg) {
+  width: 23px;
+  height: 23px;
+}
+
+.metric-value {
+  color: var(--text-primary);
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: -0.8px;
+  font-variant-numeric: tabular-nums;
+}
+
+.metric-label {
+  margin-top: 7px;
+  color: var(--text-regular);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.metric-hint {
+  margin-top: 3px;
+  color: var(--text-placeholder);
+  font-size: 11px;
 }
 
 @media (min-width: 992px) {
@@ -226,23 +351,13 @@ onBeforeUnmount(() => {
   }
 }
 
-.label {
-  color: #5c6e83;
-  margin-bottom: 8px;
-}
-
-.value {
-  font-size: 30px;
-  font-weight: 700;
-  color: #0a4f92;
-}
-
 .chart-card {
-  margin-top: 16px;
+  height: 100%;
 }
 
 .chart-row {
-  margin-top: 8px;
+  margin-top: 20px;
+  row-gap: 16px;
 }
 
 .chart-row .chart-card {
@@ -251,7 +366,7 @@ onBeforeUnmount(() => {
 
 .chart-canvas--pie {
   width: 100%;
-  height: 320px;
+  height: 340px;
   cursor: pointer;
 }
 
@@ -259,5 +374,36 @@ onBeforeUnmount(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
+}
+
+.chart-title {
+  color: var(--text-primary);
+  font-size: 15px;
+  font-weight: 650;
+}
+
+.chart-subtitle,
+.chart-unit {
+  color: var(--text-placeholder);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.chart-subtitle {
+  margin-top: 3px;
+}
+
+@media (max-width: 700px) {
+  .dashboard-heading {
+    flex-direction: column;
+  }
+
+  .updated-at {
+    display: none;
+  }
+
+  .chart-canvas--pie {
+    height: 300px;
+  }
 }
 </style>

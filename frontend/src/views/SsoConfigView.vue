@@ -88,6 +88,11 @@
           <el-text class="hint" type="info">可填写点路径，例如 p.displayName；登录成功后会随用户信息回传 display_name</el-text>
         </el-form-item>
 
+        <el-form-item label="头像字段">
+          <el-input v-model="form.avatar_field" placeholder="picture 或 data.avatarUrl" />
+          <el-text class="hint" type="info">可填写点路径，例如 p.avatar.url；留空时自动识别 picture、avatar_url 等常见字段</el-text>
+        </el-form-item>
+
         <el-form-item>
           <el-button type="primary" :loading="saving" @click="saveConfig">保存配置</el-button>
           <el-button @click="loadConfig">重新加载</el-button>
@@ -121,6 +126,7 @@ const form = reactive({
   username_field: "preferred_username",
   email_field: "email",
   display_name_field: "",
+  avatar_field: "",
 });
 
 const defaultRedirectUri = computed(() => `${window.location.origin}/sso/callback`);
@@ -147,6 +153,7 @@ async function loadConfig() {
       username_field: row.username_field || "preferred_username",
       email_field: row.email_field || "email",
       display_name_field: row.display_name_field || "",
+      avatar_field: row.avatar_field || "",
     });
   } catch (error) {
     ElMessage.error(error.response?.data?.message || "加载 SSO 配置失败");

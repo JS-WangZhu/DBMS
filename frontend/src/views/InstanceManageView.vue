@@ -48,7 +48,6 @@
         @row-mouse-leave="onRowMouseLeave"
         @filter-change="onTableFilterChange"
       >
-        <el-table-column prop="id" label="ID" min-width="50" />
         <el-table-column prop="name" label="实例名" min-width="120" class-name="name-col" />
         <el-table-column
           label="所属集群"
@@ -91,7 +90,9 @@
         <el-table-column
           label="运行情况"
           column-key="running"
-          min-width="78"
+          min-width="92"
+          class-name="running-col"
+          header-class-name="running-header"
           :filters="runningFilters"
           :filter-method="filterByRunning"
           :filter-multiple="false"
@@ -2642,17 +2643,25 @@ async function removeInstance(row) {
               ? buildMongoReplicationRows(payload)
               : dbType.value === "redis"
                 ? buildRedisReplicationRows(payload, row)
-              : buildGenericInfoRows(payload);
+                : dbType.value === "postgresql"
+                  ? buildPostgresqlDetailRows(payload)
+                  : buildGenericInfoRows(payload);
       } catch (err) {
-        rowsData = buildGenericInfoRows(payload);
+        rowsData = dbType.value === "postgresql"
+          ? buildPostgresqlDetailRows(payload)
+          : buildGenericInfoRows(payload);
       }
       openInfoDialog(`${row.name} - ${actionLabel.value}`, rowsData);
     } catch (error) {
       const fallbackPayload = latestPayload || error?.response?.data?.data;
       if (fallbackPayload) {
-        const rowsData = dbType.value === "redis" ? buildRedisReplicationRows(fallbackPayload, row) : buildGenericInfoRows(fallbackPayload);
+        const rowsData = dbType.value === "redis"
+          ? buildRedisReplicationRows(fallbackPayload, row)
+          : dbType.value === "postgresql"
+            ? buildPostgresqlDetailRows(fallbackPayload)
+            : buildGenericInfoRows(fallbackPayload);
         openInfoDialog(`${row.name} - ${actionLabel.value}`, rowsData);
-        ElMessage.warning(`${actionLabel.value}详情解析异常，已展示原始数据`);
+        ElMessage.warning(`${actionLabel.value}详情解析异常，已展示可用状态数据`);
         return;
       }
       // eslint-disable-next-line no-console
@@ -3270,6 +3279,31 @@ watch(
 
 :deep(.instance-table th.el-table__cell) {
   background: #fafbfd;
+}
+
+:deep(.instance-table th.running-header .cell) {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 3px;
+  white-space: nowrap;
+}
+
+:deep(.instance-table th.running-header .el-table__column-filter-trigger) {
+  flex: 0 0 20px;
+  width: 20px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  line-height: 1;
+  vertical-align: middle;
+}
+
+:deep(.instance-table th.running-header .el-table__column-filter-trigger .el-icon) {
+  margin: 0;
+  font-size: 14px;
 }
 
 :deep(.el-table .cluster-related-row > td) {

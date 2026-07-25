@@ -74,7 +74,11 @@ def sso_callback():
         return error_response(str(exc), code=401)
     token = create_access_token(identity=str(user.id), additional_claims={"role": user.role})
     log_audit(user_id=user.id, action="auth.login.sso", detail={"auth_source": user.auth_source})
-    return ok_response(data={"access_token": token, "user": user.to_dict()})
+    user_data = user.to_dict()
+    avatar_url = getattr(user, "_sso_avatar_url", None)
+    if avatar_url:
+        user_data["avatar_url"] = avatar_url
+    return ok_response(data={"access_token": token, "user": user_data})
 
 
 @bp.patch("/password")
