@@ -35,6 +35,7 @@ MENU_CATALOG = [
     {"key": "mongodb_instances", "label": "MongoDB 实例管理"},
     {"key": "mongodb_clusters", "label": "MongoDB 集群管理"},
     {"key": "mongodb_connections", "label": "MongoDB 连接管理"},
+    {"key": "mongodb_session_probe", "label": "MongoDB 会话探测"},
     {"key": "redis_instances", "label": "Redis 实例管理"},
     {"key": "redis_clusters", "label": "Redis 集群管理"},
     {"key": "redis_connections", "label": "Redis 连接管理"},

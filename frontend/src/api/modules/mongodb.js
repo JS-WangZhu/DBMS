@@ -11,3 +11,19 @@ export function createMongoInstance(payload) {
 export function mongoReplicaStatus(instanceId) {
   return client.get(`/mongodb/instances/${instanceId}/replica-status`);
 }
+
+export function startMongoSessionProbe(instanceId) {
+  return client.post("/mongodb/session-probes", { instance_id: instanceId });
+}
+
+export function getMongoOperations(token) {
+  return client.get(`/mongodb/session-probes/${token}/operations`);
+}
+
+export function killMongoOperation(token, operationId) {
+  return client.post(`/mongodb/session-probes/${token}/kill`, { operation_id: operationId });
+}
+
+export function stopMongoSessionProbe(token) {
+  return client.post(`/mongodb/session-probes/${token}/stop`);
+}

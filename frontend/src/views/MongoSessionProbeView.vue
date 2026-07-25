@@ -1,0 +1,74 @@
+<template>
+  <div class="session-probe-page">
+    <el-card shadow="never">
+      <template #header>
+        <div class="header-row">
+          <div><div class="page-title">MongoDB 会话探测</div><div class="page-subtitle">点击开始后实时读取 currentOp，探测连接最长保留 5 分钟</div></div>
+          <div class="probe-state"><el-tag :type="active ? 'success' : 'info'">{{ active ? '正在抓取' : '未开始' }}</el-tag><span v-if="active" class="countdown">剩余 {{ countdownText }}</span></div>
+        </div>
+      </template>
+      <div class="filters">
+        <el-select v-model="businessLine" filterable clearable :disabled="active" placeholder="选择项目" @change="resetCluster"><el-option v-for="item in businessLines" :key="item" :label="item" :value="item" /></el-select>
+        <el-select v-model="environment" filterable clearable :disabled="active" placeholder="选择环境" @change="resetCluster"><el-option v-for="item in environments" :key="item" :label="item" :value="item" /></el-select>
+        <el-select v-model="clusterId" filterable clearable :disabled="active" placeholder="检索集群名称" @change="syncInstance"><el-option v-for="item in filteredClusters" :key="item.id" :label="clusterLabel(item)" :value="item.id" /></el-select>
+        <el-select v-model="instanceId" filterable clearable :disabled="active" class="instance-select" placeholder="选择 MongoDB 实例"><el-option v-for="item in filteredInstances" :key="item.id" :label="`${item.name} (${item.resolved_ip || item.host_input}:${item.port})`" :value="item.id" /></el-select>
+        <el-button v-if="!active" type="primary" :loading="starting" :disabled="!instanceId" @click="startProbe">开始抓取</el-button><el-button v-else type="danger" plain :loading="stopping" @click="stopProbe(true)">停止抓取</el-button><el-button :disabled="!active" :loading="fetching" @click="fetchSessions(true)">立即刷新</el-button>
+      </div>
+    </el-card>
+    <el-card v-loading="fetching" shadow="never" class="table-card">
+      <template #header><div class="table-header"><span>运行操作</span><span class="summary">操作 {{ visibleSessions.length }}，活跃 {{ activeCount }}<template v-if="collectedAt">，采集于 {{ dateTime(collectedAt) }}</template></span></div></template>
+      <el-empty v-if="!active && !visibleSessions.length" description="请选择实例并点击“开始抓取”" />
+      <el-table v-else :key="tableRevision" :data="visibleSessions" row-key="id" border stripe size="small" empty-text="当前没有可展示的运行操作">
+        <el-table-column prop="id" label="操作 ID" min-width="130" fixed="left" show-overflow-tooltip />
+        <el-table-column prop="operation" label="类型" width="90"><template #default="{ row }"><el-tag size="small" :type="operationTag(row.operation)">{{ row.operation || '-' }}</el-tag></template></el-table-column>
+        <el-table-column prop="namespace" label="命名空间" min-width="160" show-overflow-tooltip><template #default="{ row }">{{ row.namespace || '-' }}</template></el-table-column>
+        <el-table-column prop="client" label="客户端" min-width="160" show-overflow-tooltip><template #default="{ row }">{{ row.client || '-' }}</template></el-table-column>
+        <el-table-column prop="app_name" label="应用" min-width="120" show-overflow-tooltip><template #default="{ row }">{{ row.app_name || '-' }}</template></el-table-column>
+        <el-table-column prop="time_seconds" label="持续时间" width="110" sortable><template #default="{ row }">{{ duration(row.time_seconds) }}</template></el-table-column>
+        <el-table-column label="状态" width="100"><template #default="{ row }"><el-tag size="small" :type="row.waiting_for_lock ? 'danger' : row.active ? 'success' : 'info'">{{ row.waiting_for_lock ? '等待锁' : row.active ? '执行中' : '空闲' }}</el-tag></template></el-table-column>
+        <el-table-column label="命令 JSON" min-width="420"><template #default="{ row }"><pre class="command-json">{{ prettyCommand(row.command) }}</pre></template></el-table-column>
+        <el-table-column label="操作" width="90" fixed="right"><template #default="{ row }"><el-button link type="danger" :loading="killingId === row.id" @click="confirmKill(row)">Kill</el-button></template></el-table-column>
+      </el-table>
+    </el-card>
+  </div>
+</template>
+
+<script setup>
+import { computed, onBeforeUnmount, onDeactivated, onMounted, ref } from "vue";
+import { ElMessage, ElMessageBox } from "element-plus";
+import { listClusters } from "../api/modules/clusters";
+import { listInstances } from "../api/modules/instances";
+import { getMongoOperations, killMongoOperation, startMongoSessionProbe, stopMongoSessionProbe } from "../api/modules/mongodb";
+
+const clusters = ref([]), instances = ref([]), businessLine = ref(null), environment = ref(null), clusterId = ref(null), instanceId = ref(null), probeToken = ref(""), expiresAt = ref(null), sessions = ref([]), hiddenIds = ref(new Set()), collectedAt = ref(null), remainingSeconds = ref(0), starting = ref(false), stopping = ref(false), fetching = ref(false), killingId = ref(null), tableRevision = ref(0);
+let pollTimer = null, countdownTimer = null, refreshQueued = false;
+const active = computed(() => Boolean(probeToken.value));
+const businessLines = computed(() => [...new Set(clusters.value.map((item) => item.business_line || item.namespace).filter(Boolean))].sort());
+const environments = computed(() => [...new Set(clusters.value.filter((item) => !businessLine.value || (item.business_line || item.namespace) === businessLine.value).map((item) => item.environment).filter(Boolean))].sort());
+const filteredClusters = computed(() => clusters.value.filter((item) => (!businessLine.value || (item.business_line || item.namespace) === businessLine.value) && (!environment.value || item.environment === environment.value)));
+const filteredInstances = computed(() => { if (clusterId.value) return instances.value.filter((item) => item.cluster_id === clusterId.value); if (!businessLine.value && !environment.value) return instances.value; const ids = new Set(filteredClusters.value.map((item) => item.id)); return instances.value.filter((item) => item.cluster_id && ids.has(item.cluster_id)); });
+const visibleSessions = computed(() => sessions.value.filter((item) => !item.is_probe_connection && !hiddenIds.value.has(item.id)));
+const activeCount = computed(() => visibleSessions.value.filter((item) => item.active).length);
+const countdownText = computed(() => `${String(Math.floor(remainingSeconds.value / 60)).padStart(2, "0")}:${String(remainingSeconds.value % 60).padStart(2, "0")}`);
+function clusterLabel(item) { return [item.business_line || item.namespace, item.environment, item.name].filter(Boolean).join("/") || item.name; }
+function syncInstance() { if (!filteredInstances.value.some((item) => item.id === instanceId.value)) instanceId.value = filteredInstances.value[0]?.id || null; }
+function resetCluster() { environment.value = businessLine.value ? environment.value : null; clusterId.value = null; syncInstance(); }
+function duration(value) { const total = Math.max(0, Number(value) || 0); return total < 60 ? `${total}秒` : total < 3600 ? `${Math.floor(total / 60)}分${total % 60}秒` : `${Math.floor(total / 3600)}时${Math.floor((total % 3600) / 60)}分`; }
+function dateTime(value) { return value ? new Date(value).toLocaleString("zh-CN", { hour12: false }) : "-"; }
+function operationTag(value) { return String(value || "").toLowerCase() === "command" ? "success" : "warning"; }
+function prettyCommand(command) { try { return JSON.stringify(command || {}, null, 2); } catch { return String(command || "-"); } }
+function clearTimers() { if (pollTimer) window.clearInterval(pollTimer); if (countdownTimer) window.clearInterval(countdownTimer); pollTimer = null; countdownTimer = null; }
+function clearState() { clearTimers(); probeToken.value = ""; expiresAt.value = null; remainingSeconds.value = 0; sessions.value = []; hiddenIds.value = new Set(); collectedAt.value = null; refreshQueued = false; }
+function updateCountdown() { if (!expiresAt.value) return; remainingSeconds.value = Math.max(0, Math.ceil((new Date(expiresAt.value).getTime() - Date.now()) / 1000)); if (!remainingSeconds.value) { clearState(); ElMessage.warning("会话探测已达 5 分钟，连接已自动关闭"); } }
+async function startProbe() { if (!instanceId.value || starting.value) return; starting.value = true; try { const { data: response } = await startMongoSessionProbe(instanceId.value); const data = response.data || {}; probeToken.value = data.token || ""; expiresAt.value = data.expires_at || null; updateCountdown(); countdownTimer = window.setInterval(updateCountdown, 1000); pollTimer = window.setInterval(fetchSessions, 3000); await fetchSessions(); ElMessage.success("会话抓取已开始"); } catch (error) { clearState(); ElMessage.error(error.response?.data?.message || "启动会话探测失败"); } finally { starting.value = false; } }
+async function fetchSessions(force = false) { const token = probeToken.value; if (!token) return; if (fetching.value) { if (force) refreshQueued = true; return; } fetching.value = true; try { const { data: response } = await getMongoOperations(token); const data = response.data || {}; const next = data.sessions || []; const ids = new Set(next.map((item) => item.id)); hiddenIds.value = new Set([...hiddenIds.value].filter((id) => ids.has(id))); sessions.value = next; collectedAt.value = data.collected_at || null; expiresAt.value = data.expires_at || expiresAt.value; } catch (error) { if ([403, 410, 502].includes(error.response?.status)) clearState(); ElMessage.error(error.response?.data?.message || "抓取 currentOp 失败"); } finally { fetching.value = false; if (refreshQueued && probeToken.value) { refreshQueued = false; window.setTimeout(fetchSessions, 0); } } }
+async function stopProbe(showMessage = false) { const token = probeToken.value; if (!token || stopping.value) return; stopping.value = true; clearState(); try { await stopMongoSessionProbe(token); if (showMessage) ElMessage.success("会话探测连接已关闭"); } catch (error) { if (showMessage && error.response?.status !== 410) ElMessage.warning(error.response?.data?.message || "连接已在服务端关闭"); } finally { stopping.value = false; } }
+async function confirmKill(row) { try { await ElMessageBox.confirm(`确认 Kill 操作 ${row.id}（${row.namespace || row.operation || "unknown"}）？该操作会中断当前请求及其事务。`, "Kill 操作二次确认", { type: "warning", confirmButtonText: "确认 Kill", cancelButtonText: "取消" }); } catch { return; } killingId.value = row.id; try { await killMongoOperation(probeToken.value, row.id); hiddenIds.value = new Set([...hiddenIds.value, row.id]); sessions.value = sessions.value.filter((item) => item.id !== row.id); tableRevision.value += 1; ElMessage.success(`操作 ${row.id} 已 Kill`); await fetchSessions(true); } catch (error) { ElMessage.error(error.response?.data?.message || "Kill 操作失败"); } finally { killingId.value = null; } }
+function closeOnPageHide() { const token = probeToken.value; if (!token) return; const authToken = localStorage.getItem("dbms_token") || ""; fetch(`/api/v1/mongodb/session-probes/${token}/stop`, { method: "POST", headers: authToken ? { Authorization: `Bearer ${authToken}` } : {}, keepalive: true }).catch(() => {}); clearState(); }
+onMounted(async () => { window.addEventListener("pagehide", closeOnPageHide); try { const [clusterResponse, instanceResponse] = await Promise.all([listClusters("mongodb"), listInstances("mongodb")]); clusters.value = clusterResponse.data?.data || []; instances.value = instanceResponse.data?.data || []; syncInstance(); } catch (error) { ElMessage.error(error.response?.data?.message || "MongoDB 实例与集群加载失败"); } });
+onDeactivated(() => stopProbe(false)); onBeforeUnmount(() => { window.removeEventListener("pagehide", closeOnPageHide); stopProbe(false); });
+</script>
+
+<style scoped>
+.session-probe-page { display: flex; flex-direction: column; gap: 16px; } .header-row, .table-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; } .page-title { color: #303133; font-size: 20px; font-weight: 700; } .page-subtitle { color: #909399; font-size: 13px; margin-top: 5px; } .probe-state, .filters { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; } .countdown { color: #e6a23c; font-variant-numeric: tabular-nums; font-weight: 600; } .filters > .el-select { width: 150px; } .filters .instance-select { width: 280px; } .table-card { min-height: 320px; } .table-header { font-weight: 600; } .summary { color: #909399; font-size: 13px; font-weight: 400; } .command-json { margin: 0; color: #303133; font: 12px/1.45 Consolas, "SFMono-Regular", monospace; white-space: pre-wrap; word-break: break-word; } @media (max-width: 900px) { .header-row, .table-header { align-items: flex-start; flex-direction: column; } .filters > .el-select, .filters .instance-select { width: 100%; } }
+</style>

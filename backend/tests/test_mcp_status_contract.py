@@ -1,4 +1,6 @@
 import json
+from datetime import datetime
+from types import SimpleNamespace
 
 from app.extensions import db
 from app.models.backup_agent import BackupAgent
@@ -76,4 +78,54 @@ def test_mcp_status_has_stable_physical_machine_defaults(app, monkeypatch):
             "discovery_mode": "auto",
             "discovery_source": None,
             "discovered_at": None,
+        }
+
+
+def test_mcp_status_exposes_redis_operational_metrics(app, monkeypatch):
+    from app.services import mcp_status
+
+    with app.app_context():
+        instance = DatabaseInstance(name="redis-metrics", db_type="redis", host_input="10.20.1.10", port=6379)
+        db.session.add(instance)
+        db.session.commit()
+        snapshot = SimpleNamespace(
+            id=1,
+            metric_type="status",
+            collected_at=datetime.now(),
+            payload_json={
+                "ok": True,
+                "ping_ok": True,
+                "maxclients": 1000,
+                "connection_usage_pct": 12.5,
+                "used_memory_peak": 1024,
+                "keyspace_db_count": 2,
+                "keyspace_hits": 80,
+                "keyspace_misses": 20,
+                "redis_mode": "cluster",
+                "cluster_state": "ok",
+                "cluster_info": {"cluster_slots_assigned": "16384"},
+                "replication_source": "redis-primary:6379",
+                "connected_slaves": 2,
+            },
+        )
+        monkeypatch.setattr(
+            mcp_status,
+            "latest_snapshots_by_instance_ids",
+            lambda *_args: {instance.id: snapshot},
+        )
+
+        row = mcp_status.build_mcp_instance_status()["instances"][0]
+
+        assert row["metrics"] == {
+            "maxclients": 1000,
+            "connection_usage_pct": 12.5,
+            "used_memory_peak": 1024,
+            "keyspace_db_count": 2,
+            "keyspace_hits": 80,
+            "keyspace_misses": 20,
+            "redis_mode": "cluster",
+            "cluster_state": "ok",
+            "cluster_info": {"cluster_slots_assigned": "16384"},
+            "connected_slaves": 2,
+            "replication_source": "redis-primary:6379",
         }

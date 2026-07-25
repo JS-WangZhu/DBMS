@@ -31,6 +31,7 @@ import McpPlatformView from "../views/McpPlatformView.vue";
 import MysqlConnectionManageView from "../views/MysqlConnectionManageView.vue";
 import MysqlInstanceDetailView from "../views/MysqlInstanceDetailView.vue";
 import MysqlSessionProbeView from "../views/MysqlSessionProbeView.vue";
+import MongoSessionProbeView from "../views/MongoSessionProbeView.vue";
 import MongoConnectionManageView from "../views/MongoConnectionManageView.vue";
 import RedisConnectionManageView from "../views/RedisConnectionManageView.vue";
 import DatabaseApplyView from "../views/DatabaseApplyView.vue";
@@ -80,6 +81,7 @@ const routes = [
       { path: "/databases/mongodb/clusters", component: ClusterManageView, meta: { title: "MongoDB 集群管理", dbType: "mongodb", dbLabel: "MongoDB" } },
       { path: "/databases/mongodb/instances", component: InstanceManageView, meta: { title: "MongoDB 实例管理", dbType: "mongodb", dbLabel: "MongoDB" } },
       { path: "/databases/mongodb/connections", component: MongoConnectionManageView, meta: { title: "MongoDB 连接管理", dbType: "mongodb", dbLabel: "MongoDB" } },
+      { path: "/databases/mongodb/session-probe", component: MongoSessionProbeView, meta: { title: "MongoDB 会话探测", dbType: "mongodb", dbLabel: "MongoDB" } },
 
       { path: "/databases/redis", redirect: "/databases/redis/instances" },
       { path: "/databases/redis/clusters", component: ClusterManageView, meta: { title: "Redis 集群管理", dbType: "redis", dbLabel: "Redis" } },

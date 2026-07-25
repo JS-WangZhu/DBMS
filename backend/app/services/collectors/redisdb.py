@@ -75,6 +75,7 @@ def collect_redis_status(instance, password):
             cluster_info = client.execute_command("CLUSTER INFO")
         except Exception:
             cluster_info = {}
+        cluster_state = cluster_info.get("cluster_state") if isinstance(cluster_info, dict) else None
 
         maxclients = _safe_int(info.get("maxclients"))
         if maxclients is None:
@@ -104,6 +105,7 @@ def collect_redis_status(instance, password):
             "redis_version": info.get("redis_version"),
             "redis_mode": info.get("redis_mode"),
             "cluster_enabled": _safe_int(info.get("cluster_enabled")),
+            "cluster_state": cluster_state,
             "role": redis_role,
             "master_host": master_host,
             "master_port": master_port,
@@ -125,6 +127,7 @@ def collect_redis_status(instance, password):
             "keyspace_db_count": keyspace_db_count,
             "keyspace_hits": info.get("keyspace_hits"),
             "keyspace_misses": info.get("keyspace_misses"),
+            "uptime": _safe_int(info.get("uptime_in_seconds")),
             "cluster_info": cluster_info,
             **host_metrics,
         }

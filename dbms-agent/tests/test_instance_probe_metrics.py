@@ -127,6 +127,72 @@ def test_mysql_agent_preserves_unknown_read_only_state(monkeypatch):
     assert payload["replication_role"] == "unknown"
 
 
+class FakeRedisClient:
+    def __init__(self, **_kwargs):
+        pass
+
+    def ping(self):
+        return True
+
+    def info(self, section=None):
+        if section == "replication":
+            return {
+                "role": "replica",
+                "master_host": "redis-primary",
+                "master_port": "6379",
+                "master_link_status": "up",
+            }
+        return {
+            "redis_version": "7.2.5",
+            "redis_mode": "standalone",
+            "cluster_enabled": "0",
+            "uptime_in_seconds": "3600",
+            "connected_clients": "25",
+            "maxclients": "100",
+            "used_memory": "200",
+            "used_memory_human": "200B",
+            "maxmemory": "1000",
+            "maxmemory_human": "1000B",
+            "used_memory_peak": "300",
+            "used_memory_peak_human": "300B",
+            "master_last_io_seconds_ago": "7",
+            "connected_slaves": "0",
+            "keyspace_hits": "90",
+            "keyspace_misses": "10",
+            "db0": {"keys": "12"},
+            "db3": {"keys": "8"},
+        }
+
+    def execute_command(self, command):
+        assert command == "CLUSTER INFO"
+        return {"cluster_state": "ok"}
+
+    def config_get(self, name):
+        assert name == "maxclients"
+        return {"maxclients": "100"}
+
+
+def test_redis_agent_collects_operational_metrics_without_host_metrics(monkeypatch):
+    monkeypatch.setitem(sys.modules, "redis", types.SimpleNamespace(Redis=FakeRedisClient))
+
+    payload = instance_probe._redis({"host_input": "redis-1", "port": 6379}, "secret")
+
+    assert payload["role"] == "slave"
+    assert payload["replication_source"] == "redis-primary:6379"
+    assert payload["replication_lag_seconds"] == 7
+    assert payload["connected_clients"] == 25
+    assert payload["maxclients"] == 100
+    assert payload["connection_usage_pct"] == 25.0
+    assert payload["memory_usage_pct"] == 20.0
+    assert payload["used_memory_peak"] == 300
+    assert payload["keyspace_total_keys"] == 20
+    assert payload["keyspace_db_count"] == 2
+    assert payload["keyspace_hits"] == 90
+    assert payload["keyspace_misses"] == 10
+    assert not any(key.startswith("host_") for key in payload)
+    assert "node_exporter_status" not in payload
+
+
 class FakeMongoAdmin:
     def command(self, command):
         if command == "ping":

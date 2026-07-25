@@ -1,13 +1,32 @@
 from flask import Blueprint, request
 
-from app.api.routes.common import active_user_required
+from app.api.routes.common import active_user_required, get_current_user, require_menu_permission
 from app.models.db_asset import DatabaseInstance
 from app.services.monitor_snapshot_service import latest_snapshot_for_instance
 from app.services.audit import log_audit
 from app.services.instance_service import create_instance, list_instances_paginated
+from app.services.mongodb_session_probe import (
+    SessionProbeError,
+    close_probe_session,
+    fetch_operations,
+    kill_operation,
+    start_probe_session,
+)
+from app.utils.crypto import decrypt_secret
 from app.utils.response import error_response, ok_response
 
 bp = Blueprint("mongodb", __name__, url_prefix="/mongodb")
+
+
+def _session_probe_error(exc):
+    message = str(exc)
+    if "does not belong" in message:
+        return error_response(message, code=403)
+    if "not found or expired" in message or message.endswith("expired"):
+        return error_response(message, code=410)
+    if "connect failed" in message or "fetch failed" in message or "kill mongodb" in message:
+        return error_response(message, code=502)
+    return error_response(message, code=400)
 
 
 @bp.get("/instances")
@@ -67,3 +86,59 @@ def mongodb_replica_status(instance_id):
     if not isinstance(repl, dict):
         repl = {}
     return ok_response(data={"instance_id": instance.id, "repl": repl})
+
+
+@bp.post("/session-probes")
+@require_menu_permission("mongodb_session_probe")
+def start_mongodb_session_probe():
+    payload = request.get_json(silent=True) or {}
+    try:
+        instance_id = int(payload.get("instance_id"))
+    except (TypeError, ValueError):
+        return error_response("instance_id is required", code=400)
+    instance = DatabaseInstance.query.filter_by(id=instance_id, db_type="mongodb", enabled=True).first()
+    if not instance:
+        return error_response("mongodb instance not found", code=404)
+    user = get_current_user()
+    password = decrypt_secret(instance.password_encrypted) if instance.password_encrypted else ""
+    try:
+        data = start_probe_session(instance=instance, password=password, user_id=user.id)
+    except SessionProbeError as exc:
+        return _session_probe_error(exc)
+    log_audit(user_id=user.id, action="mongodb.session_probe.start", target_type="instance", target_id=str(instance.id), detail={"expires_at": data.get("expires_at")})
+    return ok_response(data=data, code=201)
+
+
+@bp.get("/session-probes/<string:token>/operations")
+@require_menu_permission("mongodb_session_probe")
+def get_mongodb_operations(token):
+    try:
+        data = fetch_operations(token=token, user_id=get_current_user().id)
+    except SessionProbeError as exc:
+        return _session_probe_error(exc)
+    return ok_response(data=data)
+
+
+@bp.post("/session-probes/<string:token>/kill")
+@require_menu_permission("mongodb_session_probe")
+def kill_mongodb_operation(token):
+    payload = request.get_json(silent=True) or {}
+    operation_id = payload.get("operation_id")
+    if operation_id is None or not str(operation_id).strip():
+        return error_response("operation_id is required", code=400)
+    try:
+        data = kill_operation(token=token, user_id=get_current_user().id, operation_id=operation_id)
+    except SessionProbeError as exc:
+        return _session_probe_error(exc)
+    log_audit(user_id=get_current_user().id, action="mongodb.session_probe.kill", target_type="mongodb_operation", target_id=str(operation_id), detail={"probe_token_prefix": token[:8]})
+    return ok_response(data=data)
+
+
+@bp.post("/session-probes/<string:token>/stop")
+@require_menu_permission("mongodb_session_probe")
+def stop_mongodb_session_probe(token):
+    try:
+        closed = close_probe_session(token=token, user_id=get_current_user().id)
+    except SessionProbeError as exc:
+        return _session_probe_error(exc)
+    return ok_response(data={"closed": closed})

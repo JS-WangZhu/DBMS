@@ -57,7 +57,7 @@
             </el-menu-item>
           </el-sub-menu>
 
-          <el-sub-menu v-if="hasAnyMenu(['mongodb_instances','mongodb_clusters','mongodb_connections'])" index="db-mongodb">
+          <el-sub-menu v-if="hasAnyMenu(['mongodb_instances','mongodb_clusters','mongodb_connections','mongodb_session_probe'])" index="db-mongodb">
             <template #title>
               <el-icon class="db-brand-icon"><MongoIcon /></el-icon>
               <span>MongoDB</span>
@@ -73,6 +73,9 @@
             <el-menu-item v-if="hasMenu('mongodb_connections')" index="/databases/mongodb/connections">
               <el-icon><Link /></el-icon>
               <span>连接管理</span>
+            </el-menu-item>
+            <el-menu-item v-if="hasMenu('mongodb_session_probe')" index="/databases/mongodb/session-probe">
+              <el-icon><View /></el-icon><span>会话探测</span>
             </el-menu-item>
           </el-sub-menu>
 
@@ -454,6 +457,7 @@ const routePermissionMap = {
   "/databases/mongodb/instances": "mongodb_instances",
   "/databases/mongodb/clusters": "mongodb_clusters",
   "/databases/mongodb/connections": "mongodb_connections",
+  "/databases/mongodb/session-probe": "mongodb_session_probe",
   "/databases/redis/instances": "redis_instances",
   "/databases/redis/clusters": "redis_clusters",
   "/databases/redis/connections": "redis_connections",

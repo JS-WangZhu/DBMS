@@ -21,6 +21,47 @@ def _safe_int(value):
         return None
 
 
+def _redis_memory_usage_pct(used_memory, maxmemory):
+    used = _safe_int(used_memory)
+    maximum = _safe_int(maxmemory)
+    if used is None or maximum is None or maximum <= 0:
+        return None
+    return round(max(0.0, min(used / maximum * 100, 100.0)), 2)
+
+
+def _redis_connection_usage_pct(connected_clients, maxclients):
+    connected = _safe_int(connected_clients)
+    maximum = _safe_int(maxclients)
+    if connected is None or maximum is None or maximum <= 0:
+        return None
+    return round(max(0.0, min(connected / maximum * 100, 100.0)), 2)
+
+
+def _redis_keyspace_summary(info):
+    total_keys = 0
+    db_count = 0
+    for name, value in (info or {}).items():
+        if not str(name).startswith("db") or not isinstance(value, dict):
+            continue
+        keys = _safe_int(value.get("keys"))
+        if keys is None:
+            continue
+        total_keys += keys
+        db_count += 1
+    return total_keys, db_count
+
+
+def _redis_role(info):
+    role = str(info.get("role") or "").strip().lower()
+    if role in {"master", "slave"}:
+        return role
+    if role == "replica" or info.get("master_host"):
+        return "slave"
+    if _safe_int(info.get("connected_slaves")) not in (None, 0):
+        return "master"
+    return "unknown"
+
+
 def _bool_flag(value):
     if value is None:
         return None
@@ -351,6 +392,21 @@ def _redis(instance, password):
         cluster_info = client.execute_command("CLUSTER INFO") or {}
     except Exception:
         pass
+    maxclients = _safe_int(info.get("maxclients"))
+    if maxclients is None:
+        try:
+            maxclients = _safe_int((client.config_get("maxclients") or {}).get("maxclients"))
+        except Exception:
+            pass
+    used_memory = _safe_int(info.get("used_memory"))
+    maxmemory = _safe_int(info.get("maxmemory"))
+    connected_clients = _safe_int(info.get("connected_clients"))
+    total_keys, keyspace_db_count = _redis_keyspace_summary(info)
+    master_host = replication.get("master_host")
+    master_port = _safe_int(replication.get("master_port"))
+    replication_source = None
+    if master_host:
+        replication_source = f"{master_host}:{master_port}" if master_port is not None else str(master_host)
     return {
         "ok": ping_ok,
         "ping_ok": ping_ok,
@@ -363,11 +419,26 @@ def _redis(instance, password):
         "cluster_info": cluster_info,
         "uptime": _safe_int(info.get("uptime_in_seconds")),
         "connected_clients": _safe_int(info.get("connected_clients")),
-        "used_memory": _safe_int(info.get("used_memory")),
-        "role": replication.get("role"),
-        "master_host": replication.get("master_host"),
-        "master_port": _safe_int(replication.get("master_port")),
+        "used_memory": used_memory,
+        "used_memory_human": info.get("used_memory_human"),
+        "maxmemory": maxmemory,
+        "maxmemory_human": info.get("maxmemory_human"),
+        "memory_usage_pct": _redis_memory_usage_pct(used_memory, maxmemory),
+        "used_memory_peak": _safe_int(info.get("used_memory_peak")),
+        "used_memory_peak_human": info.get("used_memory_peak_human"),
+        "role": _redis_role(replication),
+        "master_host": master_host,
+        "master_port": master_port,
+        "replication_source": replication_source,
+        "replication_lag_seconds": _safe_int(replication.get("master_last_io_seconds_ago")),
         "master_link_status": replication.get("master_link_status"),
+        "connected_slaves": _safe_int(replication.get("connected_slaves")),
+        "maxclients": maxclients,
+        "connection_usage_pct": _redis_connection_usage_pct(connected_clients, maxclients),
+        "keyspace_total_keys": total_keys,
+        "keyspace_db_count": keyspace_db_count,
+        "keyspace_hits": _safe_int(info.get("keyspace_hits")),
+        "keyspace_misses": _safe_int(info.get("keyspace_misses")),
     }
 
 
