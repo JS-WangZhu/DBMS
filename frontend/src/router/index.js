@@ -95,7 +95,7 @@ const routes = [
       { path: "/databases/doris", redirect: "/databases/doris/instances" },
       { path: "/databases/doris/clusters", component: ClusterManageView, meta: { title: "Doris 集群管理", dbType: "doris", dbLabel: "Doris" } },
       { path: "/databases/doris/instances", component: InstanceManageView, meta: { title: "Doris 实例管理", dbType: "doris", dbLabel: "Doris" } },
-      { path: "/service/inspection", component: InspectionManageView, meta: { title: "巡检管理" } },
+      { path: "/service/inspection", component: InspectionManageView, meta: { title: "巡检状态" } },
 
       { path: "/backups/mysql-policies", component: BackupMysqlPolicyView, meta: { title: "MySQL策略" } },
       { path: "/backups/postgresql-policies", component: BackupPostgresqlPolicyView, meta: { title: "PostgreSQL策略" } },
@@ -121,7 +121,7 @@ const routes = [
       { path: "/config/ai-models", component: AIModelConfigView, meta: { title: "AI模型管理" } },
       { path: "/config/ha", component: HAConfigView, meta: { title: "高可用配置管理" } },
       { path: "/config/instance-status", component: InstanceStatusConfigView, meta: { title: "实例状态检测管理" } },
-      { path: "/config/inspection", component: InspectionParamConfigView, meta: { title: "巡检参数管理" } },
+      { path: "/config/inspection", component: InspectionParamConfigView, meta: { title: "巡检参数" } },
       { path: "/config/data-query-ops", component: DataQueryOpConfigView, meta: { title: "数据查询操作配置" } },
       { path: "/config/domain", component: DomainConfigManageView, meta: { title: "域名配置管理" } },
       { path: "/config/mcp-platform", component: McpPlatformView, meta: { title: "MCP开放平台" } },

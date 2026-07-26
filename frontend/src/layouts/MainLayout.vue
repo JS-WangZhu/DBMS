@@ -34,7 +34,7 @@
           </el-menu-item>
         </el-sub-menu>
 
-        <el-sub-menu v-if="hasAnyMenu(['mysql_instances','mysql_instance_detail','mysql_clusters','mysql_connections','mysql_session_probe','mongodb_instances','mongodb_clusters','mongodb_connections','redis_instances','redis_clusters','redis_connections','postgresql_instances','postgresql_clusters','doris_instances','doris_clusters','inspection_manage'])" index="service-manage">
+        <el-sub-menu v-if="hasAnyMenu(['mysql_instances','mysql_instance_detail','mysql_clusters','mysql_connections','mysql_session_probe','mongodb_instances','mongodb_clusters','mongodb_connections','redis_instances','redis_clusters','redis_connections','postgresql_instances','postgresql_clusters','doris_instances','doris_clusters'])" index="service-manage">
           <template #title>
             <el-icon><Menu /></el-icon>
             <span>服务管理</span>
@@ -138,10 +138,20 @@
             </el-menu-item>
           </el-sub-menu>
         </el-sub-menu>
-          <el-menu-item v-if="hasMenu('inspection_manage')" index="/service/inspection">
+        <el-sub-menu v-if="hasAnyMenu(['inspection_manage','inspection_param_config'])" index="inspection-manage">
+          <template #title>
             <el-icon><CircleCheck /></el-icon>
             <span>巡检管理</span>
+          </template>
+          <el-menu-item v-if="hasMenu('inspection_manage')" index="/service/inspection">
+            <el-icon><CircleCheck /></el-icon>
+            <span>巡检状态</span>
           </el-menu-item>
+          <el-menu-item v-if="hasMenu('inspection_param_config')" index="/config/inspection">
+            <el-icon><Setting /></el-icon>
+            <span>巡检参数</span>
+          </el-menu-item>
+        </el-sub-menu>
         <el-sub-menu v-if="hasAnyMenu(['data_query','data_change','data_history'])" index="data-access">
           <template #title>
             <el-icon><View /></el-icon>
@@ -261,7 +271,7 @@
           </el-menu-item>
         </el-sub-menu>
 
-        <el-sub-menu v-if="hasAnyMenu(['ai_model_config', 'ha_config', 'instance_status_config', 'inspection_param_config', 'data_query_op_config', 'backup_notify_targets', 'backup_agents', 'domain_config', 'mcp_platform', 'sso_config'])" index="config">
+        <el-sub-menu v-if="hasAnyMenu(['ai_model_config', 'ha_config', 'instance_status_config', 'data_query_op_config', 'backup_notify_targets', 'backup_agents', 'domain_config', 'mcp_platform', 'sso_config'])" index="config">
           <template #title>
             <el-icon><Management /></el-icon>
             <span>配置管理</span>
@@ -285,10 +295,6 @@
           <el-menu-item v-if="hasMenu('physical_discovery_manage')" index="/config/physical-discovery">
             <el-icon><Monitor /></el-icon>
             <span>物理机探测管理</span>
-          </el-menu-item>
-          <el-menu-item v-if="hasMenu('inspection_param_config')" index="/config/inspection">
-            <el-icon><Setting /></el-icon>
-            <span>巡检参数管理</span>
           </el-menu-item>
           <el-menu-item v-if="hasMenu('data_query_op_config')" index="/config/data-query-ops">
             <el-icon><DataAnalysis /></el-icon>
@@ -366,18 +372,21 @@
             </div>
           </Teleport>
         </div>
-        <router-view v-slot="{ Component }">
-          <keep-alive>
-            <component :is="Component" />
-          </keep-alive>
-        </router-view>
+        <div class="route-content" :class="{ 'is-entering': contentEntering }">
+          <router-view v-slot="{ Component }">
+            <keep-alive>
+              <component :is="Component" />
+            </keep-alive>
+          </router-view>
+        </div>
       </el-main>
     </el-container>
+    <QuickJump :items="quickJumpMenus" @select="onQuickJumpSelect" />
   </el-container>
 </template>
 
 <script setup>
-import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import {
   Avatar,
@@ -434,8 +443,10 @@ import MongoIcon from "../components/icons/MongoIcon.vue";
 import RedisIcon from "../components/icons/RedisIcon.vue";
 import PostgreSQLIcon from "../components/icons/PostgreSQLIcon.vue";
 import DorisIcon from "../components/icons/DorisIcon.vue";
+import QuickJump from "../components/QuickJump.vue";
 import { listMyUserPermissions } from "../api/modules/backups";
 import { logoutCurrentSession, startSessionMonitor } from "../services/authSession";
+import { QUICK_JUMP_MENUS } from "../utils/quickJump";
 
 const router = useRouter();
 const route = useRoute();
@@ -444,8 +455,10 @@ const tabs = ref([]);
 const activeTabId = ref("");
 const sidebarCollapsed = ref(false);
 const avatarLoadFailed = ref(false);
+const contentEntering = ref(false);
 let tabSeq = 0;
 let stopSessionMonitor = null;
+let contentAnimationTimer = null;
 
 const contextMenu = ref({
   visible: false,
@@ -509,6 +522,7 @@ const userId = computed(() => {
 
 const menuKeys = ref([]);
 const permissionsLoaded = ref(false);
+const quickJumpMenus = computed(() => QUICK_JUMP_MENUS.filter((item) => hasMenu(item.permission)));
 const routePermissionMap = {
   "/dashboard": "dashboard",
   "/resources/database-apply": "database_apply",
@@ -642,6 +656,12 @@ function onMenuSelect(index) {
   }
   if (route.path !== path) {
     router.push(path);
+  }
+}
+
+function onQuickJumpSelect(item) {
+  if (item?.path && item.path !== route.path) {
+    router.push(item.path);
   }
 }
 
@@ -789,11 +809,26 @@ function onTabDragEnd() {
   draggingTabId.value = "";
 }
 
+function playContentTransition() {
+  contentEntering.value = false;
+  if (contentAnimationTimer) {
+    window.clearTimeout(contentAnimationTimer);
+  }
+  nextTick(() => {
+    contentEntering.value = true;
+    contentAnimationTimer = window.setTimeout(() => {
+      contentEntering.value = false;
+      contentAnimationTimer = null;
+    }, 280);
+  });
+}
+
 watch(
   () => route.path,
   () => {
     ensureRouteTab(route);
     enforceRoutePermission();
+    playContentTransition();
   },
   { immediate: true },
 );
@@ -807,6 +842,7 @@ onMounted(() => {
 onUnmounted(() => {
   window.removeEventListener("click", onDocumentClick);
   if (stopSessionMonitor) stopSessionMonitor();
+  if (contentAnimationTimer) window.clearTimeout(contentAnimationTimer);
 });
 
 async function logout() {
@@ -1560,6 +1596,77 @@ async function logout() {
   padding-left: 12px;
   color: var(--brand);
   background: var(--brand-soft);
+}
+
+.route-content {
+  min-width: 0;
+  width: 100%;
+  transform-origin: top center;
+}
+
+.route-content.is-entering {
+  animation: routeContentIn 280ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+:deep(.sidebar .el-menu-item.is-active) {
+  animation: menuItemSelect 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+:deep(.sidebar .el-menu-item.is-active .el-icon) {
+  animation: menuIconIn 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+:deep(.sidebar .el-menu--inline) {
+  transform-origin: top;
+  animation: submenuIn 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes routeContentIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes menuItemSelect {
+  from {
+    opacity: 0.72;
+    transform: translateX(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes menuIconIn {
+  0% { transform: scale(0.84); }
+  70% { transform: scale(1.08); }
+  100% { transform: scale(1); }
+}
+
+@keyframes submenuIn {
+  from {
+    opacity: 0;
+    transform: translateY(-5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .route-content.is-entering,
+  :deep(.sidebar .el-menu-item.is-active),
+  :deep(.sidebar .el-menu-item.is-active .el-icon),
+  :deep(.sidebar .el-menu--inline) {
+    animation: none;
+  }
 }
 
 @media (max-width: 900px) {

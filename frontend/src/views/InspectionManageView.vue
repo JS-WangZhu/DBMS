@@ -3,7 +3,7 @@
     <el-card>
       <template #header>
         <div class="header-row">
-          <span>巡检管理</span>
+          <span>巡检状态</span>
           <div class="header-actions">
             <el-button type="primary" :loading="running" @click="runNow">立即巡检</el-button>
             <el-button :loading="loading" @click="loadData">刷新</el-button>

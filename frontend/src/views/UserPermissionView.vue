@@ -267,6 +267,7 @@ function buildMenuTree(catalog, disabled) {
       { key: "redis", label: "Redis", children: ["redis_instances", "redis_clusters"] },
       { key: "doris", label: "Doris", children: ["doris_instances", "doris_clusters"] },
     ] },
+    { key: "inspection", label: "巡检管理", children: ["inspection_manage", "inspection_param_config"] },
     { key: "data_access", label: "数据访问", children: ["data_query", "data_change", "data_history"] },
     { key: "task_management", label: "任务管理", children: ["task_schedule", "task_results"] },
     { key: "backup", label: "备份管理", children: [
@@ -274,7 +275,7 @@ function buildMenuTree(catalog, disabled) {
       "backup_records",
       { key: "backup_config", label: "配置管理", children: ["backup_tool_configs", "backup_s3_storage", "backup_keys"] },
     ] },
-    { key: "config", label: "配置管理", children: ["ai_model_config", "backup_agents", "ha_config", "instance_status_config", "inspection_param_config", "data_query_op_config", "backup_notify_targets", "mcp_platform", "sso_config"] },
+    { key: "config", label: "配置管理", children: ["ai_model_config", "backup_agents", "ha_config", "instance_status_config", "data_query_op_config", "backup_notify_targets", "mcp_platform", "sso_config"] },
     { key: "users", label: "用户管理", children: ["users_info", "users_permissions", "users_role_groups"] },
   ];
 

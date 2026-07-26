@@ -2,7 +2,7 @@
   <div class="page">
     <div class="page-header">
       <div class="page-header-left">
-        <div class="page-title">巡检参数管理</div>
+        <div class="page-title">巡检参数</div>
         <div class="page-subtitle">配置巡检周期、告警阈值与通知策略</div>
       </div>
       <div class="page-header-actions">
