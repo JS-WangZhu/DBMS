@@ -3,14 +3,14 @@
     <el-aside :width="sidebarCollapsed ? '72px' : '248px'" class="sidebar" :class="{ 'is-collapsed': sidebarCollapsed }">
       <div class="logo">
         <div class="logo-mark">D</div>
-        <div v-show="!sidebarCollapsed" class="logo-copy">
+        <div class="logo-copy">
           <strong>DBMS 数据库管理平台</strong>
         </div>
       </div>
       <el-menu
         :default-active="route.path"
         :collapse="sidebarCollapsed"
-        :collapse-transition="false"
+        :collapse-transition="true"
         @select="onMenuSelect"
       >
         <el-menu-item v-if="hasMenu('dashboard')" index="/dashboard">
@@ -1275,7 +1275,9 @@ async function logout() {
   background: #101828;
   box-shadow: 4px 0 16px rgba(16, 24, 40, 0.08);
   overflow-x: hidden;
-  transition: width 0.22s ease;
+  --el-transition-duration: 220ms;
+  transition: width 220ms linear;
+  will-change: width;
 }
 
 .logo {
@@ -1287,6 +1289,7 @@ async function logout() {
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   background: transparent;
   user-select: none;
+  transition: gap 220ms linear, padding 220ms linear;
 }
 
 .logo-mark {
@@ -1308,8 +1311,13 @@ async function logout() {
   min-width: 0;
   display: flex;
   flex-direction: column;
+  max-width: 180px;
+  overflow: hidden;
   line-height: 1.2;
   white-space: nowrap;
+  opacity: 1;
+  transform: translateX(0);
+  transition: max-width 220ms linear, opacity 160ms linear, transform 220ms linear;
 }
 
 .logo-copy strong {
@@ -1321,7 +1329,15 @@ async function logout() {
 
 .sidebar.is-collapsed .logo {
   justify-content: center;
+  gap: 0;
   padding: 0;
+}
+
+.sidebar.is-collapsed .logo-copy {
+  max-width: 0;
+  opacity: 0;
+  transform: translateX(-6px);
+  pointer-events: none;
 }
 
 :deep(.sidebar .el-menu) {
@@ -1339,6 +1355,14 @@ async function logout() {
 
 :deep(.sidebar .el-menu--collapse) {
   width: auto;
+}
+
+:deep(.sidebar .horizontal-collapse-transition) {
+  transition: width 220ms linear, padding-left 220ms linear, padding-right 220ms linear;
+}
+
+:deep(.sidebar .collapse-transition) {
+  transition: height 220ms linear, padding-top 220ms linear, padding-bottom 220ms linear;
 }
 
 :deep(.sidebar .el-menu-item),
@@ -1714,11 +1738,6 @@ async function logout() {
   animation: menuIconIn 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
-:deep(.sidebar .el-menu--inline) {
-  transform-origin: top;
-  animation: submenuIn 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
-}
-
 @keyframes routeContentIn {
   from {
     opacity: 0;
@@ -1747,22 +1766,10 @@ async function logout() {
   100% { transform: scale(1); }
 }
 
-@keyframes submenuIn {
-  from {
-    opacity: 0;
-    transform: translateY(-5px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
 @media (prefers-reduced-motion: reduce) {
   .route-content.is-entering,
   :deep(.sidebar .el-menu-item.is-active),
-  :deep(.sidebar .el-menu-item.is-active .el-icon),
-  :deep(.sidebar .el-menu--inline) {
+  :deep(.sidebar .el-menu-item.is-active .el-icon) {
     animation: none;
   }
 }
