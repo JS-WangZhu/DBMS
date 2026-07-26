@@ -129,3 +129,97 @@ def test_mcp_status_exposes_redis_operational_metrics(app, monkeypatch):
             "connected_slaves": 2,
             "replication_source": "redis-primary:6379",
         }
+
+def test_mcp_metrics_expose_all_safe_collector_status_fields():
+    from app.services import mcp_status
+
+    common_keys = {
+        "warnings",
+        "node_exporter_enabled",
+        "node_exporter_mode",
+        "node_exporter_status",
+        "node_exporter_error",
+        "host_cpu_usage_pct",
+        "host_cpu_cores",
+        "host_memory_usage_pct",
+        "host_memory_total_bytes",
+        "host_data_disk_usage_pct",
+        "host_data_disk_mountpoint",
+        "host_data_disk_device",
+        "host_data_disk_size_bytes",
+        "host_disk_io_latency_ms",
+        "host_disk_io_device",
+        "host_disk_entries",
+        "host_net_rates",
+    }
+    database_keys = {
+        "mysql": {
+            "uptime", "started_at", "threads_connected", "connections_current",
+            "threads_running", "max_connections", "connection_usage_pct",
+            "connections_usage_pct", "questions_total", "com_commit_total",
+            "com_rollback_total", "qps", "tps", "lock_waits", "read_only",
+            "super_read_only", "effective_read_only", "mgr_member_role",
+            "mgr_member_state", "mgr_group_name", "mgr_members",
+            "replica_io_running", "replica_sql_running", "replica_source_host",
+            "replica_source_resolved_ip", "replica_source_port",
+            "seconds_behind_master",
+        },
+        "mongodb": {
+            "process", "mongo_topology", "started_at", "uptime",
+            "connections_current", "connections_max", "connection_usage_pct",
+            "connections_usage_pct", "lock_waits", "repl_lag_seconds",
+            "replication_lag_seconds", "op_insert", "op_query", "op_update",
+            "op_delete", "op_read", "op_write", "op_read_pct", "op_write_pct",
+            "cache_used_pct", "connections", "mem", "repl",
+        },
+        "redis": {
+            "uptime", "redis_mode", "cluster_enabled", "cluster_state",
+            "cluster_info", "master_host", "master_port", "master_link_status",
+            "connected_slaves", "replication_source", "replication_lag_seconds",
+            "connected_clients", "maxclients", "connection_usage_pct",
+            "connections_usage_pct",
+            "used_memory", "used_memory_human", "maxmemory", "maxmemory_human",
+            "memory_usage_pct", "used_memory_peak", "used_memory_peak_human",
+            "keyspace_total_keys", "keyspace_db_count", "keyspace_hits",
+            "keyspace_misses",
+        },
+        "postgresql": {
+            "database", "uptime", "in_recovery", "replication_lag_seconds",
+            "replication_lag_bytes", "receive_lag_bytes", "replay_lag_bytes",
+            "wal_current_lsn", "wal_source_lsn", "wal_receive_lsn",
+            "wal_replay_lsn", "wal_receiver_status", "wal_last_message_at",
+            "replay_paused", "replica_count", "connections",
+            "connections_current", "active_connections",
+            "lock_waiting_connections", "max_connections",
+            "connection_usage_pct", "connections_usage_pct", "xact_commit",
+            "xact_rollback", "deadlocks", "database_size_bytes",
+        },
+        "doris": {
+            "frontend_count", "frontend_alive_count", "backend_count",
+            "backend_alive_count", "frontends", "backends",
+        },
+    }
+
+    for db_type, db_keys in database_keys.items():
+        expected_keys = common_keys | db_keys
+        payload = {key: {"sample": key} for key in expected_keys}
+        payload["internal_secret"] = "must-not-leak"
+
+        metrics = mcp_status._metrics(payload, db_type)
+
+        assert set(metrics) == expected_keys
+        assert "internal_secret" not in metrics
+
+
+def test_mcp_alerts_accept_mongodb_replication_lag_name():
+    from app.services import mcp_status
+
+    alerts = mcp_status._alerts(
+        instance=None,
+        payload={"repl_lag_seconds": 90},
+        snapshot=SimpleNamespace(),
+        status="running",
+        age=0,
+    )
+
+    assert "replication_lag" in alerts

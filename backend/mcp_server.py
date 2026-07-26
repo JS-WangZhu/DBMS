@@ -63,7 +63,7 @@ def _list_tools() -> Dict[str, Any]:
         "tools": [
             {
                 "name": TOOL_NAME,
-                "description": "Query DBMS latest database instance status details for MySQL, MongoDB, Redis and Doris.",
+                "description": "Query DBMS latest database instance status details for MySQL, MongoDB, Redis, PostgreSQL and Doris.",
                 "inputSchema": _tool_schema(),
             }
         ]

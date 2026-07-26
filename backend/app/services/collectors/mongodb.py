@@ -112,8 +112,10 @@ def _try_collect_arbiter_without_auth(instance):
                 "uptime": None,
                 "connections_current": None,
                 "connections_max": None,
+                "connection_usage_pct": None,
                 "lock_waits": None,
                 "repl_lag_seconds": None,
+                "replication_lag_seconds": None,
                 "op_insert": None,
                 "op_query": None,
                 "op_update": None,
@@ -240,6 +242,9 @@ def collect_mongodb_status(instance, password):
                 connections_max = int(connections_current) + int(connections_available)
             except Exception:
                 connections_max = None
+        connection_usage_pct = None
+        if connections_max and connections_current is not None:
+            connection_usage_pct = round(float(connections_current) * 100 / connections_max, 2)
 
         opcounters = status.get("opcounters", {})
         op_insert = opcounters.get("insert")
@@ -364,8 +369,11 @@ def collect_mongodb_status(instance, password):
             "uptime": uptime,
             "connections_current": connections_current,
             "connections_max": connections_max,
+            "connection_usage_pct": connection_usage_pct,
+            "connections_usage_pct": connection_usage_pct,
             "lock_waits": lock_waits,
             "repl_lag_seconds": repl_lag_seconds,
+            "replication_lag_seconds": repl_lag_seconds,
             "op_insert": op_insert,
             "op_query": op_query,
             "op_update": op_update,

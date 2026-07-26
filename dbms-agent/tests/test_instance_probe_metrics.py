@@ -102,6 +102,8 @@ def test_mysql_agent_collects_operational_and_replication_metrics(monkeypatch):
     assert payload["threads_connected"] == 12
     assert payload["threads_running"] == 3
     assert payload["max_connections"] == 200
+    assert payload["connections_current"] == 12
+    assert payload["connection_usage_pct"] == 6.0
     assert payload["qps"] == 5.0
     assert payload["tps"] == 0.5
     assert payload["lock_waits"] == 2
@@ -255,8 +257,10 @@ def test_mongodb_agent_collects_full_database_metrics(monkeypatch):
     assert payload["mongo_topology"] == "replica_set"
     assert payload["connections_current"] == 20
     assert payload["connections_max"] == 100
+    assert payload["connection_usage_pct"] == 20.0
     assert payload["lock_waits"] == 2
     assert payload["repl_lag_seconds"] == 3
+    assert payload["replication_lag_seconds"] == 3
     assert payload["cache_used_pct"] == 25.0
     assert payload["op_read"] == 12
     assert payload["op_write"] == 8
@@ -266,3 +270,64 @@ def test_mongodb_agent_collects_full_database_metrics(monkeypatch):
     assert FakeMongoClient.last_options["directConnection"] is True
     assert FakeMongoClient.last_options["tls"] is True
     assert not any(key.startswith("host_") for key in payload)
+
+
+class FakeDorisCursor:
+    def __init__(self):
+        self.statement = None
+        self.description = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return False
+
+    def execute(self, statement):
+        self.statement = statement
+        if statement == "SHOW FRONTENDS":
+            self.description = [("Name",), ("Alive",)]
+        elif statement == "SHOW BACKENDS":
+            self.description = [("BackendId",), ("Alive",)]
+
+    def fetchone(self):
+        return (1, "Apache Doris 3.0")
+
+    def fetchall(self):
+        if self.statement == "SHOW FRONTENDS":
+            return [("fe-1", "true"), ("fe-2", "false")]
+        if self.statement == "SHOW BACKENDS":
+            return [(1, True), (2, True), (3, False)]
+        return []
+
+
+class FakeDorisConnection:
+    def __init__(self):
+        self.closed = False
+
+    def cursor(self):
+        return FakeDorisCursor()
+
+    def close(self):
+        self.closed = True
+
+
+def test_doris_agent_collects_frontend_and_backend_health(monkeypatch):
+    connection = FakeDorisConnection()
+    monkeypatch.setitem(
+        sys.modules,
+        "pymysql",
+        types.SimpleNamespace(connect=lambda **_kwargs: connection),
+    )
+
+    payload = instance_probe._doris({"host_input": "doris-fe", "port": 9030}, "secret")
+
+    assert payload["ping_ok"] is True
+    assert payload["frontend_count"] == 2
+    assert payload["frontend_alive_count"] == 1
+    assert payload["backend_count"] == 3
+    assert payload["backend_alive_count"] == 2
+    assert payload["frontends"][0]["Name"] == "fe-1"
+    assert payload["backends"][0]["BackendId"] == 1
+    assert payload["warnings"] == []
+    assert connection.closed is True

@@ -116,6 +116,7 @@ def collect_redis_status(instance, password):
             "connected_clients": connected_clients,
             "maxclients": maxclients,
             "connection_usage_pct": _connection_usage_pct(connected_clients, maxclients),
+            "connections_usage_pct": _connection_usage_pct(connected_clients, maxclients),
             "used_memory": used_memory,
             "used_memory_human": info.get("used_memory_human"),
             "maxmemory": maxmemory,

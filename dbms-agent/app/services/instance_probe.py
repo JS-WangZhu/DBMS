@@ -280,8 +280,11 @@ def _mysql(instance, password):
             lock_waits = _safe_int(status_value("Innodb_row_lock_current_waits"))
             qps = round(questions_total / uptime, 3) if uptime and questions_total is not None else None
             tps = None
+            connection_usage_pct = None
             if uptime and (com_commit_total is not None or com_rollback_total is not None):
                 tps = round(((com_commit_total or 0) + (com_rollback_total or 0)) / uptime, 3)
+            if max_connections and threads_connected is not None:
+                connection_usage_pct = round(threads_connected * 100 / max_connections, 2)
 
             payload = {
                 "ok": ping_ok,
@@ -292,8 +295,11 @@ def _mysql(instance, password):
                 "started_at": (datetime.now() - timedelta(seconds=uptime)).isoformat() if uptime is not None else None,
                 "threads_connected": threads_connected,
                 "threads_running": threads_running,
+                "connections_current": threads_connected,
                 "max_connections": max_connections,
                 "questions_total": questions_total,
+                "connection_usage_pct": connection_usage_pct,
+                "connections_usage_pct": connection_usage_pct,
                 "com_commit_total": com_commit_total,
                 "com_rollback_total": com_rollback_total,
                 "qps": qps,
@@ -430,11 +436,14 @@ def _redis(instance, password):
         "master_host": master_host,
         "master_port": master_port,
         "replication_source": replication_source,
-        "replication_lag_seconds": _safe_int(replication.get("master_last_io_seconds_ago")),
+        "replication_lag_seconds": _safe_int(
+            replication.get("master_last_io_seconds_ago", info.get("master_last_io_seconds_ago"))
+        ),
         "master_link_status": replication.get("master_link_status"),
-        "connected_slaves": _safe_int(replication.get("connected_slaves")),
+        "connected_slaves": _safe_int(replication.get("connected_slaves", info.get("connected_slaves"))),
         "maxclients": maxclients,
         "connection_usage_pct": _redis_connection_usage_pct(connected_clients, maxclients),
+        "connections_usage_pct": _redis_connection_usage_pct(connected_clients, maxclients),
         "keyspace_total_keys": total_keys,
         "keyspace_db_count": keyspace_db_count,
         "keyspace_hits": _safe_int(info.get("keyspace_hits")),
@@ -553,6 +562,9 @@ def _mongodb(instance, password):
             pass
 
         uptime = _safe_int(status.get("uptime"))
+        connection_usage_pct = None
+        if maximum and current is not None:
+            connection_usage_pct = round(float(current) * 100 / maximum, 2)
         return {
             "ok": ping.get("ok") == 1.0,
             "ping_ok": ping.get("ok") == 1.0,
@@ -567,8 +579,11 @@ def _mongodb(instance, password):
             "connections_max": maximum,
             "lock_waits": _safe_int(((status.get("globalLock") or {}).get("currentQueue") or {}).get("total")),
             "repl_lag_seconds": repl_lag_seconds,
+            "connection_usage_pct": connection_usage_pct,
+            "connections_usage_pct": connection_usage_pct,
             "op_insert": op_insert,
             "op_query": op_query,
+            "replication_lag_seconds": repl_lag_seconds,
             "op_update": op_update,
             "op_delete": op_delete,
             "op_read": op_read,
@@ -693,8 +708,10 @@ def _postgresql(instance, password):
                 "connections": connections,
                 "active_connections": _safe_int(activity[1]),
                 "lock_waiting_connections": _safe_int(activity[2]),
+                "connections_current": connections,
                 "max_connections": max_connections,
                 "connection_usage_pct": round(connections * 100 / max_connections, 2) if max_connections and connections is not None else None,
+                "connections_usage_pct": round(connections * 100 / max_connections, 2) if max_connections and connections is not None else None,
                 "xact_commit": _safe_int(stats[0]),
                 "xact_rollback": _safe_int(stats[1]),
                 "deadlocks": _safe_int(stats[2]),
@@ -702,6 +719,29 @@ def _postgresql(instance, password):
             }
     finally:
         conn.close()
+
+
+def _doris_show_rows(cursor, statement):
+    cursor.execute(statement)
+    columns = [item[0] for item in cursor.description or []]
+    return [
+        {
+            columns[index]: value.isoformat() if hasattr(value, "isoformat") else value
+            for index, value in enumerate(row)
+        }
+        for row in (cursor.fetchall() or [])
+    ]
+
+
+def _doris_alive_count(rows):
+    if rows is None:
+        return None
+    total = 0
+    for row in rows:
+        alive = next((value for key, value in row.items() if str(key).lower() == "alive"), None)
+        if str(alive).strip().lower() in {"true", "1", "yes", "on"}:
+            total += 1
+    return total
 
 
 def _doris(instance, password):
@@ -720,7 +760,31 @@ def _doris(instance, password):
         with conn.cursor() as cursor:
             cursor.execute("SELECT 1, VERSION()")
             row = cursor.fetchone()
-            return {"ok": bool(row and row[0] == 1), "ping_ok": bool(row and row[0] == 1), "db_type": "doris", "version": row[1] if row else None}
+            ping_ok = bool(row and row[0] == 1)
+            warnings = []
+            frontends = None
+            backends = None
+            try:
+                frontends = _doris_show_rows(cursor, "SHOW FRONTENDS")
+            except Exception as exc:
+                warnings.append(f"frontends:{exc}")
+            try:
+                backends = _doris_show_rows(cursor, "SHOW BACKENDS")
+            except Exception as exc:
+                warnings.append(f"backends:{exc}")
+            return {
+                "ok": ping_ok,
+                "ping_ok": ping_ok,
+                "db_type": "doris",
+                "version": row[1] if row else None,
+                "frontend_count": len(frontends) if frontends is not None else None,
+                "frontend_alive_count": _doris_alive_count(frontends),
+                "backend_count": len(backends) if backends is not None else None,
+                "backend_alive_count": _doris_alive_count(backends),
+                "frontends": frontends,
+                "backends": backends,
+                "warnings": warnings,
+            }
     finally:
         conn.close()
 

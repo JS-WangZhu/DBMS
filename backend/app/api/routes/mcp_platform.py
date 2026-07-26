@@ -125,7 +125,7 @@ def _mcp_tools():
     return [
         {
             "name": MCP_TOOL_NAME,
-            "description": "Query DBMS latest database instance status details for MySQL, MongoDB, Redis and Doris.",
+            "description": "Query DBMS latest database instance status details for MySQL, MongoDB, Redis, PostgreSQL and Doris.",
             "inputSchema": _mcp_tool_schema(),
         }
     ]

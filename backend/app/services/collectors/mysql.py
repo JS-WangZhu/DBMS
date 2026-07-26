@@ -193,12 +193,15 @@ def collect_mysql_status(instance, password):
         replica_source_resolved_ip = resolve_host(replica_source_host_value) if replica_source_host_value else None
         qps = None
         tps = None
+        connection_usage_pct = None
         if uptime and uptime > 0:
             if questions_total is not None:
                 qps = round(questions_total / uptime, 3)
 
             if com_commit_total is not None or com_rollback_total is not None:
                 tps = round(((com_commit_total or 0) + (com_rollback_total or 0)) / uptime, 3)
+        if max_connections and threads_connected is not None:
+            connection_usage_pct = round(threads_connected * 100 / max_connections, 2)
 
         return {
             "ok": True,
@@ -207,8 +210,11 @@ def collect_mysql_status(instance, password):
             "collected_at": datetime.now().isoformat(),
             "version": version,
             "uptime": uptime,
+            "connections_current": threads_connected,
             "threads_connected": threads_connected,
             "threads_running": threads_running,
+            "connection_usage_pct": connection_usage_pct,
+            "connections_usage_pct": connection_usage_pct,
             "max_connections": max_connections,
             "questions_total": questions_total,
             "com_commit_total": com_commit_total,

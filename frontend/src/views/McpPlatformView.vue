@@ -38,7 +38,7 @@
       <el-descriptions class="capabilities" :column="2" border>
         <el-descriptions-item label="认证方式">Header: X-API-Key</el-descriptions-item>
         <el-descriptions-item label="能力范围">instance_status:read</el-descriptions-item>
-        <el-descriptions-item label="覆盖数据库">MySQL / MongoDB / Redis / Doris</el-descriptions-item>
+        <el-descriptions-item label="覆盖数据库">MySQL / MongoDB / Redis / PostgreSQL / Doris</el-descriptions-item>
         <el-descriptions-item label="返回内容">集群、实例、角色、连通性、版本、指标、告警、最新采集时间</el-descriptions-item>
       </el-descriptions>
 
@@ -172,7 +172,7 @@ const toolSchemaSnippet = computed(() => JSON.stringify({
   name: "dbms_get_latest_instance_status",
   description: "查询 DBMS 内所有数据库实例的最新状态明细",
   arguments: {
-    db_type: "mysql | mongodb | redis | doris，可选",
+    db_type: "mysql | mongodb | redis | postgresql | doris，可选",
     business_line: "业务线，可选",
     environment: "环境，可选",
     cluster_id: "集群ID，可选",
