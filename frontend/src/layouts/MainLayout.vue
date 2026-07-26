@@ -1585,7 +1585,6 @@ async function logout() {
   background: #fff;
   border-color: #cbd6e5 !important;
   box-shadow: 0 3px 9px rgba(31, 45, 61, 0.08);
-  transform: translateY(-1px);
 }
 
 :deep(.tabs-wrap .el-tabs--card > .el-tabs__header .el-tabs__item.is-active) {

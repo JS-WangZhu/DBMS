@@ -55,11 +55,17 @@ body {
 
 #app .el-avatar,
 #app .el-radio__inner,
-#app .el-switch__core,
-#app .el-switch__action,
 #app .el-badge__content.is-dot,
 #app .ai-loading-dot {
   border-radius: 50% !important;
+}
+
+#app .el-switch__core {
+  border-radius: 5px !important;
+}
+
+#app .el-switch__action {
+  border-radius: 3px !important;
 }
 
 body > .el-overlay .el-dialog,
