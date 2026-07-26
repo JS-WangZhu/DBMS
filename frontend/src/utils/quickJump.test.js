@@ -18,6 +18,10 @@ test("keeps English product names in initials", () => {
   assert.equal(filterQuickJumpMenus(QUICK_JUMP_MENUS, "mysqlslxq")[0].path, "/databases/mysql/instance-detail");
 });
 
+test("finds MongoDB instance detail by pinyin initials", () => {
+  assert.equal(filterQuickJumpMenus(QUICK_JUMP_MENUS, "mongodbslxq")[0].path, "/databases/mongodb/instance-detail");
+});
+
 test("returns no result for an unknown keyword", () => {
   assert.deepEqual(filterQuickJumpMenus(QUICK_JUMP_MENUS, "not-a-menu"), []);
 });

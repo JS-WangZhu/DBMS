@@ -33,6 +33,7 @@ MENU_CATALOG = [
     {"key": "mysql_connections", "label": "MySQL 连接管理"},
     {"key": "mysql_session_probe", "label": "MySQL 会话探测"},
     {"key": "mongodb_instances", "label": "MongoDB 实例管理"},
+    {"key": "mongodb_instance_detail", "label": "MongoDB 实例详情"},
     {"key": "mongodb_clusters", "label": "MongoDB 集群管理"},
     {"key": "mongodb_connections", "label": "MongoDB 连接管理"},
     {"key": "mongodb_session_probe", "label": "MongoDB 会话探测"},

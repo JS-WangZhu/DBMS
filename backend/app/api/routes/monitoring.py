@@ -2,9 +2,9 @@
 
 import math
 
-from flask import Blueprint, current_app, request
+from flask import Blueprint, current_app, g, request
 
-from app.api.routes.common import active_user_required, require_menu_permission
+from app.api.routes.common import active_user_required, get_effective_menu_keys
 from app.extensions import db
 from app.models.db_asset import DatabaseInstance
 from app.services.monitor_snapshot_service import (
@@ -83,11 +83,14 @@ def latest_snapshot(instance_id):
 
 
 @bp.get("/instance/<int:instance_id>/performance")
-@require_menu_permission("mysql_instance_detail")
+@active_user_required
 def get_instance_performance(instance_id):
     instance = DatabaseInstance.query.get_or_404(instance_id)
-    if instance.db_type != "mysql":
-        return error_response("performance detail currently supports mysql only", code=400)
+    if instance.db_type not in {"mysql", "mongodb"}:
+        return error_response("performance detail supports mysql and mongodb only", code=400)
+    permission_key = f"{instance.db_type}_instance_detail"
+    if g.current_user.role != "admin" and permission_key not in get_effective_menu_keys(g.current_user.id):
+        return error_response("permission denied", code=403)
     try:
         hours = int(request.args.get("hours", "24"))
     except (TypeError, ValueError):
@@ -136,6 +139,10 @@ def get_instance_performance(instance_id):
             "network_tx_bps": tx_bps,
             "sessions": payload.get("threads_connected"),
             "running_sessions": payload.get("threads_running"),
+            "connections_current": (
+                payload.get("threads_connected") if instance.db_type == "mysql" else payload.get("connections_current")
+            ),
+            "wiredtiger_cache_used_pct": payload.get("cache_used_pct") if instance.db_type == "mongodb" else None,
             "lock_waits": payload.get("lock_waits"),
         })
     return ok_response(data={

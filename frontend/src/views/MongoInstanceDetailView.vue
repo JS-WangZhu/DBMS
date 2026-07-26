@@ -3,7 +3,7 @@
     <el-card class="toolbar-card" shadow="never">
       <div class="toolbar-header">
         <div>
-          <div class="page-title">MySQL 实例详情</div>
+          <div class="page-title">MongoDB 实例详情</div>
           <div class="page-subtitle">性能数据来自实例状态快照</div>
         </div>
       </div>
@@ -27,8 +27,8 @@
           </el-select>
         </div>
         <div class="filter-item filter-item--instance">
-          <label>MySQL 实例</label>
-          <el-select v-model="instanceId" filterable placeholder="请选择 MySQL 实例" @change="loadPerformance">
+          <label>MongoDB 实例</label>
+          <el-select v-model="instanceId" filterable placeholder="请选择 MongoDB 实例" @change="loadPerformance">
             <el-option
               v-for="item in filteredInstances"
               :key="item.id"
@@ -82,7 +82,7 @@
 
     <section class="section-block" v-loading="loading">
       <div class="section-heading">
-        <div><h2>数据库运行指标</h2><span>运行会话、连接数与锁等待趋势</span></div>
+        <div><h2>数据库运行指标</h2><span>WiredTiger 缓存与连接趋势</span></div>
       </div>
       <div class="chart-grid database-grid">
         <el-card v-for="chart in databaseCharts" :key="chart.key" class="chart-card" shadow="hover">
@@ -132,9 +132,13 @@ const basicCharts = [
   },
 ];
 const databaseCharts = [
-  { key: "sessions", title: "运行会话数", fields: [{ key: "running_sessions", name: "运行会话", color: "#f56c6c" }], unit: "" },
+  {
+    key: "wiredtigerCache",
+    title: "WiredTiger 缓存使用率",
+    fields: [{ key: "wiredtiger_cache_used_pct", name: "缓存使用率", color: "#22a06b" }],
+    unit: "%",
+  },
   { key: "connections", title: "连接数", fields: [{ key: "connections_current", name: "当前连接", color: "#409eff" }], unit: "" },
-  { key: "locks", title: "锁等待数量", fields: [{ key: "lock_waits", name: "锁等待", color: "#e6a23c" }], unit: "" },
 ];
 
 const latestPoint = computed(() => points.value.length ? points.value[points.value.length - 1] : null);
@@ -286,21 +290,21 @@ function resizeCharts() {
 
 async function loadInstances() {
   try {
-    const response = await listInstances("mysql");
+    const response = await listInstances("mongodb");
     instances.value = response.data?.data || [];
     if (!instanceId.value && instances.value.length) instanceId.value = instances.value[0].id;
   } catch (error) {
-    ElMessage.error(error.response?.data?.message || "MySQL 实例加载失败");
+    ElMessage.error(error.response?.data?.message || "MongoDB 实例加载失败");
   }
 }
 
 async function loadClusters() {
   try {
-    const response = await listClusters("mysql");
+    const response = await listClusters("mongodb");
     clusters.value = response.data?.data || [];
   } catch (error) {
     clusters.value = [];
-    ElMessage.error(error.response?.data?.message || "MySQL 集群加载失败");
+    ElMessage.error(error.response?.data?.message || "MongoDB 集群加载失败");
   }
 }
 

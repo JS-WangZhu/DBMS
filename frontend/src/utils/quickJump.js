@@ -13,6 +13,7 @@ export const QUICK_JUMP_MENUS = [
   menu("mysql_connections", "/databases/mysql/connections", "MySQL 连接管理", "服务管理 / MySQL", "mysql lian jie guan li"),
   menu("mysql_session_probe", "/databases/mysql/session-probe", "MySQL 会话探测", "服务管理 / MySQL", "mysql hui hua tan ce"),
   menu("mongodb_instances", "/databases/mongodb/instances", "MongoDB 实例管理", "服务管理 / MongoDB", "mongodb shi li guan li"),
+  menu("mongodb_instance_detail", "/databases/mongodb/instance-detail", "MongoDB 实例详情", "服务管理 / MongoDB", "mongodb shi li xiang qing"),
   menu("mongodb_clusters", "/databases/mongodb/clusters", "MongoDB 集群管理", "服务管理 / MongoDB", "mongodb ji qun guan li"),
   menu("mongodb_connections", "/databases/mongodb/connections", "MongoDB 连接管理", "服务管理 / MongoDB", "mongodb lian jie guan li"),
   menu("mongodb_session_probe", "/databases/mongodb/session-probe", "MongoDB 会话探测", "服务管理 / MongoDB", "mongodb hui hua tan ce"),

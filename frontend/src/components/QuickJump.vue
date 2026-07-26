@@ -62,7 +62,7 @@ const iconMap = {
   database_apply: CirclePlus, database_recycle: Delete, application_history: Document,
   mysql_instances: MysqlIcon, mysql_instance_detail: TrendCharts, mysql_clusters: Share,
   mysql_connections: Connection, mysql_session_probe: View,
-  mongodb_instances: MongoIcon, mongodb_clusters: FolderOpened, mongodb_connections: Link,
+  mongodb_instances: MongoIcon, mongodb_instance_detail: TrendCharts, mongodb_clusters: FolderOpened, mongodb_connections: Link,
   mongodb_session_probe: View,
   redis_instances: RedisIcon, redis_clusters: Coin, redis_connections: Promotion,
   postgresql_instances: PostgreSQLIcon, postgresql_clusters: Coin,

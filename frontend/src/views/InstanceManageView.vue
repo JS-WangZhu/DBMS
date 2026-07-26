@@ -207,7 +207,7 @@
           <template #header>
             <span class="metric-header">
               CPU
-              <el-popover placement="bottom" width="170" trigger="click">
+              <el-popover placement="bottom" width="210" trigger="click">
                 <div class="metric-filter-panel">
                   <span>大于</span>
                   <el-input-number v-model="metricFilters.cpu" :min="0" :max="100" :precision="1" size="small" controls-position="right" />
@@ -231,7 +231,7 @@
           <template #header>
             <span class="metric-header">
               内存
-              <el-popover placement="bottom" width="170" trigger="click">
+              <el-popover placement="bottom" width="210" trigger="click">
                 <div class="metric-filter-panel">
                   <span>大于</span>
                   <el-input-number v-model="metricFilters.memory" :min="0" :max="100" :precision="1" size="small" controls-position="right" />
@@ -255,7 +255,7 @@
           <template #header>
             <span class="metric-header">
               数据盘
-              <el-popover placement="bottom" width="170" trigger="click">
+              <el-popover placement="bottom" width="210" trigger="click">
                 <div class="metric-filter-panel">
                   <span>大于</span>
                   <el-input-number v-model="metricFilters.disk" :min="0" :max="100" :precision="1" size="small" controls-position="right" />
@@ -2998,9 +2998,18 @@ watch(
 
 .metric-filter-panel {
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
+}
+
+.metric-filter-panel :deep(.el-input-number) {
+  width: 100%;
+  min-width: 0;
+}
+
+.metric-filter-panel :deep(.el-input__inner) {
+  font-variant-numeric: tabular-nums;
 }
 
 .metric-filter-panel .el-button {

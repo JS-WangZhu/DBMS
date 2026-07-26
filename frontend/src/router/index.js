@@ -30,6 +30,7 @@ import LoginView from "../views/LoginView.vue";
 import McpPlatformView from "../views/McpPlatformView.vue";
 import MysqlConnectionManageView from "../views/MysqlConnectionManageView.vue";
 import MysqlInstanceDetailView from "../views/MysqlInstanceDetailView.vue";
+import MongoInstanceDetailView from "../views/MongoInstanceDetailView.vue";
 import MysqlSessionProbeView from "../views/MysqlSessionProbeView.vue";
 import MongoSessionProbeView from "../views/MongoSessionProbeView.vue";
 import MongoConnectionManageView from "../views/MongoConnectionManageView.vue";
@@ -80,6 +81,7 @@ const routes = [
       { path: "/databases/mongodb", redirect: "/databases/mongodb/instances" },
       { path: "/databases/mongodb/clusters", component: ClusterManageView, meta: { title: "MongoDB 集群管理", dbType: "mongodb", dbLabel: "MongoDB" } },
       { path: "/databases/mongodb/instances", component: InstanceManageView, meta: { title: "MongoDB 实例管理", dbType: "mongodb", dbLabel: "MongoDB" } },
+      { path: "/databases/mongodb/instance-detail", component: MongoInstanceDetailView, meta: { title: "MongoDB 实例详情", dbType: "mongodb", dbLabel: "MongoDB" } },
       { path: "/databases/mongodb/connections", component: MongoConnectionManageView, meta: { title: "MongoDB 连接管理", dbType: "mongodb", dbLabel: "MongoDB" } },
       { path: "/databases/mongodb/session-probe", component: MongoSessionProbeView, meta: { title: "MongoDB 会话探测", dbType: "mongodb", dbLabel: "MongoDB" } },
 

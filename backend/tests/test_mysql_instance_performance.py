@@ -2,7 +2,7 @@ from datetime import datetime, timedelta
 
 from app.extensions import db
 from app.models.db_asset import DatabaseInstance
-from app.models.monitor_snapshot import MonitorSnapshotMySQL
+from app.models.monitor_snapshot import MonitorSnapshotMongoDB, MonitorSnapshotMySQL
 
 
 def _admin_headers(client):
@@ -75,6 +75,8 @@ def test_mysql_performance_returns_chronological_status_series(client):
     assert data["points"][1]["network_rx_bps"] == 250.0
     assert data["points"][1]["network_tx_bps"] == 100.0
     assert data["points"][1]["sessions"] == 15
+    assert data["points"][1]["connections_current"] == 15
+    assert data["points"][1]["wiredtiger_cache_used_pct"] is None
     assert data["points"][1]["lock_waits"] == 2
     assert data["points"][0]["collected_at"] < data["points"][1]["collected_at"]
 
@@ -91,3 +93,55 @@ def test_mysql_performance_rejects_invalid_hours(client):
     )
 
     assert response.status_code == 400
+
+
+
+def test_mongodb_performance_returns_resources_cache_and_connections(client):
+    headers = _admin_headers(client)
+    instance = DatabaseInstance(
+        name="mongodb-performance",
+        db_type="mongodb",
+        host_input="mongodb.local",
+        resolved_ip="10.0.0.18",
+        port=27017,
+        username="monitor",
+    )
+    db.session.add(instance)
+    db.session.flush()
+    now = datetime.now()
+    db.session.add(
+        MonitorSnapshotMongoDB(
+            instance_id=instance.id,
+            metric_type="status",
+            collected_at=now,
+            payload_json={
+                "host_cpu_usage_pct": 18.5,
+                "host_memory_usage_pct": 52.0,
+                "host_data_disk_usage_pct": 61.0,
+                "host_net_rates": [{"device": "eth0", "rx_bps": 320, "tx_bps": 180}],
+                "cache_used_pct": 43.25,
+                "connections_current": 27,
+            },
+        )
+    )
+    db.session.commit()
+
+    response = client.get(
+        f"/api/v1/monitoring/instance/{instance.id}/performance?hours=6",
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    data = response.get_json()["data"]
+    assert data["instance"]["name"] == "mongodb-performance"
+    assert data["hours"] == 6
+    assert len(data["points"]) == 1
+    point = data["points"][0]
+    assert point["cpu_usage_pct"] == 18.5
+    assert point["memory_usage_pct"] == 52.0
+    assert point["disk_usage_pct"] == 61.0
+    assert point["network_rx_bps"] == 320.0
+    assert point["network_tx_bps"] == 180.0
+    assert point["wiredtiger_cache_used_pct"] == 43.25
+    assert point["connections_current"] == 27
+    assert point["sessions"] is None

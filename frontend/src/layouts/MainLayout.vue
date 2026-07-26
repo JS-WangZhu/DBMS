@@ -34,7 +34,7 @@
           </el-menu-item>
         </el-sub-menu>
 
-        <el-sub-menu v-if="hasAnyMenu(['mysql_instances','mysql_instance_detail','mysql_clusters','mysql_connections','mysql_session_probe','mongodb_instances','mongodb_clusters','mongodb_connections','redis_instances','redis_clusters','redis_connections','postgresql_instances','postgresql_clusters','doris_instances','doris_clusters'])" index="service-manage">
+        <el-sub-menu v-if="hasAnyMenu(['mysql_instances','mysql_instance_detail','mysql_clusters','mysql_connections','mysql_session_probe','mongodb_instances','mongodb_instance_detail','mongodb_clusters','mongodb_connections','redis_instances','redis_clusters','redis_connections','postgresql_instances','postgresql_clusters','doris_instances','doris_clusters'])" index="service-manage">
           <template #title>
             <el-icon><Menu /></el-icon>
             <span>服务管理</span>
@@ -67,7 +67,7 @@
             </el-menu-item>
           </el-sub-menu>
 
-          <el-sub-menu v-if="hasAnyMenu(['mongodb_instances','mongodb_clusters','mongodb_connections','mongodb_session_probe'])" index="db-mongodb">
+          <el-sub-menu v-if="hasAnyMenu(['mongodb_instances','mongodb_instance_detail','mongodb_clusters','mongodb_connections','mongodb_session_probe'])" index="db-mongodb">
             <template #title>
               <el-icon class="db-brand-icon"><MongoIcon /></el-icon>
               <span>MongoDB</span>
@@ -75,6 +75,10 @@
             <el-menu-item v-if="hasMenu('mongodb_instances')" index="/databases/mongodb/instances">
               <el-icon class="db-brand-icon"><MongoIcon /></el-icon>
               <span>实例管理</span>
+            </el-menu-item>
+            <el-menu-item v-if="hasMenu('mongodb_instance_detail')" index="/databases/mongodb/instance-detail">
+              <el-icon><TrendCharts /></el-icon>
+              <span>实例详情</span>
             </el-menu-item>
             <el-menu-item v-if="hasMenu('mongodb_clusters')" index="/databases/mongodb/clusters">
               <el-icon><FolderOpened /></el-icon>
@@ -538,6 +542,7 @@ const routePermissionMap = {
   "/databases/mysql/connections": "mysql_connections",
   "/databases/mysql/session-probe": "mysql_session_probe",
   "/databases/mongodb/instances": "mongodb_instances",
+  "/databases/mongodb/instance-detail": "mongodb_instance_detail",
   "/databases/mongodb/clusters": "mongodb_clusters",
   "/databases/mongodb/connections": "mongodb_connections",
   "/databases/mongodb/session-probe": "mongodb_session_probe",
@@ -632,6 +637,7 @@ const tabIconMap = {
   "/databases/mysql/connections": Connection,
   "/databases/mysql/session-probe": View,
   "/databases/mongodb/instances": MongoIcon,
+  "/databases/mongodb/instance-detail": TrendCharts,
   "/databases/mongodb/clusters": FolderOpened,
   "/databases/mongodb/connections": Link,
   "/databases/mongodb/session-probe": View,
