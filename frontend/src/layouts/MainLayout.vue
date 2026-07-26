@@ -350,6 +350,7 @@
               <template #label>
                 <span
                   class="tab-label"
+                  :title="tab.title"
                   draggable="true"
                   @dragstart="onTabDragStart($event, tab)"
                   @dragover.prevent
@@ -357,7 +358,10 @@
                   @dragend="onTabDragEnd"
                   @contextmenu.prevent="onTabRightClick($event, tab)"
                 >
-                  {{ tab.title }}
+                  <el-icon class="tab-icon" aria-hidden="true">
+                    <component :is="tabIcon(tab.path)" />
+                  </el-icon>
+                  <span class="tab-title">{{ tab.title }}</span>
                 </span>
               </template>
             </el-tab-pane>
@@ -615,6 +619,63 @@ function newTabId() {
 
 function tabTitle(routeLike) {
   return routeLike.meta?.title || routeLike.path || "页面";
+}
+
+const tabIconMap = {
+  "/dashboard": Odometer,
+  "/resources/database-apply": CirclePlus,
+  "/resources/database-recycle": Delete,
+  "/resources/application-history": Document,
+  "/databases/mysql/instances": MysqlIcon,
+  "/databases/mysql/instance-detail": TrendCharts,
+  "/databases/mysql/clusters": Share,
+  "/databases/mysql/connections": Connection,
+  "/databases/mysql/session-probe": View,
+  "/databases/mongodb/instances": MongoIcon,
+  "/databases/mongodb/clusters": FolderOpened,
+  "/databases/mongodb/connections": Link,
+  "/databases/mongodb/session-probe": View,
+  "/databases/redis/instances": RedisIcon,
+  "/databases/redis/clusters": Coin,
+  "/databases/redis/connections": Promotion,
+  "/databases/postgresql/instances": PostgreSQLIcon,
+  "/databases/postgresql/clusters": Coin,
+  "/databases/doris/instances": DorisIcon,
+  "/databases/doris/clusters": Histogram,
+  "/service/inspection": CircleCheck,
+  "/data-access/query": Search,
+  "/data-access/change": EditPen,
+  "/data-access/history": Clock,
+  "/data-access/ai-analysis": Cpu,
+  "/tasks/schedules": Operation,
+  "/tasks/results": Tickets,
+  "/tools/aliyun-dns": Position,
+  "/backups/overview": Notebook,
+  "/backups/mysql-policies": MysqlIcon,
+  "/backups/postgresql-policies": PostgreSQLIcon,
+  "/backups/mongo-policies": MongoIcon,
+  "/backups/records": Files,
+  "/backups/tool-configs": Tools,
+  "/backups/notify-targets": Bell,
+  "/backups/s3-storage": Box,
+  "/backups/keys": Key,
+  "/users/info": UserFilled,
+  "/users/role-groups": Avatar,
+  "/users/permissions": Lock,
+  "/config/agents": Monitor,
+  "/config/ai-models": TrendCharts,
+  "/config/ha": Lightning,
+  "/config/instance-status": Timer,
+  "/config/physical-discovery": Monitor,
+  "/config/inspection": Setting,
+  "/config/data-query-ops": DataAnalysis,
+  "/config/domain": Location,
+  "/config/mcp-platform": SetUp,
+  "/config/sso": Key,
+};
+
+function tabIcon(path) {
+  return tabIconMap[path] || Document;
 }
 
 function findTabByPath(path) {
@@ -1506,29 +1567,33 @@ async function logout() {
   min-width: auto;
   max-width: 190px;
   height: 36px;
-  margin: 0 4px 0 0;
-  padding: 0 14px !important;
-  border: 0 !important;
-  border-radius: 7px 7px 0 0 !important;
+  margin: 0 6px 0 0;
+  padding: 0 12px !important;
+  border: 1px solid #e4e9f1 !important;
+  border-bottom-color: #d8dee8 !important;
+  border-radius: 8px 8px 0 0 !important;
   color: var(--text-soft);
-  background: transparent;
-  box-shadow: none;
+  background: #f8fafc;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
   font-size: 13px;
   font-weight: 500;
+  transition: color 160ms ease, background-color 160ms ease, border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
 }
 
 :deep(.tabs-wrap .el-tabs--card > .el-tabs__header .el-tabs__item:hover) {
   color: var(--brand);
-  background: #f8fafc;
-  border: 0 !important;
-  box-shadow: none;
+  background: #fff;
+  border-color: #cbd6e5 !important;
+  box-shadow: 0 3px 9px rgba(31, 45, 61, 0.08);
+  transform: translateY(-1px);
 }
 
 :deep(.tabs-wrap .el-tabs--card > .el-tabs__header .el-tabs__item.is-active) {
   color: var(--brand);
-  background: var(--brand-soft);
-  border: 0 !important;
-  box-shadow: none;
+  background: #fff;
+  border-color: #b9c9dd !important;
+  border-bottom-color: #fff !important;
+  box-shadow: 0 4px 12px rgba(31, 45, 61, 0.12);
   font-weight: 600;
 }
 
@@ -1539,6 +1604,40 @@ async function logout() {
   height: 2px;
   border-radius: 2px 2px 0 0;
   background: var(--brand);
+}
+
+:deep(.tabs-wrap .tab-label) {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
+  align-items: center;
+  gap: 7px;
+}
+
+:deep(.tabs-wrap .tab-title) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:deep(.tabs-wrap .tab-icon) {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 15px;
+  color: #667085;
+  font-size: 15px;
+  transition: color 160ms ease, transform 160ms ease;
+}
+
+:deep(.tabs-wrap .el-tabs__item:hover .tab-icon) {
+  color: var(--brand);
+  transform: translateY(-1px);
+}
+
+:deep(.tabs-wrap .el-tabs__item.is-active .tab-icon) {
+  color: var(--brand);
+  transform: scale(1.08);
 }
 
 :deep(.tabs-wrap .el-tabs__nav-prev),
