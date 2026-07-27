@@ -9,14 +9,24 @@ from app.extensions import db
 from app.models.user import User
 from app.models.user_permission import ApiKey
 from app.services.audit import log_audit
+from app.services.mcp_resources import (
+    build_mcp_backup_status,
+    build_mcp_cluster_instance_map,
+    build_mcp_inspection_status,
+)
 from app.services.mcp_status import build_mcp_instance_status
 from app.utils.response import error_response, ok_response
 
 bp = Blueprint("mcp_platform", __name__, url_prefix="/mcp")
 
 MCP_SCOPE_INSTANCE_STATUS = "instance_status:read"
+MCP_SCOPE_READ = "dbms:read"
 MCP_TOOL_NAME = "dbms_get_latest_instance_status"
+MCP_CLUSTER_INSTANCE_TOOL_NAME = "dbms_get_cluster_instance_mapping"
+MCP_BACKUP_STATUS_TOOL_NAME = "dbms_get_database_backup_status"
+MCP_INSPECTION_STATUS_TOOL_NAME = "dbms_get_inspection_status"
 MCP_PROTOCOL_VERSION = "2024-11-05"
+MCP_SERVER_VERSION = "1.1.0"
 
 
 def _current_user_api_key_query():
@@ -39,7 +49,7 @@ def _require_mcp_key():
     if not api_key or api_key.purpose != "mcp":
         return error_response("mcp api key required", code=403)
     scopes = api_key.scopes if isinstance(api_key.scopes, list) else []
-    if scopes and MCP_SCOPE_INSTANCE_STATUS not in scopes:
+    if scopes and not ({MCP_SCOPE_READ, MCP_SCOPE_INSTANCE_STATUS} & set(scopes)):
         return error_response("api key scope denied", code=403)
     api_key.last_used_at = datetime.utcnow()
     db.session.commit()
@@ -56,11 +66,11 @@ def _bool_arg(value):
 
 def _filters_from_source(source):
     filters = {}
-    for key in ("db_type", "business_line", "environment", "cluster_name", "status"):
+    for key in ("db_type", "business_line", "environment", "cluster_name", "status", "instance_name", "host"):
         value = source.get(key)
         if value not in (None, ""):
             filters[key] = str(value).strip()
-    for key in ("cluster_id",):
+    for key in ("cluster_id", "instance_id", "port"):
         value = source.get(key)
         if value not in (None, ""):
             try:
@@ -74,15 +84,62 @@ def _filters_from_source(source):
     return filters
 
 
-def _status_payload(source):
+def _resource_filters_from_source(source, tool_name):
+    filters = {}
+    string_keys = {
+        MCP_CLUSTER_INSTANCE_TOOL_NAME: ("db_type",),
+        MCP_BACKUP_STATUS_TOOL_NAME: ("db_type", "protection_status"),
+        MCP_INSPECTION_STATUS_TOOL_NAME: ("db_type",),
+    }.get(tool_name, ())
+    integer_keys = {
+        MCP_CLUSTER_INSTANCE_TOOL_NAME: ("cluster_id",),
+        MCP_BACKUP_STATUS_TOOL_NAME: ("cluster_id", "instance_id", "hours"),
+        MCP_INSPECTION_STATUS_TOOL_NAME: ("cluster_id", "instance_id"),
+    }.get(tool_name, ())
+    boolean_keys = {
+        MCP_CLUSTER_INSTANCE_TOOL_NAME: ("enabled_only",),
+        MCP_INSPECTION_STATUS_TOOL_NAME: ("include_recovered",),
+    }.get(tool_name, ())
+    for key in string_keys:
+        if source.get(key) not in (None, ""):
+            filters[key] = str(source.get(key)).strip()
+    for key in integer_keys:
+        if source.get(key) not in (None, ""):
+            try:
+                filters[key] = int(source.get(key))
+            except (TypeError, ValueError):
+                raise ValueError(f"{key} must be integer")
+    for key in boolean_keys:
+        if key in source and source.get(key) not in (None, ""):
+            filters[key] = _bool_arg(source.get(key))
+    return filters
+
+
+def _execute_tool(tool_name, source):
+    allowed_cluster_ids = list_allowed_cluster_ids("query")
+    if tool_name == MCP_TOOL_NAME:
+        return build_mcp_instance_status(
+            filters=_filters_from_source(source),
+            allowed_cluster_ids=allowed_cluster_ids,
+        )
+    filters = _resource_filters_from_source(source, tool_name)
+    if tool_name == MCP_CLUSTER_INSTANCE_TOOL_NAME:
+        return build_mcp_cluster_instance_map(filters=filters, allowed_cluster_ids=allowed_cluster_ids)
+    if tool_name == MCP_BACKUP_STATUS_TOOL_NAME:
+        return build_mcp_backup_status(filters=filters, allowed_cluster_ids=allowed_cluster_ids)
+    if tool_name == MCP_INSPECTION_STATUS_TOOL_NAME:
+        return build_mcp_inspection_status(filters=filters, allowed_cluster_ids=allowed_cluster_ids)
+    raise ValueError(f"unknown tool: {tool_name}")
+
+
+def _tool_payload(tool_name, source):
     denied = _require_mcp_key()
     if denied:
         return denied
     try:
-        filters = _filters_from_source(source)
+        data = _execute_tool(tool_name, source)
     except ValueError as exc:
         return error_response(str(exc), code=400)
-    data = build_mcp_instance_status(filters=filters, allowed_cluster_ids=list_allowed_cluster_ids("query"))
     return ok_response(data=data)
 
 
@@ -113,9 +170,55 @@ def _mcp_tool_schema():
             "environment": {"type": "string", "description": "Optional environment filter."},
             "cluster_id": {"type": "integer", "description": "Optional DBMS cluster id filter."},
             "cluster_name": {"type": "string", "description": "Optional DBMS cluster name filter."},
+            "instance_id": {"type": "integer", "description": "Optional exact DBMS instance id."},
+            "instance_name": {"type": "string", "description": "Optional exact DBMS instance name."},
+            "host": {"type": "string", "description": "Optional exact configured instance host."},
+            "port": {"type": "integer", "description": "Optional exact instance port."},
             "status": {"type": "string", "description": "Optional normalized status filter."},
             "unhealthy_only": {"type": "boolean", "description": "Return only unhealthy or alerted instances."},
             "include_raw_payload": {"type": "boolean", "description": "Include original collector payload."},
+        },
+        "additionalProperties": False,
+    }
+
+
+def _cluster_instance_tool_schema():
+    return {
+        "type": "object",
+        "properties": {
+            "db_type": {"type": "string", "enum": ["mysql", "mongodb", "redis", "postgresql", "doris"]},
+            "cluster_id": {"type": "integer", "description": "Optional exact DBMS cluster id."},
+            "enabled_only": {"type": "boolean", "description": "Only include enabled instances."},
+        },
+        "additionalProperties": False,
+    }
+
+
+def _backup_status_tool_schema():
+    return {
+        "type": "object",
+        "properties": {
+            "db_type": {"type": "string", "enum": ["mysql", "mongodb", "postgresql"]},
+            "cluster_id": {"type": "integer", "description": "Optional exact DBMS cluster id."},
+            "instance_id": {"type": "integer", "description": "Optional exact DBMS instance id."},
+            "hours": {"type": "integer", "minimum": 1, "maximum": 720, "description": "Healthy backup time window, default 48 hours."},
+            "protection_status": {
+                "type": "string",
+                "enum": ["healthy", "stale", "running", "failed", "never_run", "unconfigured"],
+            },
+        },
+        "additionalProperties": False,
+    }
+
+
+def _inspection_status_tool_schema():
+    return {
+        "type": "object",
+        "properties": {
+            "db_type": {"type": "string", "enum": ["mysql", "mongodb", "redis", "postgresql", "doris"]},
+            "cluster_id": {"type": "integer", "description": "Optional exact DBMS cluster id."},
+            "instance_id": {"type": "integer", "description": "Optional exact DBMS instance id."},
+            "include_recovered": {"type": "boolean", "description": "Include recovered alert history; default false."},
         },
         "additionalProperties": False,
     }
@@ -127,7 +230,22 @@ def _mcp_tools():
             "name": MCP_TOOL_NAME,
             "description": "Query DBMS latest database instance status details for MySQL, MongoDB, Redis, PostgreSQL and Doris.",
             "inputSchema": _mcp_tool_schema(),
-        }
+        },
+        {
+            "name": MCP_CLUSTER_INSTANCE_TOOL_NAME,
+            "description": "Return the DBMS cluster-to-instance mapping visible to the API key owner.",
+            "inputSchema": _cluster_instance_tool_schema(),
+        },
+        {
+            "name": MCP_BACKUP_STATUS_TOOL_NAME,
+            "description": "Return backup protection status for all visible MySQL, MongoDB and PostgreSQL instances, including policies and latest results.",
+            "inputSchema": _backup_status_tool_schema(),
+        },
+        {
+            "name": MCP_INSPECTION_STATUS_TOOL_NAME,
+            "description": "Return all current inspection item thresholds, visible assets and alert information.",
+            "inputSchema": _inspection_status_tool_schema(),
+        },
     ]
 
 
@@ -141,7 +259,7 @@ def _handle_mcp_jsonrpc(message):
             {
                 "protocolVersion": MCP_PROTOCOL_VERSION,
                 "capabilities": {"tools": {}},
-                "serverInfo": {"name": "dbms-instance-status", "version": "1.0.0"},
+                "serverInfo": {"name": "dbms-instance-status", "version": MCP_SERVER_VERSION},
             },
             request_id,
         )
@@ -152,11 +270,11 @@ def _handle_mcp_jsonrpc(message):
     if method == "tools/list":
         return _jsonrpc_result({"tools": _mcp_tools()}, request_id)
     if method == "tools/call":
-        if params.get("name") != MCP_TOOL_NAME:
+        tool_name = params.get("name")
+        if tool_name not in {item["name"] for item in _mcp_tools()}:
             return _jsonrpc_error(-32602, f"unknown tool: {params.get('name')}", request_id)
         try:
-            filters = _filters_from_source(params.get("arguments") or {})
-            data = build_mcp_instance_status(filters=filters, allowed_cluster_ids=list_allowed_cluster_ids("query"))
+            data = _execute_tool(tool_name, params.get("arguments") or {})
         except Exception as exc:
             return _jsonrpc_result({"content": [{"type": "text", "text": str(exc)}], "isError": True}, request_id)
         return _jsonrpc_result(
@@ -204,7 +322,7 @@ def create_api_key():
         name=name[:128],
         token=token,
         purpose="mcp",
-        scopes=[MCP_SCOPE_INSTANCE_STATUS],
+        scopes=[MCP_SCOPE_READ],
         status="active",
     )
     db.session.add(api_key)
@@ -280,10 +398,28 @@ def streamable_http_info():
 @bp.get("/instance-status")
 @api_key_required
 def get_instance_status():
-    return _status_payload(request.args)
+    return _tool_payload(MCP_TOOL_NAME, request.args)
 
 
 @bp.post("/tools/dbms_get_latest_instance_status")
 @api_key_required
 def get_instance_status_tool():
-    return _status_payload(request.get_json(silent=True) or {})
+    return _tool_payload(MCP_TOOL_NAME, request.get_json(silent=True) or {})
+
+
+@bp.post("/tools/dbms_get_cluster_instance_mapping")
+@api_key_required
+def get_cluster_instance_mapping_tool():
+    return _tool_payload(MCP_CLUSTER_INSTANCE_TOOL_NAME, request.get_json(silent=True) or {})
+
+
+@bp.post("/tools/dbms_get_database_backup_status")
+@api_key_required
+def get_database_backup_status_tool():
+    return _tool_payload(MCP_BACKUP_STATUS_TOOL_NAME, request.get_json(silent=True) or {})
+
+
+@bp.post("/tools/dbms_get_inspection_status")
+@api_key_required
+def get_inspection_status_tool():
+    return _tool_payload(MCP_INSPECTION_STATUS_TOOL_NAME, request.get_json(silent=True) or {})

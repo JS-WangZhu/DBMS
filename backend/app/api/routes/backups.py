@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 
 from apscheduler.triggers.cron import CronTrigger
 from flask import Blueprint, current_app, request, send_file, Response, stream_with_context
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.api.routes.common import active_user_required, admin_required
 from app.extensions import db, scheduler
@@ -48,6 +49,16 @@ def _parse_datetime(value: str):
         return datetime.fromisoformat(text)
     except Exception:
         return None
+
+
+def _sync_running_remote_backups_for_read():
+    """A reconciliation lock conflict must never make records unreadable."""
+    try:
+        return sync_running_remote_backups()
+    except SQLAlchemyError as exc:
+        db.session.rollback()
+        current_app.logger.warning("remote backup reconciliation skipped for read request: %s", exc)
+        return 0
 
 
 def _validate_cron_expr(expr: str):
@@ -859,7 +870,7 @@ def _execute_policy_once(policy_id: int, dry_run: bool = False):
 def list_logs():
     # User refresh is the reconciliation trigger. Only logs still marked
     # running are queried; terminal results are never requested again.
-    sync_running_remote_backups()
+    _sync_running_remote_backups_for_read()
 
     policy_id = request.args.get("policy_id")
     status = request.args.get("status")
@@ -1108,7 +1119,7 @@ def delete_policy(policy_id):
 def backup_overview():
     # Reconcile remote jobs before aggregating, matching the records endpoint.
     # Otherwise the overview can remain stale until the records page is opened.
-    sync_running_remote_backups()
+    _sync_running_remote_backups_for_read()
 
     hours = int(request.args.get("hours", "48"))
     hours = max(1, min(hours, 168))

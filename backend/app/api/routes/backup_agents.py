@@ -1,4 +1,5 @@
 import requests
+import secrets
 from flask import Blueprint, request
 
 from app.api.routes.common import active_user_required, admin_required
@@ -6,9 +7,38 @@ from app.extensions import db
 from app.models.backup_agent import BackupAgent
 from app.models.db_asset import DatabaseInstance
 from app.services.audit import log_audit
+from app.services.remote_backup_service import checkpoint_remote_backup, recoverable_remote_backups
 from app.utils.response import error_response, ok_response
 
 bp = Blueprint("backup_agents", __name__, url_prefix="/backup-agents")
+
+
+def _agent_callback_authorized(agent):
+    supplied = request.headers.get("X-Agent-API-Key") or ""
+    expected = agent.api_key or ""
+    return secrets.compare_digest(str(supplied), str(expected))
+
+
+@bp.post("/<int:agent_id>/tasks/checkpoint")
+def checkpoint_agent_backup_task(agent_id):
+    """Optional callback used only by restart-recovery capable Agents."""
+    agent = BackupAgent.query.get_or_404(agent_id)
+    if not agent.enabled or not _agent_callback_authorized(agent):
+        return error_response("invalid Agent API key", code=401)
+    payload = request.get_json(silent=True) or {}
+    log = checkpoint_remote_backup(agent_id, payload)
+    if not log:
+        return error_response("running backup task not found", code=404)
+    return ok_response(data={"task_id": payload.get("task_id"), "backup_log_id": log.id})
+
+
+@bp.post("/<int:agent_id>/tasks/recover")
+def recover_agent_backup_tasks(agent_id):
+    """Let an upgraded Agent fetch only tasks it previously checkpointed."""
+    agent = BackupAgent.query.get_or_404(agent_id)
+    if not agent.enabled or not _agent_callback_authorized(agent):
+        return error_response("invalid Agent API key", code=401)
+    return ok_response(data={"tasks": recoverable_remote_backups(agent_id)})
 
 
 @bp.route("", methods=["GET"])

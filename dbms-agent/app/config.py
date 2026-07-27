@@ -15,6 +15,13 @@ class Config:
     AGENT_PORT = int(os.environ.get("AGENT_PORT", 5001))
     AGENT_DEBUG = os.environ.get("AGENT_DEBUG", "false").lower() == "true"
 
+    # Optional restart recovery. Existing agents that do not configure these
+    # values keep the original in-memory execution path unchanged.
+    AGENT_RECOVERY_ENABLED = os.environ.get("AGENT_RECOVERY_ENABLED", "false").lower() == "true"
+    DBMS_SERVER_URL = os.environ.get("DBMS_SERVER_URL", "").strip()
+    DBMS_AGENT_ID = os.environ.get("DBMS_AGENT_ID", "").strip()
+    AGENT_TASK_STATE_DIR = os.environ.get("AGENT_TASK_STATE_DIR", "/tmp/dbms-agent-tasks").strip()
+
     # Logging
     LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO")
 

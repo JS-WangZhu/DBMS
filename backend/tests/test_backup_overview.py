@@ -1,7 +1,9 @@
 from datetime import datetime, timedelta
 
+from sqlalchemy.exc import OperationalError
+
 from app.api.routes import backups
-from app.api.routes.backups import backup_overview
+from app.api.routes.backups import backup_overview, list_logs
 from app.extensions import db
 from app.models.backup import BackupLog, BackupPolicy
 from app.models.db_asset import DatabaseCluster, DatabaseInstance
@@ -126,3 +128,31 @@ def test_backup_overview_syncs_running_remote_backups_before_query(app, monkeypa
     assert status_code == 200
     assert response.get_json()["data"]["total_clusters"] == 0
     assert calls == [True]
+
+
+def test_backup_overview_remains_readable_when_reconcile_hits_lock_timeout(app, monkeypatch):
+    monkeypatch.setattr(
+        backups,
+        "sync_running_remote_backups",
+        lambda: (_ for _ in ()).throw(OperationalError("UPDATE backup_logs", {}, Exception("1205"))),
+    )
+
+    with app.test_request_context("/api/v1/backups/overview?hours=24"):
+        response, status_code = backup_overview.__wrapped__()
+
+    assert status_code == 200
+    assert response.get_json()["data"]["total_clusters"] == 0
+
+
+def test_backup_records_remain_readable_when_reconcile_hits_lock_timeout(app, monkeypatch):
+    monkeypatch.setattr(
+        backups,
+        "sync_running_remote_backups",
+        lambda: (_ for _ in ()).throw(OperationalError("UPDATE backup_logs", {}, Exception("1205"))),
+    )
+
+    with app.test_request_context("/api/v1/backups/logs?page=1&page_size=10"):
+        response, status_code = list_logs.__wrapped__()
+
+    assert status_code == 200
+    assert response.get_json()["data"]["items"] == []

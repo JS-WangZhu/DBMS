@@ -160,7 +160,12 @@ def job_reconcile_remote_backups(app):
         current_app.logger.error("remote backup reconcile job missing app context")
         return 0
     with app.app_context():
-        updated = sync_running_remote_backups()
+        try:
+            updated = sync_running_remote_backups()
+        except Exception as exc:
+            db.session.rollback()
+            current_app.logger.exception("remote backup reconcile failed: %s", exc)
+            return 0
         if updated:
             current_app.logger.info(
                 "remote backup reconcile finished: updated=%s",

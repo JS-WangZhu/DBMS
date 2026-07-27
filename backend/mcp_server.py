@@ -7,8 +7,11 @@ import requests
 
 
 SERVER_NAME = "dbms-instance-status"
-SERVER_VERSION = "1.0.0"
+SERVER_VERSION = "1.1.0"
 TOOL_NAME = "dbms_get_latest_instance_status"
+CLUSTER_INSTANCE_TOOL_NAME = "dbms_get_cluster_instance_mapping"
+BACKUP_STATUS_TOOL_NAME = "dbms_get_database_backup_status"
+INSPECTION_STATUS_TOOL_NAME = "dbms_get_inspection_status"
 
 
 def _env(name: str, default: str = "") -> str:
@@ -50,9 +53,55 @@ def _tool_schema() -> Dict[str, Any]:
             "environment": {"type": "string", "description": "Optional environment filter."},
             "cluster_id": {"type": "integer", "description": "Optional DBMS cluster id filter."},
             "cluster_name": {"type": "string", "description": "Optional DBMS cluster name filter."},
+            "instance_id": {"type": "integer", "description": "Optional exact DBMS instance id."},
+            "instance_name": {"type": "string", "description": "Optional exact DBMS instance name."},
+            "host": {"type": "string", "description": "Optional exact configured instance host."},
+            "port": {"type": "integer", "description": "Optional exact instance port."},
             "status": {"type": "string", "description": "Optional normalized status filter."},
             "unhealthy_only": {"type": "boolean", "description": "Return only unhealthy or alerted instances."},
             "include_raw_payload": {"type": "boolean", "description": "Include original collector payload."},
+        },
+        "additionalProperties": False,
+    }
+
+
+def _cluster_instance_tool_schema() -> Dict[str, Any]:
+    return {
+        "type": "object",
+        "properties": {
+            "db_type": {"type": "string", "enum": ["mysql", "mongodb", "redis", "postgresql", "doris"]},
+            "cluster_id": {"type": "integer", "description": "Optional exact DBMS cluster id."},
+            "enabled_only": {"type": "boolean", "description": "Only include enabled instances."},
+        },
+        "additionalProperties": False,
+    }
+
+
+def _backup_status_tool_schema() -> Dict[str, Any]:
+    return {
+        "type": "object",
+        "properties": {
+            "db_type": {"type": "string", "enum": ["mysql", "mongodb", "postgresql"]},
+            "cluster_id": {"type": "integer", "description": "Optional exact DBMS cluster id."},
+            "instance_id": {"type": "integer", "description": "Optional exact DBMS instance id."},
+            "hours": {"type": "integer", "minimum": 1, "maximum": 720, "description": "Healthy backup time window, default 48 hours."},
+            "protection_status": {
+                "type": "string",
+                "enum": ["healthy", "stale", "running", "failed", "never_run", "unconfigured"],
+            },
+        },
+        "additionalProperties": False,
+    }
+
+
+def _inspection_status_tool_schema() -> Dict[str, Any]:
+    return {
+        "type": "object",
+        "properties": {
+            "db_type": {"type": "string", "enum": ["mysql", "mongodb", "redis", "postgresql", "doris"]},
+            "cluster_id": {"type": "integer", "description": "Optional exact DBMS cluster id."},
+            "instance_id": {"type": "integer", "description": "Optional exact DBMS instance id."},
+            "include_recovered": {"type": "boolean", "description": "Include recovered alert history; default false."},
         },
         "additionalProperties": False,
     }
@@ -65,16 +114,31 @@ def _list_tools() -> Dict[str, Any]:
                 "name": TOOL_NAME,
                 "description": "Query DBMS latest database instance status details for MySQL, MongoDB, Redis, PostgreSQL and Doris.",
                 "inputSchema": _tool_schema(),
-            }
+            },
+            {
+                "name": CLUSTER_INSTANCE_TOOL_NAME,
+                "description": "Return the DBMS cluster-to-instance mapping visible to the API key owner.",
+                "inputSchema": _cluster_instance_tool_schema(),
+            },
+            {
+                "name": BACKUP_STATUS_TOOL_NAME,
+                "description": "Return backup protection status for all visible MySQL, MongoDB and PostgreSQL instances, including policies and latest results.",
+                "inputSchema": _backup_status_tool_schema(),
+            },
+            {
+                "name": INSPECTION_STATUS_TOOL_NAME,
+                "description": "Return all current inspection item thresholds, visible assets and alert information.",
+                "inputSchema": _inspection_status_tool_schema(),
+            },
         ]
     }
 
 
-def _call_status_tool(arguments: Dict[str, Any]) -> Dict[str, Any]:
+def _call_tool(name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
     api_key = _api_key()
     if not api_key:
         raise RuntimeError("DBMS_MCP_API_KEY is required")
-    url = f"{_api_base_url()}/api/v1/mcp/tools/{TOOL_NAME}"
+    url = f"{_api_base_url()}/api/v1/mcp/tools/{name}"
     response = requests.post(
         url,
         headers={"X-API-Key": api_key, "Content-Type": "application/json"},
@@ -110,10 +174,11 @@ def _handle(request: Dict[str, Any]) -> Dict[str, Any] | None:
         return _response(_list_tools(), request_id)
     if method == "tools/call":
         name = params.get("name")
-        if name != TOOL_NAME:
+        tool_names = {item["name"] for item in _list_tools()["tools"]}
+        if name not in tool_names:
             return _error(-32602, f"unknown tool: {name}", request_id)
         try:
-            data = _call_status_tool(params.get("arguments") or {})
+            data = _call_tool(name, params.get("arguments") or {})
         except Exception as exc:
             return _response({"content": [{"type": "text", "text": str(exc)}], "isError": True}, request_id)
         return _response(

@@ -1,9 +1,11 @@
+from datetime import datetime, timedelta
+
 import requests
 from flask import current_app
 from typing import Optional
 
 from app.models.backup_agent import BackupAgent
-from app.models.backup import BackupPolicy
+from app.models.backup import BackupLog, BackupPolicy
 from app.models.backup_key import BackupKey
 from app.models.s3_storage_config import S3StorageConfig
 from app.models.db_asset import DatabaseInstance
@@ -220,6 +222,31 @@ def _build_payload_from_policy(policy: BackupPolicy, instance: DatabaseInstance)
         "encrypt": encrypt_payload,
         "mongo_backup": mongo_backup,
         "postgresql_backup": dict((policy.extra_json or {}).get("postgresql_backup") or {}),
+    }
+    # The server owns backup history, while the agent owns the files.  Select
+    # only this policy's expired files here and let the agent remove them after
+    # its newly submitted backup has completed successfully.
+    retention_files = []
+    retain_days = int(policy.retain_days or 0)
+    if retain_days > 0:
+        cutoff = datetime.utcnow() - timedelta(days=retain_days)
+        old_logs = BackupLog.query.filter(
+            BackupLog.policy_id == policy.id,
+            BackupLog.status == "success",
+            BackupLog.finished_at.isnot(None),
+            BackupLog.finished_at < cutoff,
+        ).all()
+        for log in old_logs:
+            extra = log.extra_json if isinstance(log.extra_json, dict) else {}
+            if (
+                extra.get("remote")
+                and str(extra.get("agent_id")) == str(policy.backup_agent_id)
+                and log.file_path
+            ):
+                retention_files.append(log.file_path)
+    policy_data["retention"] = {
+        "retain_days": retain_days,
+        "expired_file_paths": retention_files,
     }
     if policy.s3_storage_config_id and _is_policy_s3_upload_enabled(policy):
         s3_config = S3StorageConfig.query.get(policy.s3_storage_config_id)

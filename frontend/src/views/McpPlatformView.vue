@@ -37,9 +37,9 @@
 
       <el-descriptions class="capabilities" :column="2" border>
         <el-descriptions-item label="认证方式">Header: X-API-Key</el-descriptions-item>
-        <el-descriptions-item label="能力范围">instance_status:read</el-descriptions-item>
+        <el-descriptions-item label="能力范围">dbms:read（兼容 instance_status:read）</el-descriptions-item>
         <el-descriptions-item label="覆盖数据库">MySQL / MongoDB / Redis / PostgreSQL / Doris</el-descriptions-item>
-        <el-descriptions-item label="返回内容">集群、实例、角色、连通性、版本、指标、告警、最新采集时间</el-descriptions-item>
+        <el-descriptions-item label="返回内容">实例状态、集群映射、备份状态、巡检项与告警</el-descriptions-item>
       </el-descriptions>
 
       <el-tabs class="access-tabs" model-value="stdio">
@@ -169,16 +169,23 @@ const stdioConfigSnippet = computed(() => JSON.stringify({
   },
 }, null, 2));
 const toolSchemaSnippet = computed(() => JSON.stringify({
-  name: "dbms_get_latest_instance_status",
-  description: "查询 DBMS 内所有数据库实例的最新状态明细",
-  arguments: {
-    db_type: "mysql | mongodb | redis | postgresql | doris，可选",
-    business_line: "业务线，可选",
-    environment: "环境，可选",
-    cluster_id: "集群ID，可选",
-    cluster_name: "集群名称，可选",
-    unhealthy_only: "仅返回异常实例，可选",
-    include_raw_payload: "返回原始采集数据，可选",
+  tools: {
+    dbms_get_latest_instance_status: {
+      description: "查询数据库实例最新状态，可通过 instance_id 精确查询单实例",
+      arguments: "instance_id / instance_name / host / port / db_type / cluster_id 等，可选",
+    },
+    dbms_get_cluster_instance_mapping: {
+      description: "返回所有集群与实例的映射关系",
+      arguments: "db_type / cluster_id / enabled_only，可选",
+    },
+    dbms_get_database_backup_status: {
+      description: "返回数据库备份保护情况、策略及最新备份结果",
+      arguments: "db_type / cluster_id / instance_id / hours / protection_status，可选",
+    },
+    dbms_get_inspection_status: {
+      description: "返回当前巡检项、资产状态及告警信息",
+      arguments: "db_type / cluster_id / instance_id / include_recovered，可选",
+    },
   },
 }, null, 2));
 const httpSnippet = computed(() => `curl -H "X-API-Key: mcp_xxx" "${statusEndpoint.value}"

@@ -94,6 +94,32 @@ per endpoint (the built-in `python manage.py` setup already does this). If a
 multi-worker process manager is used, requests for one endpoint must be pinned
 to the same worker or the task store must be replaced with a shared store.
 
+### Optional restart recovery
+
+Restart recovery is opt-in so older deployed Agents keep their existing
+in-memory behavior and API contract. Enable it only on an upgraded Agent:
+
+```env
+AGENT_RECOVERY_ENABLED=true
+DBMS_SERVER_URL=http://dbms-server:5000
+DBMS_AGENT_ID=3
+AGENT_TASK_STATE_DIR=/data/backups/.agent-tasks
+```
+
+`DBMS_AGENT_ID` is the Agent ID configured in the DBMS Server. The task state
+directory contains connection-bearing execution input and therefore must be
+private, persistent, and mounted together with the backup directory. The Agent
+starts each recoverable backup in a detached worker and checkpoints its PID and
+phase to Server storage and cache. After an Agent restart it fetches its own
+running tasks from the Server. A matching live worker is monitored until it
+finishes; a missing or identity-mismatched dumping worker fails immediately and
+the dump is never retried.
+
+Container restart normally terminates every process in the container, so a
+Docker restart reports the interrupted dump as failed. Recovery can wait for a
+worker only when the Agent web process restarts without its detached worker
+being killed.
+
 
 ## Docker multi-architecture build
 

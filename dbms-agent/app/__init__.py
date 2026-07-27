@@ -1,4 +1,6 @@
 import logging
+import os
+import threading
 
 from flask import Flask
 
@@ -21,5 +23,16 @@ def create_app(config_class=None):
     )
 
     app.register_blueprint(agent_bp)
+
+    recovery_process = os.environ.get("WERKZEUG_RUN_MAIN") == "true" or not app.config.get("AGENT_DEBUG")
+    if app.config.get("AGENT_RECOVERY_ENABLED") and not app.config.get("TESTING") and recovery_process:
+        from app.api.routes.agent import recover_backup_tasks_on_startup
+
+        threading.Thread(
+            target=recover_backup_tasks_on_startup,
+            args=(app,),
+            name="backup-task-recovery",
+            daemon=True,
+        ).start()
 
     return app

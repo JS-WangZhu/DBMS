@@ -1,18 +1,25 @@
 import logging
+import hashlib
+import json
 import os
 import secrets
 import shutil
+import signal
 import subprocess
+import sys
 import tempfile
 import tarfile
 import re
 import struct
 import gzip
 import threading
+import time
 import uuid
 from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
+
+import requests
 
 BACKUP_TIMEOUT_SECONDS = 604800
 from urllib.parse import urlsplit
@@ -31,10 +38,283 @@ logger = logging.getLogger(__name__)
 _backup_tasks = {}
 _backup_tasks_lock = threading.RLock()
 _MAX_BACKUP_TASKS = 1000
+_AGENT_BOOT_ID = uuid.uuid4().hex
 
 
 def _task_snapshot(task):
-    return deepcopy({key: value for key, value in task.items() if key not in {"process", "processes"}})
+    return deepcopy({
+        key: value
+        for key, value in task.items()
+        if key not in {"process", "processes", "worker_process"}
+    })
+
+
+def _recovery_ready(app):
+    return bool(
+        app.config.get("AGENT_RECOVERY_ENABLED")
+        and str(app.config.get("DBMS_SERVER_URL") or "").strip()
+        and str(app.config.get("DBMS_AGENT_ID") or "").strip()
+        and str(app.config.get("AGENT_TASK_STATE_DIR") or "").strip()
+    )
+
+
+def _task_state_dir(app, task_id):
+    if not re.fullmatch(r"[A-Za-z0-9_.-]{1,128}", str(task_id)):
+        raise ValueError("invalid task_id")
+    root = Path(app.config["AGENT_TASK_STATE_DIR"]).resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    return root / str(task_id)
+
+
+def _write_json_atomic(path, payload):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = path.with_suffix(path.suffix + ".tmp")
+    with temp_path.open("w", encoding="utf-8") as handle:
+        json.dump(payload, handle, ensure_ascii=False)
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.chmod(temp_path, 0o600)
+    os.replace(temp_path, path)
+
+
+def _read_json(path):
+    try:
+        with Path(path).open("r", encoding="utf-8") as handle:
+            value = json.load(handle)
+        return value if isinstance(value, dict) else None
+    except (OSError, ValueError, TypeError):
+        return None
+
+
+def _process_identity(pid):
+    """Return stable Linux process identity; PID alone is not sufficient."""
+    try:
+        pid = int(pid)
+        os.kill(pid, 0)
+    except (TypeError, ValueError, OSError):
+        return None
+    try:
+        stat_fields = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8").split()
+        cmdline = Path(f"/proc/{pid}/cmdline").read_bytes()
+        return {
+            "pid": pid,
+            "start_ticks": stat_fields[21],
+            "command_hash": hashlib.sha256(cmdline).hexdigest(),
+        }
+    except (OSError, IndexError):
+        return None
+
+
+def _process_matches(state):
+    identity = _process_identity(state.get("pid"))
+    return bool(
+        identity
+        and str(identity.get("start_ticks")) == str(state.get("process_start_ticks"))
+        and identity.get("command_hash") == state.get("process_command_hash")
+    )
+
+
+def _persist_recovery_task(app, task):
+    if not task.get("recovery_managed"):
+        return
+    task_dir = _task_state_dir(app, task["task_id"])
+    snapshot = _task_snapshot(task)
+    snapshot["agent_boot_id"] = _AGENT_BOOT_ID
+    _write_json_atomic(task_dir / "state.json", snapshot)
+
+
+def _checkpoint_recovery_task(app, task):
+    if not task.get("recovery_managed"):
+        return False
+    server_url = str(app.config.get("DBMS_SERVER_URL") or "").rstrip("/")
+    agent_id = str(app.config.get("DBMS_AGENT_ID") or "").strip()
+    api_key = str(app.config.get("AGENT_API_KEY") or "")
+    payload = _task_snapshot(task)
+    payload["agent_boot_id"] = _AGENT_BOOT_ID
+    try:
+        response = requests.post(
+            f"{server_url}/api/v1/backup-agents/{agent_id}/tasks/checkpoint",
+            json=payload,
+            headers={"X-Agent-API-Key": api_key},
+            timeout=(3, 8),
+        )
+        return response.status_code < 400
+    except requests.RequestException:
+        logger.warning("failed to checkpoint recoverable backup task: task_id=%s", task.get("task_id"))
+        return False
+
+
+def _load_worker_result(task_dir):
+    payload = _read_json(Path(task_dir) / "result.json") or {}
+    result = payload.get("result")
+    return result if isinstance(result, dict) else None
+
+
+def _finish_recovery_task(app, task_id, result):
+    with _backup_tasks_lock:
+        task = _backup_tasks.get(task_id)
+        if not task:
+            return
+        task["status"] = "cancelled" if task.get("cancel_requested") else ("success" if result.get("ok") else "failed")
+        task["phase"] = task["status"]
+        task["result"] = result
+        task["finished_at"] = datetime.utcnow().isoformat() + "Z"
+        task["processes"] = []
+        snapshot = dict(task)
+    _persist_recovery_task(app, snapshot)
+    _checkpoint_recovery_task(app, snapshot)
+    try:
+        (_task_state_dir(app, task_id) / "input.json").unlink(missing_ok=True)
+    except OSError:
+        logger.warning("failed to remove completed backup task input: task_id=%s", task_id)
+    _prune_backup_tasks()
+
+
+def _monitor_recovery_worker(app, task_id, proc=None):
+    task_dir = _task_state_dir(app, task_id)
+    if proc is not None:
+        proc.wait()
+    else:
+        while True:
+            with _backup_tasks_lock:
+                task = _backup_tasks.get(task_id)
+                state = dict(task or {})
+            if not state or not _process_matches(state):
+                break
+            time.sleep(1)
+
+    # The worker atomically writes result.json immediately before exiting.
+    result = None
+    for _ in range(20):
+        result = _load_worker_result(task_dir)
+        if result is not None:
+            break
+        time.sleep(0.1)
+    if result is None:
+        result = {"ok": False, "message": "dump process ended without a recoverable result"}
+    _finish_recovery_task(app, task_id, result)
+
+
+def _start_recovery_worker(app, task_id, policy, instance):
+    task_dir = _task_state_dir(app, task_id)
+    task_dir.mkdir(parents=True, exist_ok=True)
+    os.chmod(task_dir, 0o700)
+    result_path = task_dir / "result.json"
+    if result_path.exists():
+        result_path.unlink()
+    _write_json_atomic(task_dir / "input.json", {"policy": policy, "instance": instance})
+    command = [sys.executable, "-m", "app.services.backup_task_worker", str(task_dir)]
+    log_handle = (task_dir / "worker.log").open("ab", buffering=0)
+    try:
+        proc = subprocess.Popen(
+            command,
+            cwd=str(Path(__file__).resolve().parents[3]),
+            stdin=subprocess.DEVNULL,
+            stdout=log_handle,
+            stderr=log_handle,
+            start_new_session=True,
+            close_fds=True,
+        )
+    finally:
+        log_handle.close()
+    identity = _process_identity(proc.pid) or {}
+    with _backup_tasks_lock:
+        task = _backup_tasks[task_id]
+        task.update({
+            "status": "running",
+            "phase": "dumping",
+            "started_at": datetime.utcnow().isoformat() + "Z",
+            "recovery_managed": True,
+            "agent_boot_id": _AGENT_BOOT_ID,
+            "pid": proc.pid,
+            "process_start_ticks": identity.get("start_ticks"),
+            "process_command_hash": identity.get("command_hash"),
+            "worker_process": proc,
+            "processes": [proc],
+            "task_state_dir": str(task_dir),
+        })
+        snapshot = dict(task)
+    _persist_recovery_task(app, snapshot)
+    threading.Thread(
+        target=_checkpoint_recovery_task,
+        args=(app, snapshot),
+        name=f"backup-checkpoint-{task_id[:12]}",
+        daemon=True,
+    ).start()
+    threading.Thread(
+        target=_monitor_recovery_worker,
+        args=(app, task_id, proc),
+        name=f"backup-monitor-{task_id[:12]}",
+        daemon=True,
+    ).start()
+
+
+def recover_backup_tasks_on_startup(app):
+    if not _recovery_ready(app):
+        return
+    server_url = str(app.config.get("DBMS_SERVER_URL") or "").rstrip("/")
+    agent_id = str(app.config.get("DBMS_AGENT_ID") or "").strip()
+    api_key = str(app.config.get("AGENT_API_KEY") or "")
+    try:
+        response = requests.post(
+            f"{server_url}/api/v1/backup-agents/{agent_id}/tasks/recover",
+            json={"agent_boot_id": _AGENT_BOOT_ID},
+            headers={"X-Agent-API-Key": api_key},
+            timeout=(3, 10),
+        )
+        response.raise_for_status()
+        tasks = ((response.json() or {}).get("data") or {}).get("tasks") or []
+    except Exception:
+        logger.exception("failed to fetch recoverable backup tasks from server")
+        return
+
+    for remote_task in tasks:
+        task_id = str(remote_task.get("task_id") or "")
+        try:
+            local_state = _read_json(_task_state_dir(app, task_id) / "state.json") or {}
+        except ValueError:
+            continue
+        for key in ("pid", "process_start_ticks", "process_command_hash", "started_at"):
+            if local_state.get(key) in (None, "") and remote_task.get(key) not in (None, ""):
+                local_state[key] = remote_task.get(key)
+        local_state.update({
+            "task_id": task_id,
+            "status": "running",
+            "phase": "dumping",
+            "recovery_managed": True,
+            "agent_boot_id": _AGENT_BOOT_ID,
+            "processes": [],
+            "task_state_dir": str(_task_state_dir(app, task_id)),
+        })
+        result = _load_worker_result(_task_state_dir(app, task_id))
+        if result is not None:
+            with _backup_tasks_lock:
+                _backup_tasks[task_id] = local_state
+            _finish_recovery_task(app, task_id, result)
+            continue
+        if _process_matches(local_state):
+            with _backup_tasks_lock:
+                _backup_tasks[task_id] = local_state
+            _persist_recovery_task(app, local_state)
+            _checkpoint_recovery_task(app, local_state)
+            threading.Thread(
+                target=_monitor_recovery_worker,
+                args=(app, task_id),
+                name=f"backup-recovery-{task_id[:12]}",
+                daemon=True,
+            ).start()
+            continue
+        local_state.update({
+            "status": "failed",
+            "phase": "failed",
+            "finished_at": datetime.utcnow().isoformat() + "Z",
+            "result": {"ok": False, "message": "dump process lost after agent restart"},
+        })
+        with _backup_tasks_lock:
+            _backup_tasks[task_id] = local_state
+        _persist_recovery_task(app, local_state)
+        _checkpoint_recovery_task(app, local_state)
 
 
 def _register_task_process(task_id, proc):
@@ -623,6 +903,7 @@ def _run_backup(policy: dict, instance: dict, dry_run: bool = False, task_id: st
             if not s3_result.get("ok"):
                 return {"ok": False, "message": f"s3 upload failed: {s3_result.get('message')}", "command": command, "s3": s3_result}
 
+        retention_deleted = _cleanup_retention_files(policy)
         file_size = os.path.getsize(output_file) if os.path.exists(output_file) else 0
 
         return {
@@ -635,11 +916,47 @@ def _run_backup(policy: dict, instance: dict, dry_run: bool = False, task_id: st
             "compress_method": compress_method,
             "encrypt": encrypt_info,
             "s3": s3_result or {"ok": False, "message": "s3 upload disabled"},
+            "retention_deleted": retention_deleted,
         }
     except subprocess.TimeoutExpired:
         return {"ok": False, "message": "backup timeout"}
     except Exception as e:
         return {"ok": False, "message": str(e)}
+
+
+def _cleanup_retention_files(policy: dict) -> int:
+    """Remove server-selected expired backups from this agent's local storage.
+
+    The server selects files by policy and retention date from its durable
+    BackupLog records.  The agent additionally confines deletion to the policy
+    storage directory, so a stale or malformed task payload cannot remove an
+    arbitrary local file.  Object storage is intentionally not touched.
+    """
+    retention = policy.get("retention") if isinstance(policy.get("retention"), dict) else {}
+    candidates = retention.get("expired_file_paths") or []
+    storage_path = policy.get("storage_path")
+    if not isinstance(storage_path, str) or not storage_path.strip() or not isinstance(candidates, list):
+        return 0
+
+    storage_root = os.path.realpath(storage_path)
+    deleted = 0
+    for value in candidates:
+        if not isinstance(value, str) or not os.path.isabs(value):
+            continue
+        candidate = os.path.realpath(value)
+        try:
+            if os.path.commonpath([storage_root, candidate]) != storage_root:
+                continue
+        except ValueError:
+            continue
+        if not os.path.isfile(candidate):
+            continue
+        try:
+            os.remove(candidate)
+            deleted += 1
+        except OSError:
+            logger.warning("failed to remove expired backup file: %s", candidate, exc_info=True)
+    return deleted
 
 
 def _run_backup_task(app, task_id, policy, instance):
@@ -770,7 +1087,10 @@ def execute_backup():
     with _backup_tasks_lock:
         existing = _backup_tasks.get(task_id)
         if existing:
-            return ok_response(data={"task_id": task_id, "status": existing.get("status")}, code=202)
+            data = {"task_id": task_id, "status": existing.get("status")}
+            if existing.get("recovery_managed"):
+                data["recovery_managed"] = True
+            return ok_response(data=data, code=202)
         _backup_tasks[task_id] = {
             "task_id": task_id,
             "status": "submitted",
@@ -782,6 +1102,26 @@ def execute_backup():
         }
 
     app = current_app._get_current_object()
+    if _recovery_ready(app):
+        try:
+            _start_recovery_worker(app, task_id, deepcopy(policy), deepcopy(instance))
+        except Exception as exc:
+            logger.exception("failed to start recoverable backup task: task_id=%s", task_id)
+            with _backup_tasks_lock:
+                task = _backup_tasks.get(task_id)
+                if task:
+                    task.update({
+                        "status": "failed",
+                        "phase": "failed",
+                        "finished_at": datetime.utcnow().isoformat() + "Z",
+                        "result": {"ok": False, "message": str(exc)},
+                    })
+            return error_response(f"failed to start backup worker: {exc}", code=500)
+        return ok_response(
+            data={"task_id": task_id, "status": "submitted", "recovery_managed": True},
+            code=202,
+        )
+
     worker = threading.Thread(
         target=_run_backup_task,
         args=(app, task_id, deepcopy(policy), deepcopy(instance)),
@@ -813,9 +1153,21 @@ def cancel_backup_task(task_id):
     for proc in processes:
         try:
             if proc.poll() is None:
-                proc.terminate()
+                if task.get("recovery_managed") and task.get("pid") == getattr(proc, "pid", None):
+                    os.killpg(int(task["pid"]), signal.SIGTERM)
+                else:
+                    proc.terminate()
         except Exception:
             logger.warning("failed to terminate backup process: task_id=%s", task_id, exc_info=True)
+    if task.get("recovery_managed") and not processes and _process_matches(task):
+        try:
+            os.killpg(int(task["pid"]), signal.SIGTERM)
+        except Exception:
+            logger.warning("failed to terminate recovered backup worker: task_id=%s", task_id, exc_info=True)
+    if task.get("recovery_managed"):
+        app = current_app._get_current_object()
+        _persist_recovery_task(app, task)
+        _checkpoint_recovery_task(app, task)
     return ok_response(data=snapshot, code=202)
 
 

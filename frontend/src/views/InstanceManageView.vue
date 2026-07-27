@@ -2374,7 +2374,10 @@ async function loadHealthStatusFromDb(force = false) {
     return;
   }
   lastHealthFetchAt.value = Date.now();
-  const healthRows = displayRows.value.length ? displayRows.value : rows.value;
+  // CPU / memory / disk filters apply before client-side pagination. Load the
+  // same complete instance scope here; otherwise non-MySQL databases only have
+  // metrics for the visible page and valid matches on later pages disappear.
+  const healthRows = rows.value;
   const instanceIds = healthRows.map((row) => row.id).filter((id) => id !== null && id !== undefined);
   if (!instanceIds.length) {
     return;

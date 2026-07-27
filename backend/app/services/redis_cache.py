@@ -22,6 +22,8 @@ KEY_SNAPSHOT_PREFIX = "dbms:latest_snapshot"
 KEY_LAST_SUCCESS_SNAPSHOT_PREFIX = "dbms:last_success_snapshot"
 LATEST_SNAPSHOT_TTL_SECONDS = 600
 KEY_INSPECTION_SUMMARY = "dbms:inspection:last_summary"
+KEY_BACKUP_AGENT_TASK_PREFIX = "dbms:backup_agent_task"
+BACKUP_AGENT_TASK_TTL_SECONDS = 8 * 24 * 60 * 60
 
 
 def _json_default(value):
@@ -129,6 +131,22 @@ def last_success_snapshot_key(db_type: str, instance_id: int, metric_type: str =
 
 def instance_status_key(instance_id: int) -> str:
     return f"{KEY_INSTANCE_STATUS_PREFIX}:{int(instance_id)}"
+
+
+def backup_agent_task_key(agent_id: int, task_id: str) -> str:
+    return f"{KEY_BACKUP_AGENT_TASK_PREFIX}:{int(agent_id)}:{task_id}"
+
+
+def set_backup_agent_task(agent_id: int, task_id: str, payload: dict) -> bool:
+    return set_json(
+        backup_agent_task_key(agent_id, task_id),
+        payload if isinstance(payload, dict) else {},
+        ex=BACKUP_AGENT_TASK_TTL_SECONDS,
+    )
+
+
+def get_backup_agent_task(agent_id: int, task_id: str):
+    return get_json(backup_agent_task_key(agent_id, task_id))
 
 
 class CachedSnapshot(SimpleNamespace):

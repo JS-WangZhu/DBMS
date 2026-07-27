@@ -479,7 +479,7 @@ const draggingTabId = ref("");
 const username = computed(() => {
   try {
     const user = JSON.parse(localStorage.getItem("dbms_user") || "{}");
-    return user.username || "unknown";
+    return String(user.display_name || "").trim() || user.username || "unknown";
   } catch {
     return "unknown";
   }

@@ -280,6 +280,14 @@ def build_mcp_instance_status(filters=None, allowed_cluster_ids=None):
     db_type = (filters.get("db_type") or "").strip().lower()
     if db_type in DB_TYPES:
         query = query.filter(DatabaseInstance.db_type == db_type)
+    if filters.get("instance_id"):
+        query = query.filter(DatabaseInstance.id == int(filters["instance_id"]))
+    if filters.get("instance_name"):
+        query = query.filter(DatabaseInstance.name == filters["instance_name"])
+    if filters.get("host"):
+        query = query.filter(DatabaseInstance.host_input == filters["host"])
+    if filters.get("port"):
+        query = query.filter(DatabaseInstance.port == int(filters["port"]))
     if allowed_cluster_ids is not None:
         if not allowed_cluster_ids:
             return _empty_result(filters)
