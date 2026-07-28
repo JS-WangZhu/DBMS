@@ -27,3 +27,7 @@ export function getInstanceStatusConfig() {
 export function updateInstanceStatusConfig(payload) {
   return client.put("/instances/status-config", payload);
 }
+
+export function createJumpServerAccess(instanceId) {
+  return client.post(`/instances/${instanceId}/jumpserver-access`);
+}

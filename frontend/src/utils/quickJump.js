@@ -53,6 +53,7 @@ export const QUICK_JUMP_MENUS = [
   menu("domain_config", "/config/domain", "域名配置管理", "配置管理", "yu ming pei zhi guan li"),
   menu("mcp_platform", "/config/mcp-platform", "MCP 开放平台", "配置管理", "mcp kai fang ping tai"),
   menu("sso_config", "/config/sso", "SSO 登录管理", "配置管理", "sso deng lu guan li"),
+  menu("jumpserver_config", "/config/jumpserver", "JumpServer 管理", "配置管理", "jumpserver guan li", ["堡垒机"]),
 ];
 
 export function normalizeQuickJumpText(value) {

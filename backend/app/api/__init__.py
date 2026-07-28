@@ -15,6 +15,7 @@ from app.api.routes.data_query_ops import bp as data_query_ops_bp
 from app.api.routes.health import bp as health_bp
 from app.api.routes.ha_configs import bp as ha_configs_bp
 from app.api.routes.instances import bp as instances_bp
+from app.api.routes.jumpserver_configs import bp as jumpserver_configs_bp
 from app.api.routes.inspection import bp as inspection_bp
 from app.api.routes.metrics import bp as metrics_bp
 from app.api.routes.mcp_platform import bp as mcp_platform_bp
@@ -43,6 +44,7 @@ def register_blueprints(app):
     api_v1.register_blueprint(user_permissions_bp)
     api_v1.register_blueprint(clusters_bp)
     api_v1.register_blueprint(instances_bp)
+    api_v1.register_blueprint(jumpserver_configs_bp)
     api_v1.register_blueprint(inspection_bp)
     api_v1.register_blueprint(mysql_bp)
     api_v1.register_blueprint(mongodb_bp)

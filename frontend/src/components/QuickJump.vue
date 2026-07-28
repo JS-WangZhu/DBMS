@@ -77,7 +77,7 @@ const iconMap = {
   backup_agents: Monitor, ai_model_config: TrendCharts, ha_config: Lightning,
   instance_status_config: Timer, physical_discovery_manage: Monitor,
   data_query_op_config: DataAnalysis, backup_notify_targets: Bell, domain_config: Location,
-  mcp_platform: SetUp, sso_config: Key,
+  mcp_platform: SetUp, sso_config: Key, jumpserver_config: Monitor,
 };
 
 watch(results, () => {

@@ -2,6 +2,7 @@ from sqlalchemy import String, cast, or_
 
 from app.extensions import db
 from app.models.db_asset import DatabaseCluster, DatabaseInstance
+from app.models.jumpserver_config import JumpServerConfig
 from app.models.backup_agent import BackupAgent
 from app.services.dns_resolver import resolve_and_update_instance, resolve_host
 from app.services.redis_cache import KEY_INSTANCE_LIST_PREFIX, delete_pattern, get_json, set_json
@@ -26,6 +27,29 @@ def _normalize_access_binding(access_mode, probe_agent_id):
     if not agent.enabled:
         return None, None, "probe agent is disabled"
     return mode, agent_id, None
+
+
+def _normalize_jumpserver_binding(config_id, asset_id):
+    if config_id in (None, "") and asset_id in (None, ""):
+        return None, None, None
+    if config_id in (None, ""):
+        return None, None, "jumpserver_config_id is required when jumpserver_asset_id is set"
+
+    asset_id_text = str(asset_id or "").strip()
+    if not asset_id_text:
+        return None, None, "jumpserver_asset_id is required when jumpserver_config_id is set"
+    if len(asset_id_text) > 128:
+        return None, None, "jumpserver_asset_id is too long"
+    try:
+        config_id_int = int(config_id)
+    except (TypeError, ValueError):
+        return None, None, "jumpserver_config_id must be an integer"
+    config = JumpServerConfig.query.get(config_id_int)
+    if not config:
+        return None, None, "JumpServer config not found"
+    if not config.enabled:
+        return None, None, "JumpServer config is disabled"
+    return config_id_int, asset_id_text, None
 
 
 def _instance_list_cache_key(db_type=None, enabled=None):
@@ -271,6 +295,12 @@ def create_instance(payload: dict, db_type: str):
     if access_err:
         return None, access_err
 
+    jumpserver_config_id, jumpserver_asset_id, jumpserver_err = _normalize_jumpserver_binding(
+        payload.get("jumpserver_config_id"), payload.get("jumpserver_asset_id")
+    )
+    if jumpserver_err:
+        return None, jumpserver_err
+
     normalized_extra_json = _normalize_extra_json(payload.get("extra_json"))
     uniqueness_err = _validate_instance_uniqueness_in_cluster(
         db_type=db_type,
@@ -296,6 +326,8 @@ def create_instance(payload: dict, db_type: str):
         extra_json=normalized_extra_json,
         access_mode=access_mode,
         probe_agent_id=probe_agent_id,
+        jumpserver_config_id=jumpserver_config_id,
+        jumpserver_asset_id=jumpserver_asset_id,
     )
 
     db.session.add(instance)
@@ -315,6 +347,16 @@ def update_instance(instance: DatabaseInstance, payload: dict):
             raise ValueError(access_err)
         instance.access_mode = access_mode
         instance.probe_agent_id = probe_agent_id
+
+    if "jumpserver_config_id" in payload or "jumpserver_asset_id" in payload:
+        jumpserver_config_id, jumpserver_asset_id, jumpserver_err = _normalize_jumpserver_binding(
+            payload.get("jumpserver_config_id", instance.jumpserver_config_id),
+            payload.get("jumpserver_asset_id", instance.jumpserver_asset_id),
+        )
+        if jumpserver_err:
+            raise ValueError(jumpserver_err)
+        instance.jumpserver_config_id = jumpserver_config_id
+        instance.jumpserver_asset_id = jumpserver_asset_id
 
     if "cluster_id" in payload:
         cluster_id, cluster_err = _validate_cluster_binding(payload.get("cluster_id"), db_type=instance.db_type)

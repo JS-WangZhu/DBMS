@@ -11,6 +11,7 @@ from app.models.db_asset import DatabaseCluster, DatabaseInstance
 from app.models.ha_config import HAConfig
 from app.models.inspection import InspectionAlert, InspectionConfig
 from app.models.instance_status_config import InstanceStatusConfig
+from app.models.jumpserver_config import JumpServerConfig
 from app.models.physical_discovery import (
     PhysicalDiscoveryConfig,
     PhysicalDiscoveryDetail,
@@ -58,6 +59,7 @@ __all__ = [
     "InspectionConfig",
     "InspectionAlert",
     "InstanceStatusConfig",
+    "JumpServerConfig",
     "PhysicalDiscoveryConfig",
     "PhysicalDiscoveryDetail",
     "PhysicalDiscoveryRun",

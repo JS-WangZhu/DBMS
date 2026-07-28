@@ -23,6 +23,7 @@ import HAConfigView from "../views/HAConfigView.vue";
 import DataQueryView from "../views/DataQueryView.vue";
 import InstanceManageView from "../views/InstanceManageView.vue";
 import InstanceStatusConfigView from "../views/InstanceStatusConfigView.vue";
+import JumpServerConfigView from "../views/JumpServerConfigView.vue";
 import PhysicalDiscoveryManageView from "../views/PhysicalDiscoveryManageView.vue";
 import InspectionManageView from "../views/InspectionManageView.vue";
 import InspectionParamConfigView from "../views/InspectionParamConfigView.vue";
@@ -128,6 +129,7 @@ const routes = [
       { path: "/config/domain", component: DomainConfigManageView, meta: { title: "域名配置管理" } },
       { path: "/config/mcp-platform", component: McpPlatformView, meta: { title: "MCP开放平台" } },
       { path: "/config/sso", component: SsoConfigView, meta: { title: "SSO登录管理" } },
+      { path: "/config/jumpserver", component: JumpServerConfigView, meta: { title: "JumpServer管理" } },
     ],
   },
 ];

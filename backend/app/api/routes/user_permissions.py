@@ -70,6 +70,7 @@ MENU_CATALOG = [
     {"key": "data_query_op_config", "label": "数据查询操作配置"},
     {"key": "mcp_platform", "label": "MCP开放平台"},
     {"key": "sso_config", "label": "SSO登录管理"},
+    {"key": "jumpserver_config", "label": "JumpServer管理"},
 ]
 MENU_CATALOG.append({"key": "physical_discovery_manage", "label": "物理机探测管理"})
 MENU_KEY_SET = {item["key"] for item in MENU_CATALOG}

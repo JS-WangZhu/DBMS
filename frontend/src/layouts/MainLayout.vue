@@ -275,7 +275,7 @@
           </el-menu-item>
         </el-sub-menu>
 
-        <el-sub-menu v-if="hasAnyMenu(['ai_model_config', 'ha_config', 'instance_status_config', 'data_query_op_config', 'backup_notify_targets', 'backup_agents', 'domain_config', 'mcp_platform', 'sso_config'])" index="config">
+        <el-sub-menu v-if="hasAnyMenu(['ai_model_config', 'ha_config', 'instance_status_config', 'data_query_op_config', 'backup_notify_targets', 'backup_agents', 'domain_config', 'mcp_platform', 'sso_config', 'jumpserver_config'])" index="config">
           <template #title>
             <el-icon><Management /></el-icon>
             <span>配置管理</span>
@@ -319,6 +319,10 @@
           <el-menu-item v-if="hasMenu('sso_config')" index="/config/sso">
             <el-icon><Key /></el-icon>
             <span>SSO登录管理</span>
+          </el-menu-item>
+          <el-menu-item v-if="hasMenu('jumpserver_config')" index="/config/jumpserver">
+            <el-icon><Monitor /></el-icon>
+            <span>JumpServer管理</span>
           </el-menu-item>
         </el-sub-menu>
       </el-menu>
@@ -582,6 +586,7 @@ const routePermissionMap = {
   "/config/domain": "domain_config",
   "/config/mcp-platform": "mcp_platform",
   "/config/sso": "sso_config",
+  "/config/jumpserver": "jumpserver_config",
 };
 
 function hasMenu(key) {
@@ -678,6 +683,7 @@ const tabIconMap = {
   "/config/domain": Location,
   "/config/mcp-platform": SetUp,
   "/config/sso": Key,
+  "/config/jumpserver": Monitor,
 };
 
 function tabIcon(path) {

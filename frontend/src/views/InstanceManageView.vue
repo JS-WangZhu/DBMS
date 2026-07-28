@@ -373,6 +373,23 @@
             </div>
           </template>
         </el-table-column>
+        <el-table-column label="访问资产" width="78" fixed="right" align="center" class-name="jumpserver-col">
+          <template #default="scope">
+            <el-tooltip :content="jumpserverAccessTip(scope.row)" placement="top">
+              <span>
+                <el-button
+                  link
+                  type="primary"
+                  :icon="Monitor"
+                  :disabled="!jumpserverAccessAvailable(scope.row)"
+                  :loading="jumpserverOpeningId === scope.row.id"
+                  aria-label="通过 JumpServer 访问资产"
+                  @click.stop="openJumpServerAsset(scope.row)"
+                />
+              </span>
+            </el-tooltip>
+          </template>
+        </el-table-column>
         <el-table-column label="操作" width="90" fixed="right" class-name="op-col">
           <template #default="scope">
             <div class="op-actions">
@@ -436,6 +453,25 @@
             <el-option v-for="item in probeAgents" :key="item.id" :label="item.name" :value="item.id" />
           </el-select>
         </el-form-item>
+        <el-form-item label="JumpServer">
+          <el-select
+            v-model="form.jumpserver_config_id"
+            clearable
+            filterable
+            style="width: 100%"
+            placeholder="可选：选择 JumpServer 配置"
+            @clear="form.jumpserver_asset_id = ''"
+          >
+            <el-option v-for="item in jumpserverOptions" :key="item.id" :label="item.name" :value="item.id" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="资产ID">
+          <el-input
+            v-model.trim="form.jumpserver_asset_id"
+            :disabled="!form.jumpserver_config_id"
+            placeholder="JumpServer 中对应数据库资产的 ID/UUID"
+          />
+        </el-form-item>
         <el-form-item label="域名"><el-input v-model.trim="form.host_domain" placeholder="可选，如 db.example.com" /></el-form-item>
         <el-form-item label="地址"><el-input v-model="form.host_input" placeholder="IP或主机地址" /></el-form-item>
         <el-form-item label="物理机探测模式">
@@ -485,11 +521,12 @@
 import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, reactive, ref, watch } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { useRoute } from "vue-router";
-import { Coin, Files, Lightning, DataAnalysis, Download, Filter } from "@element-plus/icons-vue";
+import { Coin, Files, Lightning, DataAnalysis, Download, Filter, Monitor } from "@element-plus/icons-vue";
 
 import { collectClusterHealth, listClusters } from "../api/modules/clusters";
   import { createDorisInstance, dorisFeStatus, listDorisInstances } from "../api/modules/doris";
-  import { deleteInstance, getInstanceStatusConfig, updateInstance as updateInstanceById } from "../api/modules/instances";
+  import { createJumpServerAccess, deleteInstance, getInstanceStatusConfig, updateInstance as updateInstanceById } from "../api/modules/instances";
+  import { listJumpServerOptions } from "../api/modules/jumpserver";
   import { createMongoInstance, listMongoInstances, mongoReplicaStatus } from "../api/modules/mongodb";
   import { getInstanceHealth, getInstancesHealth } from "../api/modules/monitoring";
   import { createMysqlInstance, listMysqlInstances, mysqlInstanceDetail, mysqlReplication } from "../api/modules/mysql";
@@ -581,6 +618,8 @@ const editingInstanceId = ref(null);
 const rows = ref([]);
 const clusters = ref([]);
 const probeAgents = ref([]);
+const jumpserverOptions = ref([]);
+const jumpserverOpeningId = ref(null);
 const keyword = ref("");
 const healthIntervalSec = ref(0);
 const statusProbePollIntervalSec = ref(30);
@@ -642,6 +681,8 @@ const form = reactive({
   cluster_id: null,
   access_mode: "server",
   probe_agent_id: null,
+  jumpserver_config_id: null,
+  jumpserver_asset_id: "",
   host_domain: "",
   host_input: "",
   physical_address: "",
@@ -984,6 +1025,8 @@ function resetForm() {
   form.cluster_id = null;
   form.access_mode = "server";
   form.probe_agent_id = null;
+  form.jumpserver_config_id = null;
+  form.jumpserver_asset_id = "";
   form.host_domain = "";
   form.host_input = "";
   form.physical_address = "";
@@ -1012,6 +1055,11 @@ function openEditDialog(row) {
   form.cluster_id = row.cluster_id ?? null;
   form.access_mode = row.access_mode === "agent" ? "agent" : "server";
   form.probe_agent_id = row.probe_agent_id ?? null;
+  form.jumpserver_config_id = row.jumpserver_config_id ?? null;
+  form.jumpserver_asset_id = row.jumpserver_asset_id || "";
+  if (row.jumpserver_config_id && !jumpserverOptions.value.some((item) => item.id === row.jumpserver_config_id)) {
+    jumpserverOptions.value.push({ id: row.jumpserver_config_id, name: `${row.jumpserver_config_name || `#${row.jumpserver_config_id}`}（已停用）` });
+  }
   form.host_domain = row.host_domain || (rawExtra.domain || "");
   form.host_input = row.host_input || "";
   form.physical_address = rawExtra.physical_address || "";
@@ -2231,6 +2279,51 @@ async function loadProbeAgents() {
   }
 }
 
+async function loadJumpServerOptions() {
+  try {
+    const { data } = await listJumpServerOptions();
+    jumpserverOptions.value = data?.data || [];
+  } catch (error) {
+    jumpserverOptions.value = [];
+    ElMessage.error(error.response?.data?.message || "加载 JumpServer 配置失败");
+  }
+}
+
+function jumpserverAccessAvailable(row) {
+  return Boolean(row?.jumpserver_config_id && row?.jumpserver_asset_id && row?.jumpserver_config_enabled !== false);
+}
+
+function jumpserverAccessTip(row) {
+  if (!row?.jumpserver_config_id || !row?.jumpserver_asset_id) return "未绑定 JumpServer 资产";
+  if (row?.jumpserver_config_enabled === false) return "JumpServer 配置已停用";
+  return `通过 ${row.jumpserver_config_name || "JumpServer"} 访问资产`;
+}
+
+async function openJumpServerAsset(row) {
+  if (!jumpserverAccessAvailable(row) || jumpserverOpeningId.value) return;
+  const popup = window.open("", "_blank");
+  if (!popup) {
+    ElMessage.warning("浏览器阻止了新窗口，请允许本站打开弹窗后重试");
+    return;
+  }
+  popup.opener = null;
+  popup.document.title = "正在打开 JumpServer";
+  popup.document.body.textContent = "正在打开 JumpServer，请稍候...";
+  jumpserverOpeningId.value = row.id;
+  try {
+    const { data } = await createJumpServerAccess(row.id);
+    const targetUrl = data?.data?.url;
+    const parsed = new URL(targetUrl);
+    if (!["http:", "https:"].includes(parsed.protocol)) throw new Error("JumpServer 返回了不安全的访问地址");
+    popup.location.replace(parsed.toString());
+  } catch (error) {
+    popup.close();
+    ElMessage.error(error.response?.data?.message || error.message || "打开 JumpServer 失败");
+  } finally {
+    jumpserverOpeningId.value = null;
+  }
+}
+
 async function loadClusters() {
   try {
     const { data } = await listClusters(dbType.value);
@@ -2530,6 +2623,11 @@ async function onSubmit() {
     return;
   }
 
+  if (Boolean(form.jumpserver_config_id) !== Boolean((form.jumpserver_asset_id || "").trim())) {
+    ElMessage.warning("JumpServer 配置和资产 ID 必须同时填写或同时清空");
+    return;
+  }
+
   saving.value = true;
   try {
     const extraJson = buildExtraJsonPayload();
@@ -2542,6 +2640,8 @@ async function onSubmit() {
         extra_json: extraJson,
         access_mode: form.access_mode,
         probe_agent_id: form.access_mode === "agent" ? form.probe_agent_id : null,
+        jumpserver_config_id: form.jumpserver_config_id || null,
+        jumpserver_asset_id: (form.jumpserver_asset_id || "").trim() || null,
       };
       if (showUsername.value) {
         payload.username = form.username || null;
@@ -2561,6 +2661,8 @@ async function onSubmit() {
         extra_json: extraJson,
         access_mode: form.access_mode,
         probe_agent_id: form.access_mode === "agent" ? form.probe_agent_id : null,
+        jumpserver_config_id: form.jumpserver_config_id || null,
+        jumpserver_asset_id: (form.jumpserver_asset_id || "").trim() || null,
       };
 
       if (showUsername.value) {
@@ -2833,7 +2935,7 @@ onMounted(async () => {
     resetForm();
     resetPager();
     await loadInstanceStatusConfig();
-    await Promise.all([loadProbeAgents(), reloadAll()]);
+    await Promise.all([loadProbeAgents(), loadJumpServerOptions(), reloadAll()]);
     setupHealthTimer();
   } finally {
     endPageLoading();

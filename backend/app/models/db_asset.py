@@ -79,9 +79,12 @@ class DatabaseInstance(db.Model, TimestampMixin):
     running_status = db.Column(db.String(32), nullable=True, default="unknown")
     access_mode = db.Column(db.String(16), nullable=False, default="server")
     probe_agent_id = db.Column(db.Integer, db.ForeignKey("backup_agents.id"), nullable=True)
+    jumpserver_config_id = db.Column(db.Integer, db.ForeignKey("jumpserver_configs.id"), nullable=True)
+    jumpserver_asset_id = db.Column(db.String(128), nullable=True)
 
     cluster = db.relationship("DatabaseCluster", back_populates="instances")
     probe_agent = db.relationship("BackupAgent", foreign_keys=[probe_agent_id])
+    jumpserver_config = db.relationship("JumpServerConfig", back_populates="database_instances")
 
     def to_dict(self) -> dict:
         extra = dict(self.extra_json) if isinstance(self.extra_json, dict) else {}
@@ -106,6 +109,10 @@ class DatabaseInstance(db.Model, TimestampMixin):
             "access_mode": self.access_mode if self.access_mode in {"server", "agent"} else "server",
             "probe_agent_id": self.probe_agent_id,
             "probe_agent_name": self.probe_agent.name if self.probe_agent else None,
+            "jumpserver_config_id": self.jumpserver_config_id,
+            "jumpserver_config_name": self.jumpserver_config.name if self.jumpserver_config else None,
+            "jumpserver_config_enabled": bool(self.jumpserver_config.enabled) if self.jumpserver_config else None,
+            "jumpserver_asset_id": self.jumpserver_asset_id,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }

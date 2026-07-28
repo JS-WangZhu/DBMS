@@ -1,6 +1,13 @@
 from flask import Blueprint, current_app, request
 
-from app.api.routes.common import active_user_required, admin_required, require_menu_permission
+from app.api.routes.common import (
+    active_user_required,
+    admin_required,
+    get_current_user,
+    get_effective_menu_keys,
+    require_cluster_permission,
+    require_menu_permission,
+)
 from app.extensions import db, scheduler
 from app.models.db_asset import DatabaseInstance
 from app.models.monitor_snapshot import snapshot_model_for_instance
@@ -14,10 +21,19 @@ from app.services.instance_service import (
     list_instances as list_instances_by_type,
     update_instance as update_instance_entity,
 )
+from app.services.jumpserver_service import build_jumpserver_access_url
 from app.tasks.scheduler import sync_cache_warm_job, sync_monitor_collect_job
 from app.utils.response import error_response, ok_response
 
 bp = Blueprint("instances", __name__, url_prefix="/instances")
+
+INSTANCE_MENU_BY_DB_TYPE = {
+    "mysql": "mysql_instances",
+    "mongodb": "mongodb_instances",
+    "redis": "redis_instances",
+    "postgresql": "postgresql_instances",
+    "doris": "doris_instances",
+}
 
 
 @bp.get("")
@@ -130,3 +146,37 @@ def resolve_instance(instance_id):
     )
 
     return ok_response(data={"changed": changed, "old_ip": old_ip, "new_ip": new_ip, "instance": instance.to_dict()})
+
+
+@bp.post("/<int:instance_id>/jumpserver-access")
+@active_user_required
+def create_jumpserver_access(instance_id):
+    instance = DatabaseInstance.query.get_or_404(instance_id)
+    user = get_current_user()
+    menu_key = INSTANCE_MENU_BY_DB_TYPE.get(instance.db_type)
+    if user.role != "admin" and (not menu_key or menu_key not in get_effective_menu_keys(user.id)):
+        return error_response("permission denied", code=403)
+    if instance.cluster_id and not require_cluster_permission(instance.cluster_id, "query"):
+        return error_response("cluster permission denied", code=403)
+    if not instance.jumpserver_config_id or not instance.jumpserver_asset_id:
+        return error_response("instance is not bound to a JumpServer asset", code=409)
+    config = instance.jumpserver_config
+    if not config or not config.enabled:
+        return error_response("JumpServer config is disabled or missing", code=409)
+    try:
+        url = build_jumpserver_access_url(config, instance.jumpserver_asset_id)
+    except ValueError as exc:
+        return error_response(str(exc), code=400)
+
+    log_audit(
+        user_id=user.id,
+        action="instance.jumpserver.access",
+        target_type="instance",
+        target_id=str(instance.id),
+        detail={
+            "db_type": instance.db_type,
+            "jumpserver_config_id": config.id,
+            "jumpserver_asset_id": instance.jumpserver_asset_id,
+        },
+    )
+    return ok_response(data={"url": url})

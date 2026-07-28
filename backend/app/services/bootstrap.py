@@ -56,6 +56,10 @@ def ensure_backup_extra_columns():
         statements.append("ALTER TABLE db_instances ADD COLUMN access_mode VARCHAR(16) NOT NULL DEFAULT 'server'")
     if table_columns["db_instances"] and "probe_agent_id" not in table_columns["db_instances"]:
         statements.append("ALTER TABLE db_instances ADD COLUMN probe_agent_id INTEGER NULL")
+    if table_columns["db_instances"] and "jumpserver_config_id" not in table_columns["db_instances"]:
+        statements.append("ALTER TABLE db_instances ADD COLUMN jumpserver_config_id INTEGER NULL")
+    if table_columns["db_instances"] and "jumpserver_asset_id" not in table_columns["db_instances"]:
+        statements.append("ALTER TABLE db_instances ADD COLUMN jumpserver_asset_id VARCHAR(128) NULL")
     if table_columns["inspection_alerts"] and "muted_at" not in table_columns["inspection_alerts"]:
         statements.append("ALTER TABLE inspection_alerts ADD COLUMN muted_at DATETIME NULL")
     if table_columns["inspection_alerts"] and "muted_until" not in table_columns["inspection_alerts"]:
