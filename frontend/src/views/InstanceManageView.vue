@@ -373,7 +373,7 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="访问资产" width="78" fixed="right" align="center" class-name="jumpserver-col">
+        <el-table-column label="访问资产" width="78" fixed="right" align="center" header-align="left" class-name="jumpserver-col">
           <template #default="scope">
             <el-tooltip :content="jumpserverAccessTip(scope.row)" placement="top">
               <span>
@@ -2299,6 +2299,70 @@ function jumpserverAccessTip(row) {
   return `通过 ${row.jumpserver_config_name || "JumpServer"} 访问资产`;
 }
 
+function renderJumpServerLoadingPage(popup, row) {
+  const doc = popup.document;
+  doc.open();
+  doc.write(`<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>正在打开堡垒机</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh; display: grid; place-items: center;
+      color: #1f2937; font-family: Inter, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background:
+        radial-gradient(circle at 20% 15%, rgba(64, 158, 255, .18), transparent 34%),
+        radial-gradient(circle at 82% 82%, rgba(103, 194, 58, .12), transparent 32%),
+        linear-gradient(145deg, #f8fbff 0%, #eef5ff 100%);
+    }
+    .card {
+      width: min(420px, calc(100vw - 40px)); padding: 42px 38px 36px; text-align: center;
+      background: rgba(255, 255, 255, .9); border: 1px solid rgba(148, 163, 184, .24);
+      border-radius: 20px; box-shadow: 0 22px 60px rgba(30, 64, 175, .12);
+      backdrop-filter: blur(14px); animation: card-in .42s ease-out both;
+    }
+    .loader { position: relative; width: 82px; height: 82px; margin: 0 auto 25px; }
+    .ring {
+      position: absolute; inset: 0; border: 3px solid rgba(64, 158, 255, .16);
+      border-top-color: #409eff; border-right-color: #67c23a; border-radius: 50%;
+      animation: spin 1.15s linear infinite;
+    }
+    .terminal {
+      position: absolute; inset: 13px; display: grid; place-items: center; border-radius: 14px;
+      color: #fff; background: linear-gradient(145deg, #409eff, #2563eb);
+      box-shadow: 0 8px 20px rgba(37, 99, 235, .25); font: 700 19px/1 ui-monospace, monospace;
+    }
+    h1 { margin: 0; font-size: 21px; font-weight: 650; letter-spacing: .02em; }
+    .subtitle { margin: 12px 0 0; color: #64748b; font-size: 14px; line-height: 1.7; }
+    .target { margin-top: 18px; color: #2563eb; font-size: 13px; font-weight: 600; }
+    .dots i { display: inline-block; width: 4px; height: 4px; margin-left: 4px; border-radius: 50%; background: #409eff; animation: pulse 1.2s ease-in-out infinite; }
+    .dots i:nth-child(2) { animation-delay: .16s; }
+    .dots i:nth-child(3) { animation-delay: .32s; }
+    .security { margin-top: 24px; color: #94a3b8; font-size: 12px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes pulse { 0%, 70%, 100% { opacity: .25; transform: translateY(0); } 35% { opacity: 1; transform: translateY(-3px); } }
+    @keyframes card-in { from { opacity: 0; transform: translateY(10px) scale(.98); } to { opacity: 1; transform: none; } }
+    @media (prefers-reduced-motion: reduce) { .ring, .dots i, .card { animation: none; } }
+  </style>
+</head>
+<body>
+  <main class="card" role="status" aria-live="polite">
+    <div class="loader" aria-hidden="true"><div class="ring"></div><div class="terminal">&gt;_</div></div>
+    <h1>正在建立安全连接</h1>
+    <p class="subtitle">正在验证访问权限并准备堡垒机控制台，请稍候。</p>
+    <div class="target">即将跳转至 <span id="platform-name">JumpServer</span><span class="dots"><i></i><i></i><i></i></span></div>
+    <div class="security">安全访问 · 操作留痕 · 权限受控</div>
+  </main>
+</body>
+</html>`);
+  doc.close();
+  const platformName = doc.getElementById("platform-name");
+  if (platformName) platformName.textContent = row?.jumpserver_config_name || "JumpServer";
+}
+
 async function openJumpServerAsset(row) {
   if (!jumpserverAccessAvailable(row) || jumpserverOpeningId.value) return;
   const popup = window.open("", "_blank");
@@ -2307,14 +2371,14 @@ async function openJumpServerAsset(row) {
     return;
   }
   popup.opener = null;
-  popup.document.title = "正在打开 JumpServer";
-  popup.document.body.textContent = "正在打开 JumpServer，请稍候...";
+  renderJumpServerLoadingPage(popup, row);
   jumpserverOpeningId.value = row.id;
   try {
     const { data } = await createJumpServerAccess(row.id);
     const targetUrl = data?.data?.url;
     const parsed = new URL(targetUrl);
     if (!["http:", "https:"].includes(parsed.protocol)) throw new Error("JumpServer 返回了不安全的访问地址");
+    if (popup.closed) return;
     popup.location.replace(parsed.toString());
   } catch (error) {
     popup.close();
