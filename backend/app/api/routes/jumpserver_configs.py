@@ -136,17 +136,27 @@ def import_instance_mappings():
         if missing_headers:
             return error_response(f"CSV missing columns: {', '.join(missing_headers)}", code=400)
         records = []
+        skipped_count = 0
         for row_number, source in enumerate(reader, start=2):
-            if len(records) >= MAX_MAPPING_CSV_ROWS:
-                return error_response(f"CSV must not exceed {MAX_MAPPING_CSV_ROWS} data rows", code=400)
             normalized = {str(key or "").strip().lower(): str(value or "").strip() for key, value in source.items()}
             if not any(normalized.values()):
                 continue
+            # The downloaded template contains every database instance. Only
+            # rows with an asset id are intended for import; leave the others
+            # untouched so users can fill mappings selectively.
+            if not normalized.get("jumpserver_asset_id"):
+                skipped_count += 1
+                continue
+            if len(records) >= MAX_MAPPING_CSV_ROWS:
+                return error_response(f"CSV must not exceed {MAX_MAPPING_CSV_ROWS} mapping rows", code=400)
             records.append((row_number, normalized))
     except csv.Error as exc:
         return error_response(f"Invalid CSV: {exc}", code=400)
     if not records:
-        return error_response("CSV contains no mapping rows", code=400)
+        return ok_response(
+            data={"imported_count": 0, "skipped_count": skipped_count},
+            message="no mappings to import",
+        )
 
     errors = []
     parsed_records = []
@@ -173,9 +183,7 @@ def import_instance_mappings():
         asset_id = row.get("jumpserver_asset_id", "")
         if config_id is None and not config_name:
             errors.append(_mapping_error(row_number, "jumpserver_config_id or jumpserver_config_name is required"))
-        if not asset_id:
-            errors.append(_mapping_error(row_number, "jumpserver_asset_id is required"))
-        elif len(asset_id) > 128:
+        if len(asset_id) > 128:
             errors.append(_mapping_error(row_number, "jumpserver_asset_id is too long"))
         parsed_records.append((row_number, row, instance_id, config_id, config_name, asset_id))
 
@@ -221,6 +229,11 @@ def import_instance_mappings():
             errors.append(_mapping_error(row_number, f"JumpServer config not found: {config_name}"))
             continue
         config = config_from_id or config_from_name
+        # A row with neither config id nor config name was already recorded as
+        # invalid during basic validation. Do not dereference an empty config
+        # while collecting the remaining row-level errors.
+        if not config:
+            continue
         if config_from_id and config_from_name and config_from_id.id != config_from_name.id:
             errors.append(_mapping_error(row_number, "JumpServer config id and name refer to different configs"))
             continue
@@ -258,7 +271,10 @@ def import_instance_mappings():
         db.session.rollback()
         return error_response(f"CSV import failed: {exc}", code=500)
     invalidate_instance_list_cache()
-    return ok_response(data={"imported_count": len(updates)}, message="mappings imported")
+    return ok_response(
+        data={"imported_count": len(updates), "skipped_count": skipped_count},
+        message="mappings imported",
+    )
 
 
 @bp.post("")

@@ -291,3 +291,79 @@ def test_mapping_csv_validation_is_atomic(client):
     db.session.refresh(instance)
     assert instance.jumpserver_config_id is None
     assert instance.jumpserver_asset_id is None
+
+
+def test_mapping_csv_missing_jumpserver_config_returns_validation_error(client):
+    headers = _admin_headers(client)
+    instance = DatabaseInstance(name="csv-missing-config", db_type="mysql", host_input="10.0.0.4", port=3306)
+    from app.extensions import db
+
+    db.session.add(instance)
+    db.session.commit()
+    content = _mapping_csv(
+        [
+            {
+                "instance_id": instance.id,
+                "db_type": "mysql",
+                "instance_name": "csv-missing-config",
+                "host": "10.0.0.4",
+                "port": 3306,
+                "jumpserver_asset_id": "asset-without-config",
+            }
+        ]
+    )
+    response = client.post(
+        "/api/v1/jumpserver-configs/mapping-import",
+        data={"file": (io.BytesIO(content), "mapping.csv")},
+        content_type="multipart/form-data",
+        headers=headers,
+    )
+    assert response.status_code == 400
+    result = response.get_json()
+    assert result["data"]["error_count"] == 1
+    assert result["data"]["errors"] == [
+        {"row": 2, "message": "jumpserver_config_id or jumpserver_config_name is required"}
+    ]
+    db.session.refresh(instance)
+    assert instance.jumpserver_config_id is None
+    assert instance.jumpserver_asset_id is None
+
+
+def test_mapping_csv_rows_without_asset_id_are_skipped(client):
+    headers = _admin_headers(client)
+    first = DatabaseInstance(name="csv-skip-first", db_type="mysql", host_input="10.0.0.5", port=3306)
+    second = DatabaseInstance(name="csv-skip-second", db_type="redis", host_input="10.0.0.6", port=6379)
+    from app.extensions import db
+
+    db.session.add_all([first, second])
+    db.session.commit()
+    content = _mapping_csv(
+        [
+            {
+                "instance_id": first.id,
+                "db_type": "mysql",
+                "instance_name": "csv-skip-first",
+                "host": "10.0.0.5",
+                "port": 3306,
+            },
+            {
+                "instance_id": second.id,
+                "db_type": "redis",
+                "instance_name": "csv-skip-second",
+                "host": "10.0.0.6",
+                "port": 6379,
+            },
+        ]
+    )
+    response = client.post(
+        "/api/v1/jumpserver-configs/mapping-import",
+        data={"file": (io.BytesIO(content), "mapping.csv")},
+        content_type="multipart/form-data",
+        headers=headers,
+    )
+    assert response.status_code == 200
+    assert response.get_json()["data"] == {"imported_count": 0, "skipped_count": 2}
+    db.session.refresh(first)
+    db.session.refresh(second)
+    assert first.jumpserver_config_id is None
+    assert second.jumpserver_config_id is None

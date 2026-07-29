@@ -226,7 +226,8 @@ async function submitMappingImport() {
   try {
     const { data } = await importJumpServerMappings(mappingFile.value);
     const count = Number(data?.data?.imported_count || 0);
-    ElMessage.success(`成功导入 ${count} 条实例映射`);
+    const skipped = Number(data?.data?.skipped_count || 0);
+    ElMessage.success(`成功导入 ${count} 条实例映射${skipped ? `，忽略 ${skipped} 行未填写资产 ID 的实例` : ""}`);
     importDialogVisible.value = false;
     mappingUploadRef.value?.clearFiles();
   } catch (error) {
