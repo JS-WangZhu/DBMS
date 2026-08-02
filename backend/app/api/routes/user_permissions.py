@@ -49,6 +49,8 @@ MENU_CATALOG = [
     {"key": "data_change", "label": "数据变更"},
     {"key": "ai_analysis", "label": "智能分析"},
     {"key": "data_history", "label": "历史记录"},
+    {"key": "sql_release_apply", "label": "SQL上线"},
+    {"key": "sql_release_history", "label": "上线历史"},
     {"key": "task_schedule", "label": "调度管理"},
     {"key": "task_results", "label": "结果查询"},
     {"key": "backup_mysql_policies", "label": "MySQL策略"},
@@ -63,6 +65,7 @@ MENU_CATALOG = [
     {"key": "users_info", "label": "用户信息管理"},
     {"key": "users_role_groups", "label": "角色组管理"},
     {"key": "users_permissions", "label": "用户权限管理"},
+    {"key": "users_data_sources", "label": "数据源权限管理"},
     {"key": "ai_model_config", "label": "AI模型管理"},
     {"key": "ha_config", "label": "高可用配置管理"},
     {"key": "instance_status_config", "label": "实例状态检测管理"},
@@ -216,35 +219,37 @@ def update_permissions(user_id: int):
     for key in menu_keys:
         db.session.add(UserMenuPermission(user_id=user.id, menu_key=key))
 
-    UserClusterPermission.query.filter_by(user_id=user.id).delete(synchronize_session=False)
-    for item in cluster_permissions:
-        try:
-            cluster_id = int(item.get("cluster_id"))
-        except (TypeError, ValueError):
-            continue
-        if not DatabaseCluster.query.get(cluster_id):
-            continue
-        db.session.add(
-            UserClusterPermission(
-                user_id=user.id,
-                cluster_id=cluster_id,
-                can_query=bool(item.get("can_query")),
-                can_change=bool(item.get("can_change")),
+    if "cluster_permissions" in payload:
+        UserClusterPermission.query.filter_by(user_id=user.id).delete(synchronize_session=False)
+        for item in cluster_permissions:
+            try:
+                cluster_id = int(item.get("cluster_id"))
+            except (TypeError, ValueError):
+                continue
+            if not DatabaseCluster.query.get(cluster_id):
+                continue
+            db.session.add(
+                UserClusterPermission(
+                    user_id=user.id,
+                    cluster_id=cluster_id,
+                    can_query=bool(item.get("can_query")),
+                    can_change=bool(item.get("can_change")),
+                )
             )
-        )
 
     valid_role_group_ids = []
-    for group_id in role_group_ids:
-        try:
-            parsed = int(group_id)
-        except (TypeError, ValueError):
-            continue
-        if not RoleGroup.query.get(parsed):
-            continue
-        valid_role_group_ids.append(parsed)
-    UserRoleGroup.query.filter_by(user_id=user.id).delete(synchronize_session=False)
-    for group_id in sorted(set(valid_role_group_ids)):
-        db.session.add(UserRoleGroup(user_id=user.id, role_group_id=group_id))
+    if "role_group_ids" in payload:
+        for group_id in role_group_ids:
+            try:
+                parsed = int(group_id)
+            except (TypeError, ValueError):
+                continue
+            if not RoleGroup.query.get(parsed):
+                continue
+            valid_role_group_ids.append(parsed)
+        UserRoleGroup.query.filter_by(user_id=user.id).delete(synchronize_session=False)
+        for group_id in sorted(set(valid_role_group_ids)):
+            db.session.add(UserRoleGroup(user_id=user.id, role_group_id=group_id))
 
     db.session.commit()
     log_audit(

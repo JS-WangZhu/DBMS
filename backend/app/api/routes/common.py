@@ -6,9 +6,11 @@ from flask_jwt_extended import get_jwt_identity, jwt_required
 from app.models.user import User
 from app.models.user_permission import (
     ApiKey,
+    DataSourceGroupClusterPermission,
     RoleGroupClusterPermission,
     RoleGroupMenuPermission,
     UserClusterPermission,
+    UserDataSourceGroup,
     UserMenuPermission,
     UserRoleGroup,
 )
@@ -135,12 +137,17 @@ def get_effective_cluster_permissions(user_id: int):
             "can_change": bool(row.can_change),
         }
     role_group_ids = [row.role_group_id for row in UserRoleGroup.query.filter_by(user_id=user_id).all()]
-    if not role_group_ids:
-        return effective
-    for row in RoleGroupClusterPermission.query.filter(RoleGroupClusterPermission.role_group_id.in_(role_group_ids)).all():
-        merged = effective.setdefault(row.cluster_id, {"can_query": False, "can_change": False})
-        merged["can_query"] = merged["can_query"] or bool(row.can_query)
-        merged["can_change"] = merged["can_change"] or bool(row.can_change)
+    if role_group_ids:
+        for row in RoleGroupClusterPermission.query.filter(RoleGroupClusterPermission.role_group_id.in_(role_group_ids)).all():
+            merged = effective.setdefault(row.cluster_id, {"can_query": False, "can_change": False})
+            merged["can_query"] = merged["can_query"] or bool(row.can_query)
+            merged["can_change"] = merged["can_change"] or bool(row.can_change)
+    data_source_group_ids = [row.group_id for row in UserDataSourceGroup.query.filter_by(user_id=user_id).all()]
+    if data_source_group_ids:
+        for row in DataSourceGroupClusterPermission.query.filter(DataSourceGroupClusterPermission.group_id.in_(data_source_group_ids)).all():
+            merged = effective.setdefault(row.cluster_id, {"can_query": False, "can_change": False})
+            merged["can_query"] = merged["can_query"] or bool(row.can_query)
+            merged["can_change"] = merged["can_change"] or bool(row.can_change)
     return effective
 
 

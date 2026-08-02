@@ -6,10 +6,12 @@
         <el-select v-model="form.db_type" size="default" placeholder="选择数据库类型" style="width: 160px" @change="onDbTypeChange">
           <el-option label="MySQL" value="mysql" />
           <el-option label="MongoDB" value="mongodb" />
+          <el-option label="PostgreSQL" value="postgresql" />
           <el-option label="Redis" value="redis" />
         </el-select>
         <el-select
           v-model="form.business_line"
+          :disabled="!form.db_type"
           clearable
           placeholder="选择项目"
           size="default"
@@ -20,6 +22,7 @@
         </el-select>
         <el-select
           v-model="form.environment"
+          :disabled="!form.business_line"
           clearable
           placeholder="选择环境"
           size="default"
@@ -30,6 +33,7 @@
         </el-select>
         <el-select
           v-model="form.cluster_id"
+          :disabled="!form.environment"
           clearable
           placeholder="选择集群"
           size="default"
@@ -82,8 +86,9 @@
       <aside class="schema-panel">
         <div class="schema-header">
           <el-select
-            v-if="form.db_type === 'mysql'"
+            v-if="form.db_type === 'mysql' || form.db_type === 'postgresql'"
             v-model="form.mysql_db"
+            :disabled="!form.cluster_id"
             filterable
             allow-create
             default-first-option
@@ -102,6 +107,7 @@
           <el-select
             v-else-if="form.db_type === 'mongodb'"
             v-model="form.mongo_db"
+            :disabled="!form.cluster_id"
             filterable
             allow-create
             default-first-option
@@ -120,7 +126,7 @@
           <span v-else class="schema-placeholder">Redis 无库浏览</span>
         </div>
 
-        <template v-if="form.db_type === 'mysql' || form.db_type === 'mongodb'">
+        <template v-if="form.db_type === 'mysql' || form.db_type === 'postgresql' || form.db_type === 'mongodb'">
           <div class="schema-search">
             <el-input v-model="schemaKeyword" size="small" placeholder="搜索对象" clearable>
               <template #prefix>
@@ -185,7 +191,7 @@
         <div class="editor-toolbar">
           <div class="toolbar-left">
             <el-tag type="danger" size="small" effect="light" round class="change-tag">变更</el-tag>
-            <template v-if="form.db_type === 'mysql'">
+            <template v-if="form.db_type === 'mysql' || form.db_type === 'postgresql'">
               <span class="current-db" :title="form.mysql_db || ''">
                 <el-icon><Coin /></el-icon>
                 <span>{{ form.mysql_db || "未选择数据库" }}</span>
@@ -220,10 +226,10 @@
         <!-- 编辑区 -->
         <div class="editor-area">
           <SqlEditor
-            v-if="form.db_type === 'mysql'"
+            v-if="form.db_type === 'mysql' || form.db_type === 'postgresql'"
             ref="sqlEditorRef"
             v-model="form.sql"
-            mode="sql"
+            :mode="form.db_type === 'postgresql' ? 'postgresql' : 'sql'"
             placeholder="例如：INSERT INTO users(name) VALUES('Tom');"
             :min-height="260"
             :schema="sqlSchema"
@@ -305,10 +311,13 @@ import {
   listMysqlDatabases,
   listMysqlObjects,
   listMysqlTableColumns,
+  listPostgresqlDatabases,
+  listPostgresqlObjects,
+  listPostgresqlTableColumns,
 } from "../api/modules/data_access";
 
 const form = reactive({
-  db_type: "mysql",
+  db_type: "",
   business_line: "",
   environment: "",
   cluster_id: null,
@@ -416,6 +425,10 @@ function clusterLabel(cluster) {
 }
 
 async function loadClusters() {
+  if (!form.db_type) {
+    clusters.value = [];
+    return;
+  }
   const { data } = await listClusters(form.db_type, { action: "change" });
   clusters.value = data.data || [];
 }
@@ -496,7 +509,7 @@ async function onClusterChange() {
   resetSchema();
   await loadMysqlDatabasesOptions();
   await loadMongoDatabasesOptions();
-  if (form.db_type === "mysql" && form.mysql_db) {
+  if (["mysql", "postgresql"].includes(form.db_type) && form.mysql_db) {
     await loadMysqlSchema();
   } else if (form.db_type === "mongodb" && form.mongo_db) {
     await loadMongoSchema();
@@ -546,14 +559,17 @@ function resetSchema() {
 }
 
 async function loadMysqlDatabasesOptions(silent = false) {
-  if (form.db_type !== "mysql" || !form.cluster_id) {
+  if (!["mysql", "postgresql"].includes(form.db_type) || !form.cluster_id) {
     mysqlDatabases.value = [];
     form.mysql_db = "";
     return;
   }
   mysqlDatabasesLoading.value = true;
   try {
-    const { data } = await listMysqlDatabases(form.cluster_id, currentRoutePayload());
+    const response = form.db_type === "postgresql"
+      ? await listPostgresqlDatabases(form.cluster_id)
+      : await listMysqlDatabases(form.cluster_id, currentRoutePayload());
+    const { data } = response;
     const list = data?.data?.databases || [];
     mysqlDatabases.value = list;
     if (form.mysql_db && !list.includes(form.mysql_db)) {
@@ -561,7 +577,7 @@ async function loadMysqlDatabasesOptions(silent = false) {
     }
   } catch (error) {
     if (!silent) {
-      ElMessage.warning(error.response?.data?.message || "加载 MySQL 数据库列表失败");
+      ElMessage.warning(error.response?.data?.message || `加载 ${form.db_type === "postgresql" ? "PostgreSQL" : "MySQL"} 数据库列表失败`);
     }
   } finally {
     mysqlDatabasesLoading.value = false;
@@ -598,7 +614,10 @@ async function loadMysqlSchema(dbName) {
     return;
   }
   try {
-    const { data } = await listMysqlObjects(form.cluster_id, database, currentRoutePayload());
+    const response = form.db_type === "postgresql"
+      ? await listPostgresqlObjects(form.cluster_id, database)
+      : await listMysqlObjects(form.cluster_id, database, currentRoutePayload());
+    const { data } = response;
     const payload = data?.data || {};
     schemaObjects.value = {
       tables: payload.tables || [],
@@ -721,7 +740,9 @@ async function loadSchemaNode(node, resolve) {
       return resolve(cached.map((c) => columnToTreeNode(data.label, c)));
     }
     try {
-      const res = await listMysqlTableColumns(form.cluster_id, form.mysql_db, data.label, currentRoutePayload());
+      const res = form.db_type === "postgresql"
+        ? await listPostgresqlTableColumns(form.cluster_id, form.mysql_db, data.label)
+        : await listMysqlTableColumns(form.cluster_id, form.mysql_db, data.label, currentRoutePayload());
       const cols = res.data?.data?.columns || [];
       tableColumnsCache[data.label] = cols;
       resolve(cols.map((c) => columnToTreeNode(data.label, c)));
@@ -802,7 +823,10 @@ function columnToTreeNode(tableName, col) {
 function onSchemaNodeClick(data) {
   if (!data) return;
   if (data.kind === "table" || data.kind === "view" || data.kind === "column") {
-    sqlEditorRef.value?.insertText(`\`${data.label}\``);
+    const quoted = form.db_type === "postgresql"
+      ? data.label.split(".").map((item) => `"${item.replaceAll('"', '""')}"`).join(".")
+      : `\`${data.label}\``;
+    sqlEditorRef.value?.insertText(quoted);
   } else if (data.kind === "collection" || data.kind === "mongo-view") {
     const snippet = `db.${data.label}.updateOne({}, {$set: {}})`;
     if (mongoEditorRef.value?.insertText) {
@@ -869,13 +893,13 @@ async function runChange() {
     ElMessage.warning("请选择项目、环境和集群");
     return;
   }
-  if (form.db_type === "mysql") {
+  if (["mysql", "postgresql"].includes(form.db_type)) {
     if (form.route_mode === "manual" && !form.instance_id) {
       ElMessage.warning("请选择变更实例");
       return;
     }
     if (!form.sql.trim()) { ElMessage.warning("请填写 SQL"); return; }
-    if (!`${form.mysql_db || ""}`.trim()) { ElMessage.warning("请选择或输入 MySQL 数据库"); return; }
+    if (!`${form.mysql_db || ""}`.trim()) { ElMessage.warning(`请选择或输入 ${form.db_type === "postgresql" ? "PostgreSQL" : "MySQL"} 数据库`); return; }
   }
   if (form.db_type === "mongodb" && !form.mongo_command.trim()) {
     ElMessage.warning("请填写 Mongo 命令");
@@ -911,8 +935,8 @@ async function runChange() {
       cluster_id: form.cluster_id,
       route_mode: form.db_type === "mysql" ? form.route_mode : undefined,
       instance_id: form.db_type === "mysql" && form.route_mode === "manual" ? form.instance_id : undefined,
-      sql: form.db_type === "mysql" ? form.sql : undefined,
-      database: form.db_type === "mysql" ? `${form.mysql_db || ""}`.trim() : undefined,
+      sql: ["mysql", "postgresql"].includes(form.db_type) ? form.sql : undefined,
+      database: ["mysql", "postgresql"].includes(form.db_type) ? `${form.mysql_db || ""}`.trim() : undefined,
       mongo_command: form.db_type === "mongodb" ? form.mongo_command : undefined,
       mongo_database: form.db_type === "mongodb" ? `${form.mongo_db || ""}`.trim() : undefined,
       query: form.db_type === "redis" ? redisQuery : undefined,
@@ -932,7 +956,7 @@ async function runChange() {
 
 onMounted(async () => {
   await reloadOptions();
-  if (form.db_type === "mysql" && form.cluster_id && form.mysql_db) {
+  if (["mysql", "postgresql"].includes(form.db_type) && form.cluster_id && form.mysql_db) {
     await loadMysqlSchema();
   } else if (form.db_type === "mongodb" && form.cluster_id && form.mongo_db) {
     await loadMongoSchema();

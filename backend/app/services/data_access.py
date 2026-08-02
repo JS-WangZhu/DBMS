@@ -138,7 +138,7 @@ def cancel_execution(execution_id: str, user_id: Optional[int], is_admin: bool):
         return False, "permission denied"
     cancel_callback = row.get("cancel_callback")
     if not callable(cancel_callback):
-        return False, "cancel is only supported for mysql execution"
+        return False, "cancel is not supported for this execution"
     try:
         cancel_callback()
         return True, None
@@ -288,6 +288,25 @@ def validate_mysql_change(sql: str):
     return True, None
 
 
+def validate_postgresql_query(sql: str):
+    statements = _split_sql_statements(sql or "")
+    if not statements:
+        return False, "sql is required"
+    for statement in statements:
+        cleaned = re.sub(r"^(?:\s*(?:--[^\n]*(?:\n|$)|/\*.*?\*/))", "", statement, flags=re.S).strip()
+        keyword_match = re.match(r"^([A-Za-z]+)", cleaned)
+        keyword = keyword_match.group(1).lower() if keyword_match else ""
+        if keyword not in {"select", "with", "explain", "show", "values"}:
+            return False, "PostgreSQL 查询仅允许 SELECT/WITH/EXPLAIN/SHOW/VALUES"
+        if keyword == "with" and re.search(r"\b(insert|update|delete|merge)\b", cleaned, flags=re.I):
+            return False, "PostgreSQL 查询不允许 WITH DML"
+    return True, None
+
+
+def validate_postgresql_change(sql: str):
+    return (True, None) if _split_sql_statements(sql or "") else (False, "sql is required")
+
+
 def _select_instance_by_role(db_type: str, cluster_id: int, role_candidates, payload_key: str):
     instances = DatabaseInstance.query.filter_by(cluster_id=cluster_id, db_type=db_type, enabled=True).all()
     if not instances:
@@ -355,6 +374,13 @@ def pick_instance(db_type: str, cluster_id: int, instance_id: int, for_change: b
         return _select_instance_by_role(db_type, cluster_id, ["primary"] if for_change else ["secondary", "primary"], "mongo_role")
     if db_type == "redis":
         return _select_instance_by_role(db_type, cluster_id, ["master"] if for_change else ["slave", "master"], "role")
+    if db_type == "postgresql":
+        return _select_instance_by_role(
+            db_type,
+            cluster_id,
+            ["primary"] if for_change else ["standby", "primary"],
+            "replication_role",
+        )
     return None
 
 
@@ -443,6 +469,59 @@ def execute_mysql(
             return {"columns": [], "rows": [], "affected_rows": cursor.rowcount}
     finally:
         connection.close()
+
+
+def execute_postgresql(
+    instance: DatabaseInstance,
+    sql: str,
+    timeout_seconds: Optional[int],
+    for_change: bool,
+    database: Optional[str] = None,
+    execution_id: Optional[str] = None,
+):
+    import psycopg2
+    from psycopg2.extras import RealDictCursor
+    from app.services.postgresql_backup import _connection_kwargs
+
+    password = decrypt_secret(instance.password_encrypted) if instance.password_encrypted else None
+    kwargs = _connection_kwargs(instance, password, database=database)
+    timeout = max(1, int(timeout_seconds or 600))
+    kwargs["options"] = f"-c statement_timeout={timeout * 1000}"
+    connection = psycopg2.connect(**kwargs)
+    connection.autocommit = not for_change
+    if execution_id:
+        set_execution_cancel_callback(execution_id, connection.cancel)
+    statements = _split_sql_statements(sql or "")
+    final_rows, final_columns, affected_rows = [], [], 0
+    try:
+        with connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            for statement in statements:
+                cursor.execute(statement)
+                if cursor.description:
+                    rows = cursor.fetchmany(QUERY_ROW_LIMIT + 1)
+                    truncated = len(rows) > QUERY_ROW_LIMIT
+                    final_rows = rows[:QUERY_ROW_LIMIT]
+                    final_columns = [item.name for item in cursor.description]
+                else:
+                    truncated = False
+                if isinstance(cursor.rowcount, int) and cursor.rowcount > 0:
+                    affected_rows += cursor.rowcount
+        if for_change:
+            connection.commit()
+    except Exception:
+        if for_change:
+            connection.rollback()
+        raise
+    finally:
+        connection.close()
+    return {
+        "columns": final_columns,
+        "rows": _json_safe(final_rows),
+        "affected_rows": affected_rows,
+        "statement_count": len(statements),
+        "truncated": truncated if statements else False,
+        "limit": QUERY_ROW_LIMIT,
+    }
 
 
 def list_mysql_databases(instance: DatabaseInstance, timeout_seconds: Optional[int] = 10):

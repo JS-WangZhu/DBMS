@@ -56,33 +56,6 @@
             :props="{ label: 'label', children: 'children' }"
           />
         </el-form-item>
-        <el-form-item label="数据访问">
-          <div class="cluster-access-wrap">
-            <el-input v-model="clusterKeyword" clearable placeholder="搜索集群" style="width: 240px" @input="onClusterSearch" />
-            <el-table :data="pagedClusterPermissions" size="small" stripe>
-              <el-table-column prop="label" label="集群" min-width="220" />
-              <el-table-column label="查询">
-                <template #default="{ row }">
-                  <el-switch v-model="row.can_query" />
-                </template>
-              </el-table-column>
-              <el-table-column label="变更">
-                <template #default="{ row }">
-                  <el-switch v-model="row.can_change" />
-                </template>
-              </el-table-column>
-            </el-table>
-            <div class="cluster-pager">
-              <el-pagination
-                v-model:current-page="clusterPager.page"
-                v-model:page-size="clusterPager.pageSize"
-                :page-sizes="[10, 20, 50, 100]"
-                layout="total, sizes, prev, pager, next, jumper"
-                :total="filteredClusterPermissions.length"
-              />
-            </div>
-          </div>
-        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
@@ -93,10 +66,9 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onMounted, reactive, ref } from "vue";
+import { nextTick, onMounted, reactive, ref } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 
-import { listClusters } from "../api/modules/clusters";
 import { createRoleGroup, deleteRoleGroup, listRoleGroups, updateRoleGroup } from "../api/modules/users";
 
 const rows = ref([]);
@@ -110,33 +82,16 @@ const menuCatalog = ref([]);
 const menuTreeData = ref([]);
 const menuLeafKeys = ref([]);
 const menuTreeRef = ref(null);
-const allClusters = ref([]);
-const clusterPermissions = ref([]);
-const clusterKeyword = ref("");
 
 const pager = reactive({
   page: 1,
   pageSize: 10,
   total: 0,
 });
-const clusterPager = reactive({
-  page: 1,
-  pageSize: 10,
-});
 
 const form = reactive({
   name: "",
   description: "",
-});
-
-const filteredClusterPermissions = computed(() => {
-  const text = clusterKeyword.value.trim().toLowerCase();
-  if (!text) return clusterPermissions.value;
-  return clusterPermissions.value.filter((item) => String(item.label).toLowerCase().includes(text));
-});
-const pagedClusterPermissions = computed(() => {
-  const start = (clusterPager.page - 1) * clusterPager.pageSize;
-  return filteredClusterPermissions.value.slice(start, start + clusterPager.pageSize);
 });
 
 function buildMenuTree(catalog) {
@@ -151,6 +106,7 @@ function buildMenuTree(catalog) {
     ] },
     { key: "inspection", label: "巡检管理", children: ["inspection_manage", "inspection_param_config"] },
     { key: "data_access", label: "数据访问", children: ["data_query", "data_change", "data_history"] },
+    { key: "data_release", label: "数据发布", children: ["sql_release_apply", "sql_release_history"] },
     { key: "task_management", label: "任务管理", children: ["task_schedule", "task_results"] },
     { key: "backup", label: "备份管理", children: [
       { key: "backup_policies", label: "策略管理", children: ["backup_mysql_policies", "backup_postgresql_policies", "backup_mongo_policies"] },
@@ -158,7 +114,7 @@ function buildMenuTree(catalog) {
       { key: "backup_config", label: "配置管理", children: ["backup_tool_configs", "backup_s3_storage", "backup_keys"] },
     ] },
     { key: "config", label: "配置管理", children: ["ai_model_config", "backup_agents", "ha_config", "instance_status_config", "data_query_op_config", "backup_notify_targets", "mcp_platform", "sso_config"] },
-    { key: "users", label: "用户管理", children: ["users_info", "users_permissions", "users_role_groups"] },
+    { key: "users", label: "用户管理", children: ["users_info", "users_permissions", "users_role_groups", "users_data_sources"] },
   ];
   function convert(node) {
     if (typeof node === "string") return leafMap.get(node) || null;
@@ -172,20 +128,6 @@ function buildMenuTree(catalog) {
 function resetForm() {
   form.name = "";
   form.description = "";
-  clusterKeyword.value = "";
-  clusterPager.page = 1;
-  clusterPermissions.value = allClusters.value.map((cluster) => ({
-    cluster_id: cluster.id,
-    label: [cluster.business_line || cluster.namespace, cluster.environment, cluster.name].filter(Boolean).join("/"),
-    can_query: false,
-    can_change: false,
-  }));
-}
-
-async function loadClusters() {
-  const tasks = ["mysql", "mongodb", "redis", "doris"].map((dbType) => listClusters(dbType));
-  const responses = await Promise.all(tasks);
-  allClusters.value = responses.flatMap((item) => item.data?.data || []);
 }
 
 async function loadRoleGroups() {
@@ -222,10 +164,6 @@ async function onPageSizeChange() {
   await loadRoleGroups();
 }
 
-function onClusterSearch() {
-  clusterPager.page = 1;
-}
-
 async function openCreateDialog() {
   isEditing.value = false;
   editingId.value = null;
@@ -240,18 +178,6 @@ async function openEditDialog(row) {
   editingId.value = row.id;
   form.name = row.name || "";
   form.description = row.description || "";
-  clusterKeyword.value = "";
-  clusterPager.page = 1;
-  const perms = row.cluster_permissions || [];
-  clusterPermissions.value = allClusters.value.map((cluster) => {
-    const matched = perms.find((item) => Number(item.cluster_id) === Number(cluster.id));
-    return {
-      cluster_id: cluster.id,
-      label: [cluster.business_line || cluster.namespace, cluster.environment, cluster.name].filter(Boolean).join("/"),
-      can_query: !!matched?.can_query,
-      can_change: !!matched?.can_change,
-    };
-  });
   dialogVisible.value = true;
   await nextTick();
   menuTreeRef.value?.setCheckedKeys(row.menu_keys || []);
@@ -270,11 +196,6 @@ async function saveRoleGroup() {
       name: form.name.trim(),
       description: form.description.trim() || undefined,
       menu_keys: checkedLeafKeys,
-      cluster_permissions: clusterPermissions.value.map((item) => ({
-        cluster_id: item.cluster_id,
-        can_query: item.can_query,
-        can_change: item.can_change,
-      })),
     };
     if (isEditing.value && editingId.value) {
       await updateRoleGroup(editingId.value, payload);
@@ -310,7 +231,6 @@ async function removeRoleGroup(row) {
 }
 
 onMounted(async () => {
-  await loadClusters();
   await loadRoleGroups();
 });
 </script>
@@ -338,13 +258,4 @@ onMounted(async () => {
   justify-content: flex-end;
 }
 
-.cluster-access-wrap {
-  width: 100%;
-}
-
-.cluster-pager {
-  margin-top: 10px;
-  display: flex;
-  justify-content: flex-end;
-}
 </style>

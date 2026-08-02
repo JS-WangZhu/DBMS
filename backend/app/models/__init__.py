@@ -28,16 +28,20 @@ from app.models.monitor_snapshot import (
 from app.models.notify_target import BackupNotifyTarget
 from app.models.s3_storage_config import S3StorageConfig
 from app.models.sso_config import SsoConfig
+from app.models.sql_release import SqlRelease
 from app.models.task_management import ScheduledTask, ScheduledTaskRun
 from app.models.user import User
 from app.models.user_permission import (
     ApiKey,
+    DataSourceGroup,
+    DataSourceGroupClusterPermission,
     RoleGroup,
     RoleGroupClusterPermission,
     RoleGroupMenuPermission,
     UserClusterPermission,
     UserMenuPermission,
     UserRoleGroup,
+    UserDataSourceGroup,
 )
 
 __all__ = [
@@ -71,14 +75,18 @@ __all__ = [
     "MonitorSnapshotDoris",
     "S3StorageConfig",
     "SsoConfig",
+    "SqlRelease",
     "ScheduledTask",
     "ScheduledTaskRun",
     "User",
     "UserMenuPermission",
     "UserClusterPermission",
     "ApiKey",
+    "DataSourceGroup",
+    "DataSourceGroupClusterPermission",
     "RoleGroup",
     "RoleGroupMenuPermission",
     "RoleGroupClusterPermission",
     "UserRoleGroup",
+    "UserDataSourceGroup",
 ]

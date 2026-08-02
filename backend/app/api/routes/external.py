@@ -3,7 +3,14 @@ from flask import Blueprint, request
 from app.api.routes.common import api_key_required, list_allowed_cluster_ids, require_cluster_permission, get_current_user
 from app.models.db_asset import DatabaseCluster, DatabaseInstance
 from app.models.ai_config import AIModelConfig
-from app.services.ai_service import get_mysql_metadata, get_mongodb_metadata, analyze_sql_with_ai
+from app.services.ai_service import (
+    get_mysql_metadata,
+    get_mongodb_metadata,
+    get_postgresql_metadata,
+    analyze_sql_with_ai,
+)
+from app.services.postgresql_backup import list_databases as list_postgresql_databases
+from app.utils.crypto import decrypt_secret
 from app.services.data_access import (
     pick_instance, 
     list_mysql_databases, 
@@ -54,7 +61,7 @@ def external_data_execute():
     
     payload = _normalize_change_payload(request.get_json(silent=True) or {})
     db_type = payload.get("db_type")
-    if db_type not in {"mysql", "mongodb", "redis"}:
+    if db_type not in {"mysql", "mongodb", "redis", "postgresql"}:
         return error_response("db_type invalid", code=400)
         
     cluster, instance, err = _resolve_cluster_instance(payload)
@@ -75,7 +82,7 @@ def external_data_execute():
     execution_id = str(payload.get("execution_id") or "").strip() or uuid4().hex
     register_execution(execution_id, current_user.id if current_user else None, db_type)
     
-    if db_type != "mysql":
+    if db_type not in {"mysql", "postgresql"}:
         set_execution_cancel_callback(execution_id, None)
         
     try:
@@ -151,13 +158,21 @@ def list_external_clusters():
         cluster_nodes = sorted(seed_node_map.get(cluster.id, set()))
         database_names = []
         # 获取库名列表用于外部系统展示
-        chosen = pick_instance(cluster.db_type, cluster.id, None, for_change=(cluster.db_type == "mysql"))
+        chosen = pick_instance(
+            cluster.db_type,
+            cluster.id,
+            None,
+            for_change=(cluster.db_type in {"mysql", "postgresql"}),
+        )
         if chosen:
             try:
                 if cluster.db_type == "mysql":
                     database_names = list_mysql_databases(chosen)
                 elif cluster.db_type == "mongodb":
                     database_names = list_mongo_databases(chosen, seed_nodes=cluster_nodes)
+                elif cluster.db_type == "postgresql":
+                    password = decrypt_secret(chosen.password_encrypted) if chosen.password_encrypted else None
+                    database_names = list_postgresql_databases(chosen, password)
             except:
                 pass
                 
@@ -209,6 +224,8 @@ def external_ai_analyze():
             metadata = get_mysql_metadata(instance, database)
         elif db_type == "mongodb":
             metadata = get_mongodb_metadata(instance, database)
+        elif db_type == "postgresql":
+            metadata = get_postgresql_metadata(instance, database)
         else:
             return error_response(f"AI analysis not supported for {db_type}", code=400)
             

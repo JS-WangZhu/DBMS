@@ -7,6 +7,7 @@ from sqlalchemy import Text, cast
 from app.api.routes.common import (
     active_user_required,
     api_key_required,
+    get_effective_menu_keys,
     get_current_user,
     list_allowed_cluster_ids,
     require_cluster_permission,
@@ -23,6 +24,7 @@ from app.services.data_access import (
     execute_mongo_query_raw,
     execute_mongo_raw,
     execute_mysql,
+    execute_postgresql,
     execute_redis,
     finish_execution,
     list_mongo_collections,
@@ -38,12 +40,30 @@ from app.services.data_access import (
     validate_mongo_query,
     validate_mysql_change,
     validate_mysql_query,
+    validate_postgresql_change,
+    validate_postgresql_query,
     validate_redis_change,
     validate_redis_query,
 )
+from app.services.postgresql_backup import list_databases as list_postgresql_databases
+from app.services.postgresql_backup import list_objects as list_postgresql_objects
+from app.services.postgresql_backup import list_table_columns as list_postgresql_table_columns
+from app.utils.crypto import decrypt_secret
 from app.utils.response import error_response, ok_response
 
 bp = Blueprint("data_access", __name__, url_prefix="/data-access")
+
+
+def _require_metadata_access(cluster):
+    user = get_current_user()
+    if not user or user.status != "active":
+        return None, "permission denied"
+    menu_keys = get_effective_menu_keys(user.id) if user.role != "admin" else {"data_query", "data_change"}
+    if "data_query" in menu_keys and require_cluster_permission(cluster.id, "query"):
+        return False, None
+    if "data_change" in menu_keys and require_cluster_permission(cluster.id, "change"):
+        return True, None
+    return None, "permission denied"
 
 
 def _to_cn_time(dt):
@@ -176,7 +196,7 @@ def _safe_int(value, default_value: int):
 
 def _build_audit_detail(payload, db_type, cluster_id, instance_id, timeout_seconds, success, error_message=None, current_user=None):
     statement = ""
-    if db_type == "mysql":
+    if db_type in {"mysql", "postgresql"}:
         statement = str(payload.get("statement") or payload.get("sql") or "")
     elif db_type == "mongodb":
         statement = str(payload.get("statement") or payload.get("mongo_command") or payload.get("query") or "")
@@ -256,7 +276,7 @@ def _normalize_change_payload(payload):
         normalized["business_line"] = normalized.get("product")
     statement = str(normalized.get("statement") or "").strip()
     database = str(normalized.get("database") or "").strip()
-    if db_type == "mysql":
+    if db_type in {"mysql", "postgresql"}:
         if statement and not str(normalized.get("sql") or "").strip():
             normalized["sql"] = statement
     elif db_type == "mongodb":
@@ -290,7 +310,7 @@ def _cluster_seed_nodes(db_type: str, cluster_id: int):
 
 
 def _resolve_database_name(payload, db_type: str):
-    if db_type == "mysql":
+    if db_type in {"mysql", "postgresql"}:
         return (payload.get("database") or "").strip() or None
     if db_type == "mongodb":
         return (payload.get("mongo_database") or payload.get("database") or "").strip() or "admin"
@@ -314,6 +334,13 @@ def _execute(db_type: str, instance, payload, timeout_seconds, for_change: bool,
         if not ok:
             return False, err, None
         return True, None, execute_mysql(instance, sql, timeout_seconds, for_change, database=database, execution_id=execution_id)
+    if db_type == "postgresql":
+        sql = payload.get("sql") or ""
+        database = (payload.get("database") or "").strip() or None
+        ok, err = validate_postgresql_change(sql) if for_change else validate_postgresql_query(sql)
+        if not ok:
+            return False, err, None
+        return True, None, execute_postgresql(instance, sql, timeout_seconds, for_change, database=database, execution_id=execution_id)
     if db_type == "mongodb":
         seed_nodes = _cluster_seed_nodes("mongodb", instance.cluster_id)
         mongo_command = payload.get("mongo_command")
@@ -506,12 +533,78 @@ def list_columns_for_mysql():
     )
 
 
+@bp.get("/postgresql/databases")
+@active_user_required
+def list_databases_for_postgresql():
+    cluster_id = _safe_int(request.args.get("cluster_id"), 0)
+    cluster = DatabaseCluster.query.get(cluster_id) if cluster_id > 0 else None
+    if not cluster or cluster.db_type != "postgresql":
+        return error_response("postgresql cluster not found", code=400)
+    for_change, error = _require_metadata_access(cluster)
+    if error:
+        return error_response(error, code=403)
+    chosen = pick_instance("postgresql", cluster.id, None, for_change=for_change)
+    if not chosen:
+        return error_response("no available instance", code=400)
+    try:
+        password = decrypt_secret(chosen.password_encrypted) if chosen.password_encrypted else None
+        databases = list_postgresql_databases(chosen, password)
+    except Exception as exc:
+        return error_response(str(exc), code=400)
+    return ok_response(data={"cluster_id": cluster.id, "instance_id": chosen.id, "databases": databases})
+
+
+@bp.get("/postgresql/objects")
+@active_user_required
+def list_objects_for_postgresql():
+    cluster_id = _safe_int(request.args.get("cluster_id"), 0)
+    database = (request.args.get("database") or "").strip()
+    cluster = DatabaseCluster.query.get(cluster_id) if cluster_id > 0 else None
+    if not cluster or cluster.db_type != "postgresql" or not database:
+        return error_response("postgresql cluster and database are required", code=400)
+    for_change, error = _require_metadata_access(cluster)
+    if error:
+        return error_response(error, code=403)
+    chosen = pick_instance("postgresql", cluster.id, None, for_change=for_change)
+    if not chosen:
+        return error_response("no available instance", code=400)
+    try:
+        password = decrypt_secret(chosen.password_encrypted) if chosen.password_encrypted else None
+        result = list_postgresql_objects(chosen, password, database)
+    except Exception as exc:
+        return error_response(str(exc), code=400)
+    return ok_response(data={**result, "cluster_id": cluster.id, "instance_id": chosen.id})
+
+
+@bp.get("/postgresql/columns")
+@active_user_required
+def list_columns_for_postgresql():
+    cluster_id = _safe_int(request.args.get("cluster_id"), 0)
+    database = (request.args.get("database") or "").strip()
+    table = (request.args.get("table") or "").strip()
+    cluster = DatabaseCluster.query.get(cluster_id) if cluster_id > 0 else None
+    if not cluster or cluster.db_type != "postgresql" or not database or not table:
+        return error_response("postgresql cluster, database and table are required", code=400)
+    for_change, error = _require_metadata_access(cluster)
+    if error:
+        return error_response(error, code=403)
+    chosen = pick_instance("postgresql", cluster.id, None, for_change=for_change)
+    if not chosen:
+        return error_response("no available instance", code=400)
+    try:
+        password = decrypt_secret(chosen.password_encrypted) if chosen.password_encrypted else None
+        columns = list_postgresql_table_columns(chosen, password, database, table)
+    except Exception as exc:
+        return error_response(str(exc), code=400)
+    return ok_response(data={"cluster_id": cluster.id, "instance_id": chosen.id, "database": database, "table": table, "columns": columns})
+
+
 @bp.post("/query")
 @require_menu_permission("data_query")
 def query_data():
     payload = request.get_json(silent=True) or {}
     db_type = payload.get("db_type")
-    if db_type not in {"mysql", "mongodb", "redis"}:
+    if db_type not in {"mysql", "mongodb", "redis", "postgresql"}:
         return error_response("db_type invalid", code=400)
     cluster, instance, err = _resolve_cluster_instance(payload)
     if err:
@@ -536,7 +629,7 @@ def query_data():
     current_user = get_current_user()
     execution_id = str(payload.get("execution_id") or "").strip() or uuid4().hex
     register_execution(execution_id, current_user.id if current_user else None, db_type)
-    if db_type != "mysql":
+    if db_type not in {"mysql", "postgresql"}:
         set_execution_cancel_callback(execution_id, None)
     try:
         ok, err, result = _execute(db_type, chosen, payload, timeout_seconds, for_change=False, execution_id=execution_id)
@@ -579,7 +672,7 @@ def query_data():
 def change_data():
     payload = _normalize_change_payload(request.get_json(silent=True) or {})
     db_type = payload.get("db_type")
-    if db_type not in {"mysql", "mongodb", "redis"}:
+    if db_type not in {"mysql", "mongodb", "redis", "postgresql"}:
         return error_response("db_type invalid", code=400)
     cluster, instance, err = _resolve_cluster_instance(payload)
     if err:
@@ -605,7 +698,7 @@ def change_data():
     current_user = get_current_user()
     execution_id = str(payload.get("execution_id") or "").strip() or uuid4().hex
     register_execution(execution_id, current_user.id if current_user else None, db_type)
-    if db_type != "mysql":
+    if db_type not in {"mysql", "postgresql"}:
         set_execution_cancel_callback(execution_id, None)
     try:
         try:

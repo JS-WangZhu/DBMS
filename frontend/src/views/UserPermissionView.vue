@@ -32,67 +32,6 @@
           <el-text v-else type="info">请选择用户后进行菜单授权</el-text>
         </el-form-item>
 
-        <el-form-item label="数据访问">
-          <div v-if="selectedUserId" class="cluster-access-wrap">
-            <div class="cluster-access-toolbar">
-              <el-input
-                v-model="clusterSearchKeyword"
-                clearable
-                placeholder="搜索集群"
-                style="width: 260px"
-                @input="onClusterSearchInput"
-              />
-              <div class="cluster-access-bulk">
-                <div class="bulk-item">
-                  <span class="bulk-label">所有查询</span>
-                  <el-switch
-                    v-model="allCanQuery"
-                    :disabled="isAdminUser || !clusterPermissions.length"
-                    active-color="#10b981"
-                    inline-prompt
-                    active-text="开"
-                    inactive-text="关"
-                  />
-                </div>
-                <div class="bulk-item">
-                  <span class="bulk-label">所有变更</span>
-                  <el-switch
-                    v-model="allCanChange"
-                    :disabled="isAdminUser || !clusterPermissions.length"
-                    active-color="#ef4444"
-                    inline-prompt
-                    active-text="开"
-                    inactive-text="关"
-                  />
-                </div>
-              </div>
-            </div>
-            <el-table :data="pagedClusterPermissions" size="small" stripe>
-              <el-table-column prop="label" label="集群" min-width="220" />
-              <el-table-column label="查询">
-                <template #default="scope">
-                  <el-switch v-model="scope.row.can_query" :disabled="isAdminUser" />
-                </template>
-              </el-table-column>
-              <el-table-column label="变更">
-                <template #default="scope">
-                  <el-switch v-model="scope.row.can_change" :disabled="isAdminUser" />
-                </template>
-              </el-table-column>
-            </el-table>
-            <div class="cluster-access-pager">
-              <el-pagination
-                v-model:current-page="clusterPager.page"
-                v-model:page-size="clusterPager.pageSize"
-                :page-sizes="[10, 20, 50, 100]"
-                layout="total, sizes, prev, pager, next, jumper"
-                :total="filteredClusterPermissions.length"
-              />
-            </div>
-          </div>
-          <el-text v-else type="info">请选择用户后设置数据访问权限</el-text>
-        </el-form-item>
-
         <el-form-item label="API Key">
           <div class="api-key-actions" v-if="selectedUserId">
             <el-button type="primary" @click="createApiKey" :disabled="!selectedUserId || isAdminUser">生成API Key</el-button>
@@ -121,26 +60,17 @@
 import { computed, nextTick, onMounted, reactive, ref } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 
-import { listClusters } from "../api/modules/clusters";
 import { listUsers } from "../api/modules/users";
 import { createUserApiKey, deleteUserApiKey, listUserPermissions, updateUserPermissions } from "../api/modules/backups";
 
 const users = ref([]);
-const clusters = ref([]);
 const selectedUserId = ref(null);
 const saving = ref(false);
 const apiKeys = ref([]);
-const clusterSearchKeyword = ref("");
-const clusterPager = reactive({
-  page: 1,
-  pageSize: 10,
-});
 
 const form = reactive({
   menu_keys: [],
 });
-
-const clusterPermissions = ref([]);
 
 const menuTreeRef = ref(null);
 const menuCatalog = ref([]);
@@ -149,32 +79,6 @@ const menuLeafKeys = ref([]);
 
 const selectedUser = computed(() => users.value.find((item) => Number(item.id) === Number(selectedUserId.value)) || null);
 const isAdminUser = computed(() => selectedUser.value?.role === "admin");
-const filteredClusterPermissions = computed(() => {
-  const keyword = clusterSearchKeyword.value.trim().toLowerCase();
-  if (!keyword) {
-    return clusterPermissions.value;
-  }
-  return clusterPermissions.value.filter((item) => String(item.label || "").toLowerCase().includes(keyword));
-});
-const pagedClusterPermissions = computed(() => {
-  const start = (clusterPager.page - 1) * clusterPager.pageSize;
-  return filteredClusterPermissions.value.slice(start, start + clusterPager.pageSize);
-});
-
-// 批量开关：所有查询 / 所有变更
-const allCanQuery = computed({
-  get: () => clusterPermissions.value.length > 0 && clusterPermissions.value.every((item) => item.can_query),
-  set: (val) => {
-    clusterPermissions.value.forEach((item) => { item.can_query = !!val; });
-  },
-});
-const allCanChange = computed({
-  get: () => clusterPermissions.value.length > 0 && clusterPermissions.value.every((item) => item.can_change),
-  set: (val) => {
-    clusterPermissions.value.forEach((item) => { item.can_change = !!val; });
-  },
-});
-
 async function loadUsers() {
   const { data } = await listUsers();
   users.value = data.data?.items || [];
@@ -190,12 +94,6 @@ async function loadUsers() {
       selectedUserId.value = fallback ? fallback.id : null;
     }
   }
-}
-
-async function loadClusters() {
-  const tasks = ["mysql", "mongodb", "redis", "doris"].map((dbType) => listClusters(dbType));
-  const results = await Promise.all(tasks);
-  clusters.value = results.flatMap((res) => res.data?.data || []);
 }
 
 async function loadPermissions() {
@@ -215,22 +113,6 @@ async function loadPermissions() {
   }
   apiKeys.value = payload.api_keys || [];
 
-  const perms = payload.cluster_permissions || [];
-  clusterPermissions.value = clusters.value.map((cluster) => {
-    const matched = perms.find((p) => p.cluster_id === cluster.id);
-    return {
-      cluster_id: cluster.id,
-      label: [cluster.business_line || cluster.namespace, cluster.environment, cluster.name].filter(Boolean).join("/"),
-      can_query: matched ? matched.can_query : false,
-      can_change: matched ? matched.can_change : false,
-    };
-  });
-  clusterPager.page = 1;
-  clusterSearchKeyword.value = "";
-}
-
-function onClusterSearchInput() {
-  clusterPager.page = 1;
 }
 
 async function savePermissions() {
@@ -242,11 +124,6 @@ async function savePermissions() {
     form.menu_keys = checkedLeafKeys;
     await updateUserPermissions(selectedUserId.value, {
       menu_keys: checkedLeafKeys,
-      cluster_permissions: clusterPermissions.value.map((item) => ({
-        cluster_id: item.cluster_id,
-        can_query: item.can_query,
-        can_change: item.can_change,
-      })),
     });
     ElMessage.success("权限已保存");
   } catch (error) {
@@ -269,6 +146,7 @@ function buildMenuTree(catalog, disabled) {
     ] },
     { key: "inspection", label: "巡检管理", children: ["inspection_manage", "inspection_param_config"] },
     { key: "data_access", label: "数据访问", children: ["data_query", "data_change", "data_history"] },
+    { key: "data_release", label: "数据发布", children: ["sql_release_apply", "sql_release_history"] },
     { key: "task_management", label: "任务管理", children: ["task_schedule", "task_results"] },
     { key: "backup", label: "备份管理", children: [
       { key: "backup_policies", label: "策略管理", children: ["backup_mysql_policies", "backup_postgresql_policies", "backup_mongo_policies"] },
@@ -276,7 +154,7 @@ function buildMenuTree(catalog, disabled) {
       { key: "backup_config", label: "配置管理", children: ["backup_tool_configs", "backup_s3_storage", "backup_keys"] },
     ] },
     { key: "config", label: "配置管理", children: ["ai_model_config", "backup_agents", "ha_config", "instance_status_config", "data_query_op_config", "backup_notify_targets", "mcp_platform", "sso_config"] },
-    { key: "users", label: "用户管理", children: ["users_info", "users_permissions", "users_role_groups"] },
+    { key: "users", label: "用户管理", children: ["users_info", "users_permissions", "users_role_groups", "users_data_sources"] },
   ];
 
   function convert(node) {
@@ -324,7 +202,7 @@ async function removeApiKey(row) {
 }
 
 onMounted(async () => {
-  await Promise.all([loadUsers(), loadClusters()]);
+  await loadUsers();
   if (selectedUserId.value) {
     await loadPermissions();
   }
@@ -355,44 +233,4 @@ onMounted(async () => {
   margin-bottom: 8px;
 }
 
-.cluster-access-wrap {
-  width: 100%;
-}
-
-.cluster-access-toolbar {
-  margin-bottom: 8px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  flex-wrap: wrap;
-}
-
-.cluster-access-bulk {
-  display: inline-flex;
-  align-items: center;
-  gap: 18px;
-  padding: 6px 14px;
-  background: linear-gradient(90deg, #f0fdf4 0%, #fef2f2 100%);
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-}
-
-.bulk-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.bulk-label {
-  font-size: 13px;
-  color: #475569;
-  font-weight: 500;
-}
-
-.cluster-access-pager {
-  margin-top: 10px;
-  display: flex;
-  justify-content: flex-end;
-}
 </style>

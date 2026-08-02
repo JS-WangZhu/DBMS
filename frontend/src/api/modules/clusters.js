@@ -31,7 +31,12 @@ export function deleteCluster(clusterId) {
 
 // 集群健康检测
 export function collectClusterHealth(clusterId) {
-  return client.post(`/clusters/${clusterId}/health/collect`);
+  // The backend probes enabled instances one by one. Keep this longer than the
+  // global 10s timeout so the browser does not report failure while collection
+  // is still running and writing snapshots on the server.
+  return client.post(`/clusters/${clusterId}/health/collect`, undefined, {
+    timeout: 120000,
+  });
 }
 
 export function clusterLatestHealth(clusterId) {

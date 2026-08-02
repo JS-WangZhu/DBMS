@@ -67,6 +67,18 @@ export function listMysqlTableColumns(clusterId, database, table, route = {}) {
   });
 }
 
+export function listPostgresqlDatabases(clusterId) {
+  return client.get("/data-access/postgresql/databases", { params: { cluster_id: clusterId } });
+}
+
+export function listPostgresqlObjects(clusterId, database) {
+  return client.get("/data-access/postgresql/objects", { params: { cluster_id: clusterId, database } });
+}
+
+export function listPostgresqlTableColumns(clusterId, database, table) {
+  return client.get("/data-access/postgresql/columns", { params: { cluster_id: clusterId, database, table } });
+}
+
 export function listQueryHistory(page = 1, pageSize = 10, filters = {}) {
   const params = {
     page,

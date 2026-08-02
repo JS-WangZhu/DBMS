@@ -2,7 +2,7 @@ from flask import Blueprint, request, Response, stream_with_context
 from app.api.routes.common import active_user_required, require_menu_permission, require_cluster_permission, api_key_required
 from app.models.ai_config import AIModelConfig
 from app.models.db_asset import DatabaseCluster
-from app.services.ai_service import get_mysql_metadata, get_mongodb_metadata, analyze_sql_with_ai, analyze_sql_with_ai_stream
+from app.services.ai_service import get_mysql_metadata, get_mongodb_metadata, get_postgresql_metadata, analyze_sql_with_ai, analyze_sql_with_ai_stream
 from app.services.data_access import pick_instance
 from app.utils.response import ok_response, error_response
 from app.extensions import db
@@ -123,6 +123,8 @@ def perform_ai_analysis():
             metadata = get_mysql_metadata(instance, database)
         elif db_type == "mongodb":
             metadata = get_mongodb_metadata(instance, database)
+        elif db_type == "postgresql":
+            metadata = get_postgresql_metadata(instance, database)
         else:
             return error_response(f"AI analysis not supported for {db_type}", code=400)
             
@@ -176,6 +178,8 @@ def perform_ai_analysis_stream():
             metadata = get_mysql_metadata(instance, database)
         elif db_type == "mongodb":
             metadata = get_mongodb_metadata(instance, database)
+        elif db_type == "postgresql":
+            metadata = get_postgresql_metadata(instance, database)
         else:
             return error_response(f"AI analysis not supported for {db_type}", code=400)
             

@@ -88,3 +88,48 @@ class UserRoleGroup(db.Model, TimestampMixin):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
     role_group_id = db.Column(db.Integer, db.ForeignKey("role_groups.id"), nullable=False)
+
+
+class DataSourceGroup(db.Model, TimestampMixin):
+    __tablename__ = "data_source_groups"
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(128), nullable=False, unique=True)
+    description = db.Column(db.String(255), nullable=True)
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "name": self.name,
+            "description": self.description,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
+class DataSourceGroupClusterPermission(db.Model, TimestampMixin):
+    __tablename__ = "data_source_group_cluster_permissions"
+    __table_args__ = (db.UniqueConstraint("group_id", "cluster_id", name="uq_data_source_group_cluster"),)
+
+    id = db.Column(db.Integer, primary_key=True)
+    group_id = db.Column(db.Integer, db.ForeignKey("data_source_groups.id"), nullable=False)
+    cluster_id = db.Column(
+        db.BigInteger().with_variant(db.Integer, "sqlite"),
+        db.ForeignKey("db_clusters.id"),
+        nullable=False,
+    )
+    can_query = db.Column(db.Boolean, nullable=False, default=False)
+    can_change = db.Column(db.Boolean, nullable=False, default=False)
+
+
+class UserDataSourceGroup(db.Model, TimestampMixin):
+    __tablename__ = "user_data_source_groups"
+    __table_args__ = (db.UniqueConstraint("user_id", "group_id", name="uq_user_data_source_group"),)
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(
+        db.BigInteger().with_variant(db.Integer, "sqlite"),
+        db.ForeignKey("users.id"),
+        nullable=False,
+    )
+    group_id = db.Column(db.Integer, db.ForeignKey("data_source_groups.id"), nullable=False)

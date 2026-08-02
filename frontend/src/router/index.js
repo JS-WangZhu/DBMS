@@ -21,6 +21,9 @@ import DataQueryOpConfigView from "../views/DataQueryOpConfigView.vue";
 import DomainConfigManageView from "../views/DomainConfigManageView.vue";
 import HAConfigView from "../views/HAConfigView.vue";
 import DataQueryView from "../views/DataQueryView.vue";
+import SqlReleaseApplyView from "../views/SqlReleaseApplyView.vue";
+import SqlReleaseHistoryView from "../views/SqlReleaseHistoryView.vue";
+import DataSourcePermissionView from "../views/DataSourcePermissionView.vue";
 import InstanceManageView from "../views/InstanceManageView.vue";
 import InstanceStatusConfigView from "../views/InstanceStatusConfigView.vue";
 import JumpServerConfigView from "../views/JumpServerConfigView.vue";
@@ -114,12 +117,15 @@ const routes = [
       { path: "/data-access/change", component: DataChangeView, meta: { title: "数据变更" } },
       { path: "/data-access/ai-analysis", component: AIAnalysisView, meta: { title: "智能分析" } },
       { path: "/data-access/history", component: DataAccessHistoryView, meta: { title: "历史记录" } },
+      { path: "/data-release/apply", component: SqlReleaseApplyView, meta: { title: "SQL上线" } },
+      { path: "/data-release/history", component: SqlReleaseHistoryView, meta: { title: "上线历史" } },
       { path: "/tasks/schedules", component: TaskScheduleView, meta: { title: "调度管理" } },
       { path: "/tasks/results", component: TaskResultView, meta: { title: "结果查询" } },
       { path: "/tools/aliyun-dns", component: AliyunDnsToolView, meta: { title: "阿里云域名工具" } },
       { path: "/users/info", component: UsersView, meta: { title: "用户信息" } },
       { path: "/users/role-groups", component: UserRoleGroupView, meta: { title: "角色组管理" } },
       { path: "/users/permissions", component: UserPermissionView, meta: { title: "用户权限管理" } },
+      { path: "/users/data-sources", component: DataSourcePermissionView, meta: { title: "数据源权限管理" } },
       { path: "/config/agents", component: BackupAgentView, meta: { title: "Agent管理" } },
       { path: "/config/ai-models", component: AIModelConfigView, meta: { title: "AI模型管理" } },
       { path: "/config/ha", component: HAConfigView, meta: { title: "高可用配置管理" } },

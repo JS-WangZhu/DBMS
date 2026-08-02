@@ -1,0 +1,73 @@
+<template>
+  <div class="page">
+    <el-card>
+      <template #header><div class="header"><span>数据源权限管理</span><el-button @click="loadOverview">刷新</el-button></div></template>
+      <el-tabs v-model="activeTab">
+        <el-tab-pane label="用户授权" name="users">
+          <el-form label-width="100px">
+            <el-form-item label="用户">
+              <el-select v-model="selectedUserId" filterable style="width: 320px" @change="loadUserPermissions"><el-option v-for="item in users" :key="item.id" :value="item.id" :label="`${item.display_name || item.username} (${item.role})`" /></el-select>
+            </el-form-item>
+            <el-form-item label="数据源组">
+              <el-select v-model="selectedGroupIds" multiple filterable :disabled="isAdmin" style="width: 100%" placeholder="加入一个或多个数据源组"><el-option v-for="item in groups" :key="item.id" :value="item.id" :label="item.name" /></el-select>
+            </el-form-item>
+          </el-form>
+          <el-alert title="有效权限为“直接授权 + 数据源组 + 兼容的历史角色组授权”的并集；灰色标记展示最终有效权限。" type="info" :closable="false" show-icon />
+          <permission-table v-model="directPermissions" :clusters="clusters" :effective="effectiveMap" :disabled="isAdmin" />
+          <div class="actions"><el-button type="primary" :disabled="!selectedUserId || isAdmin" :loading="saving" @click="saveUser">保存用户数据源权限</el-button></div>
+        </el-tab-pane>
+        <el-tab-pane label="数据源组配置" name="groups">
+          <div class="group-toolbar"><el-button type="primary" @click="openGroup()">新建数据源组</el-button></div>
+          <el-table :data="groups" stripe>
+            <el-table-column prop="name" label="组名" min-width="180" /><el-table-column prop="description" label="说明" min-width="260" /><el-table-column label="数据源数" width="110"><template #default="scope">{{ scope.row.permissions.length }}</template></el-table-column><el-table-column label="用户数" width="100"><template #default="scope">{{ scope.row.user_ids.length }}</template></el-table-column>
+            <el-table-column label="操作" width="150"><template #default="scope"><el-button link type="primary" @click="openGroup(scope.row)">编辑</el-button><el-button link type="danger" @click="removeGroup(scope.row)">删除</el-button></template></el-table-column>
+          </el-table>
+        </el-tab-pane>
+      </el-tabs>
+    </el-card>
+    <el-dialog v-model="groupDialog" :title="editingGroupId ? '编辑数据源组' : '新建数据源组'" width="75%">
+      <el-form label-width="80px"><el-form-item label="组名"><el-input v-model="groupForm.name" /></el-form-item><el-form-item label="说明"><el-input v-model="groupForm.description" /></el-form-item></el-form>
+      <permission-table v-model="groupPermissions" :clusters="clusters" />
+      <template #footer><el-button @click="groupDialog = false">取消</el-button><el-button type="primary" :loading="groupSaving" @click="saveGroup">保存</el-button></template>
+    </el-dialog>
+  </div>
+</template>
+
+<script setup>
+import { computed, defineComponent, h, onMounted, reactive, ref } from "vue";
+import { ElButton, ElMessage, ElMessageBox, ElSwitch, ElTable, ElTableColumn, ElTag } from "element-plus";
+import { createDataSourceGroup, deleteDataSourceGroup, getDataSourcePermissionOverview, getUserDataSourcePermissions, updateDataSourceGroup, updateUserDataSourcePermissions } from "../api/modules/dataSourcePermissions";
+
+const PermissionTable = defineComponent({
+  props: { modelValue: { type: Array, required: true }, clusters: { type: Array, required: true }, effective: { type: Object, default: () => ({}) }, disabled: Boolean },
+  emits: ["update:modelValue"],
+  setup(props, { emit }) {
+    const update = (id, key, value) => emit("update:modelValue", props.modelValue.map((item) => item.cluster_id === id ? { ...item, [key]: value } : item));
+    return () => h(ElTable, { data: props.modelValue, stripe: true, style: "margin-top:16px" }, () => [
+      h(ElTableColumn, { label: "数据源", minWidth: 260 }, { default: ({ row }) => { const c = props.clusters.find((item) => item.id === row.cluster_id) || {}; return [c.db_type?.toUpperCase(), c.business_line || c.namespace, c.environment, c.name].filter(Boolean).join(" / "); } }),
+      h(ElTableColumn, { label: "直接查询", width: 130 }, { default: ({ row }) => h(ElSwitch, { modelValue: row.can_query, disabled: props.disabled, "onUpdate:modelValue": (value) => update(row.cluster_id, "can_query", value) }) }),
+      h(ElTableColumn, { label: "直接变更", width: 130 }, { default: ({ row }) => h(ElSwitch, { modelValue: row.can_change, disabled: props.disabled, "onUpdate:modelValue": (value) => update(row.cluster_id, "can_change", value) }) }),
+      h(ElTableColumn, { label: "最终有效", width: 180 }, { default: ({ row }) => { const value = props.effective[row.cluster_id]; return value ? [value.can_query ? h(ElTag, { type: "success", style: "margin-right:6px" }, () => "查询") : null, value.can_change ? h(ElTag, { type: "danger" }, () => "变更") : null] : "-"; } }),
+    ]);
+  },
+});
+
+const activeTab = ref("users"), users = ref([]), clusters = ref([]), groups = ref([]), selectedUserId = ref(null), selectedGroupIds = ref([]), directPermissions = ref([]), effectiveMap = ref({}), saving = ref(false);
+const groupDialog = ref(false), editingGroupId = ref(null), groupPermissions = ref([]), groupSaving = ref(false), groupForm = reactive({ name: "", description: "" });
+const selectedUser = computed(() => users.value.find((item) => item.id === selectedUserId.value));
+const isAdmin = computed(() => selectedUser.value?.role === "admin");
+const emptyPermissions = (source = []) => clusters.value.map((cluster) => { const found = source.find((item) => item.cluster_id === cluster.id); return { cluster_id: cluster.id, can_query: !!found?.can_query, can_change: !!found?.can_change }; });
+async function loadOverview() { const { data } = await getDataSourcePermissionOverview(); users.value = data.data?.users || []; clusters.value = data.data?.clusters || []; groups.value = data.data?.groups || []; if (!selectedUserId.value && users.value.length) selectedUserId.value = users.value[0].id; if (selectedUserId.value) await loadUserPermissions(); }
+async function loadUserPermissions() { if (!selectedUserId.value) return; const { data } = await getUserDataSourcePermissions(selectedUserId.value); const payload = data.data || {}; selectedGroupIds.value = payload.group_ids || []; directPermissions.value = emptyPermissions(payload.direct_permissions || []); effectiveMap.value = Object.fromEntries((payload.effective_permissions || []).map((item) => [item.cluster_id, item])); }
+async function saveUser() { saving.value = true; try { await updateUserDataSourcePermissions(selectedUserId.value, { group_ids: selectedGroupIds.value, direct_permissions: directPermissions.value }); ElMessage.success("数据源权限已保存"); await loadUserPermissions(); } finally { saving.value = false; } }
+function openGroup(row) { editingGroupId.value = row?.id || null; groupForm.name = row?.name || ""; groupForm.description = row?.description || ""; groupPermissions.value = emptyPermissions(row?.permissions || []); groupDialog.value = true; }
+async function saveGroup() { if (!groupForm.name.trim()) return ElMessage.warning("请输入组名"); groupSaving.value = true; try { const payload = { name: groupForm.name, description: groupForm.description, permissions: groupPermissions.value }; if (editingGroupId.value) await updateDataSourceGroup(editingGroupId.value, payload); else await createDataSourceGroup(payload); ElMessage.success("数据源组已保存"); groupDialog.value = false; await loadOverview(); } finally { groupSaving.value = false; } }
+async function removeGroup(row) { await ElMessageBox.confirm(`删除数据源组“${row.name}”并解除用户关联？`, "删除确认", { type: "warning" }); await deleteDataSourceGroup(row.id); ElMessage.success("已删除"); await loadOverview(); }
+onMounted(loadOverview);
+</script>
+
+<style scoped>
+.header, .actions, .group-toolbar { display: flex; justify-content: space-between; align-items: center; }
+.actions { justify-content: flex-end; margin-top: 16px; }
+.group-toolbar { justify-content: flex-end; margin-bottom: 12px; }
+</style>

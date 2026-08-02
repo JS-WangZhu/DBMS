@@ -98,6 +98,27 @@ def get_mongodb_metadata(instance: DatabaseInstance, database: str):
         client.close()
     return metadata
 
+
+def get_postgresql_metadata(instance: DatabaseInstance, database: str):
+    from app.services.postgresql_backup import list_objects, list_table_columns
+
+    password = decrypt_secret(instance.password_encrypted) if instance.password_encrypted else None
+    objects = list_objects(instance, password, database)
+    tables = []
+    for item in (objects.get("tables") or [])[:100]:
+        name = item.get("name")
+        tables.append({
+            **item,
+            "columns": list_table_columns(instance, password, database, name) if name else [],
+        })
+    return {
+        "database": database,
+        "tables": tables,
+        "views": objects.get("views") or [],
+        "procedures": objects.get("procedures") or [],
+        "functions": objects.get("functions") or [],
+    }
+
 def analyze_sql_with_ai(config, db_type: str, metadata: dict, sql_list: List[str]):
     api_url = (config.api_url or "").strip()
     api_key = config.api_key

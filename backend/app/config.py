@@ -66,6 +66,8 @@ class Config:
     
     # Backup tools configuration
     MYSQLDUMP_PATH = os.getenv("MYSQLDUMP_PATH", "mysqldump")
+    SQL_RELEASE_BACKUP_DIR = os.getenv("SQL_RELEASE_BACKUP_DIR", "data/sql_release_backups")
+    SQL_RELEASE_ROLLBACK_MAX_ROWS = int(os.getenv("SQL_RELEASE_ROLLBACK_MAX_ROWS", "10000"))
     MONGODUMP_PATH = os.getenv("MONGODUMP_PATH", "mongodump")
     PGDUMP_PATH = os.getenv("PGDUMP_PATH", "pg_dump")
 

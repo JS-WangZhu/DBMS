@@ -36,6 +36,7 @@ def ensure_backup_extra_columns():
         "api_keys",
         "inspection_alerts",
         "sso_configs",
+        "sql_releases",
     ]:
         try:
             table_columns[table] = {col["name"] for col in inspector.get_columns(table)}
@@ -68,6 +69,8 @@ def ensure_backup_extra_columns():
         statements.append("ALTER TABLE sso_configs ADD COLUMN display_name_field VARCHAR(64) NOT NULL DEFAULT ''")
     if table_columns["sso_configs"] and "avatar_field" not in table_columns["sso_configs"]:
         statements.append("ALTER TABLE sso_configs ADD COLUMN avatar_field VARCHAR(128) NOT NULL DEFAULT ''")
+    if table_columns["sql_releases"] and "db_type" not in table_columns["sql_releases"]:
+        statements.append("ALTER TABLE sql_releases ADD COLUMN db_type VARCHAR(32) NOT NULL DEFAULT 'mysql'")
     if table_columns["db_clusters"] and "namespace" not in table_columns["db_clusters"]:
         statements.append("ALTER TABLE db_clusters ADD COLUMN namespace VARCHAR(64) NOT NULL DEFAULT 'default'")
     if table_columns["db_clusters"] and "business_line" not in table_columns["db_clusters"]:

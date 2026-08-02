@@ -4,7 +4,7 @@
 
 <script setup>
 import { autocompletion } from "@codemirror/autocomplete";
-import { sql } from "@codemirror/lang-sql";
+import { MySQL, PostgreSQL, sql } from "@codemirror/lang-sql";
 import { EditorState } from "@codemirror/state";
 import { EditorView, placeholder, keymap } from "@codemirror/view";
 import { basicSetup } from "codemirror";
@@ -24,7 +24,7 @@ const props = defineProps({
     default: 260,
   },
   /**
-   * 编辑器模式：sql | mongodb | redis
+   * 编辑器模式：sql | postgresql | mongodb | redis
    */
   mode: {
     type: String,
@@ -56,6 +56,8 @@ const SQL_KEYWORDS = [
   "COUNT", "SUM", "AVG", "MIN", "MAX", "NOW", "IFNULL", "COALESCE",
   "AND", "OR", "NOT", "IN", "EXISTS", "BETWEEN", "LIKE", "IS NULL", "IS NOT NULL",
   "CASE", "WHEN", "THEN", "ELSE", "END", "DESC", "ASC", "AS",
+  "RETURNING", "ON CONFLICT", "DO NOTHING", "ILIKE", "CASCADE",
+  "JSON", "JSONB", "SERIAL", "BIGSERIAL", "CURRENT_TIMESTAMP",
 ];
 
 const MONGO_METHODS = [
@@ -101,6 +103,8 @@ function buildColumnIndex() {
   for (const t of schemaSnapshot.tables || []) {
     if (!t || !t.name) continue;
     map.set(t.name.toLowerCase(), t.columns || []);
+    const shortName = t.name.split(".").pop().toLowerCase();
+    if (!map.has(shortName)) map.set(shortName, t.columns || []);
   }
   return map;
 }
@@ -126,9 +130,20 @@ function sqlCompletions(context) {
   // 场景一：table. 语法触发字段补全
   const dotMatch = /([A-Za-z_][\w]*)\.(\w*)$/.exec(text);
   if (dotMatch) {
-    const tableName = dotMatch[1];
+    const qualifier = dotMatch[1];
     const typed = dotMatch[2] || "";
     const index = buildColumnIndex();
+    let tableName = qualifier;
+    const aliasPattern = new RegExp(
+      `(?:FROM|JOIN|UPDATE|INTO)\\s+[\\x60]?(?:[A-Za-z_][\\w$]*[\\x60]?\\.)?[\\x60]?([A-Za-z_][\\w$]*)[\\x60]?(?:\\s+(?:AS\\s+)?([A-Za-z_][\\w$]*))?`,
+      "ig"
+    );
+    let aliasMatch;
+    while ((aliasMatch = aliasPattern.exec(text))) {
+      if ((aliasMatch[2] || "").toLowerCase() === qualifier.toLowerCase()) {
+        tableName = aliasMatch[1];
+      }
+    }
     const cols = index.get(tableName.toLowerCase()) || [];
     if (cols.length) {
       return {
@@ -243,6 +258,19 @@ function mongoCompletions(context) {
   for (const m of MONGO_METHODS) {
     options.push({ label: m, type: "function", detail: "method", boost: 2 });
   }
+  const seenFields = new Set();
+  for (const collection of schemaSnapshot.collections || []) {
+    for (const field of collection.fields || []) {
+      if (!field?.name || seenFields.has(field.name)) continue;
+      seenFields.add(field.name);
+      options.push({
+        label: field.name,
+        type: "property",
+        detail: `${field.type || "field"} · ${collection.name}`,
+        boost: 3,
+      });
+    }
+  }
   return { from, options, validFor: /^\w*$/ };
 }
 
@@ -337,7 +365,9 @@ function createEditor() {
       color: "#1e3a8a",
     },
   });
-  const langExtensions = props.mode === "sql" ? [sql()] : [];
+  const langExtensions = props.mode === "sql"
+    ? [sql({ dialect: MySQL })]
+    : (props.mode === "postgresql" ? [sql({ dialect: PostgreSQL })] : []);
   const completionFn = pickCompletionFn(props.mode);
   const state = EditorState.create({
     doc: props.modelValue || "",

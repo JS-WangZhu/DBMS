@@ -179,6 +179,21 @@
           </el-menu-item>
         </el-sub-menu>
 
+        <el-sub-menu v-if="hasAnyMenu(['sql_release_apply','sql_release_history'])" index="data-release">
+          <template #title>
+            <el-icon><Promotion /></el-icon>
+            <span>数据发布</span>
+          </template>
+          <el-menu-item v-if="hasMenu('sql_release_apply')" index="/data-release/apply">
+            <el-icon><EditPen /></el-icon>
+            <span>SQL上线</span>
+          </el-menu-item>
+          <el-menu-item v-if="hasMenu('sql_release_history')" index="/data-release/history">
+            <el-icon><Clock /></el-icon>
+            <span>上线历史</span>
+          </el-menu-item>
+        </el-sub-menu>
+
         <el-sub-menu v-if="hasAnyMenu(['task_schedule','task_results'])" index="task-management">
           <template #title>
             <el-icon><Calendar /></el-icon>
@@ -256,7 +271,7 @@
           </el-sub-menu>
         </el-sub-menu>
 
-        <el-sub-menu v-if="hasAnyMenu(['users_info','users_permissions','users_role_groups'])" index="users">
+        <el-sub-menu v-if="hasAnyMenu(['users_info','users_permissions','users_role_groups','users_data_sources'])" index="users">
           <template #title>
             <el-icon><User /></el-icon>
             <span>用户管理</span>
@@ -272,6 +287,10 @@
           <el-menu-item v-if="hasMenu('users_permissions')" index="/users/permissions">
             <el-icon><Lock /></el-icon>
             <span>用户权限管理</span>
+          </el-menu-item>
+          <el-menu-item v-if="hasMenu('users_data_sources')" index="/users/data-sources">
+            <el-icon><Connection /></el-icon>
+            <span>数据源权限管理</span>
           </el-menu-item>
         </el-sub-menu>
 
@@ -562,6 +581,8 @@ const routePermissionMap = {
   "/data-access/change": "data_change",
   "/data-access/history": "data_history",
   "/data-access/ai-analysis": "ai_analysis",
+  "/data-release/apply": "sql_release_apply",
+  "/data-release/history": "sql_release_history",
   "/tasks/schedules": "task_schedule",
   "/tasks/results": "task_results",
   "/tools/aliyun-dns": "aliyun_dns_tool",
@@ -577,6 +598,7 @@ const routePermissionMap = {
   "/users/info": "users_info",
   "/users/role-groups": "users_role_groups",
   "/users/permissions": "users_permissions",
+  "/users/data-sources": "users_data_sources",
   "/config/ai-models": "ai_model_config",
   "/config/ha": "ha_config",
   "/config/instance-status": "instance_status_config",
@@ -658,6 +680,8 @@ const tabIconMap = {
   "/data-access/change": EditPen,
   "/data-access/history": Clock,
   "/data-access/ai-analysis": Cpu,
+  "/data-release/apply": EditPen,
+  "/data-release/history": Clock,
   "/tasks/schedules": Operation,
   "/tasks/results": Tickets,
   "/tools/aliyun-dns": Position,
@@ -673,6 +697,7 @@ const tabIconMap = {
   "/users/info": UserFilled,
   "/users/role-groups": Avatar,
   "/users/permissions": Lock,
+  "/users/data-sources": Connection,
   "/config/agents": Monitor,
   "/config/ai-models": TrendCharts,
   "/config/ha": Lightning,
