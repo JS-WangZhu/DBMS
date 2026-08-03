@@ -34,23 +34,10 @@
 </template>
 
 <script setup>
-import { computed, defineComponent, h, onMounted, reactive, ref } from "vue";
-import { ElButton, ElMessage, ElMessageBox, ElSwitch, ElTable, ElTableColumn, ElTag } from "element-plus";
+import { computed, onMounted, reactive, ref } from "vue";
+import { ElMessage, ElMessageBox } from "element-plus";
 import { createDataSourceGroup, deleteDataSourceGroup, getDataSourcePermissionOverview, getUserDataSourcePermissions, updateDataSourceGroup, updateUserDataSourcePermissions } from "../api/modules/dataSourcePermissions";
-
-const PermissionTable = defineComponent({
-  props: { modelValue: { type: Array, required: true }, clusters: { type: Array, required: true }, effective: { type: Object, default: () => ({}) }, disabled: Boolean },
-  emits: ["update:modelValue"],
-  setup(props, { emit }) {
-    const update = (id, key, value) => emit("update:modelValue", props.modelValue.map((item) => item.cluster_id === id ? { ...item, [key]: value } : item));
-    return () => h(ElTable, { data: props.modelValue, stripe: true, style: "margin-top:16px" }, () => [
-      h(ElTableColumn, { label: "数据源", minWidth: 260 }, { default: ({ row }) => { const c = props.clusters.find((item) => item.id === row.cluster_id) || {}; return [c.db_type?.toUpperCase(), c.business_line || c.namespace, c.environment, c.name].filter(Boolean).join(" / "); } }),
-      h(ElTableColumn, { label: "直接查询", width: 130 }, { default: ({ row }) => h(ElSwitch, { modelValue: row.can_query, disabled: props.disabled, "onUpdate:modelValue": (value) => update(row.cluster_id, "can_query", value) }) }),
-      h(ElTableColumn, { label: "直接变更", width: 130 }, { default: ({ row }) => h(ElSwitch, { modelValue: row.can_change, disabled: props.disabled, "onUpdate:modelValue": (value) => update(row.cluster_id, "can_change", value) }) }),
-      h(ElTableColumn, { label: "最终有效", width: 180 }, { default: ({ row }) => { const value = props.effective[row.cluster_id]; return value ? [value.can_query ? h(ElTag, { type: "success", style: "margin-right:6px" }, () => "查询") : null, value.can_change ? h(ElTag, { type: "danger" }, () => "变更") : null] : "-"; } }),
-    ]);
-  },
-});
+import PermissionTable from "../components/DataSourcePermissionTable.vue";
 
 const activeTab = ref("users"), users = ref([]), clusters = ref([]), groups = ref([]), selectedUserId = ref(null), selectedGroupIds = ref([]), directPermissions = ref([]), effectiveMap = ref({}), saving = ref(false);
 const groupDialog = ref(false), editingGroupId = ref(null), groupPermissions = ref([]), groupSaving = ref(false), groupForm = reactive({ name: "", description: "" });
