@@ -40,12 +40,12 @@
             :placeholder="editorPlaceholder"
             :min-height="300"
             :schema="editorSchema"
-            @run="submit(false)"
+            @run="submit"
           />
-          <div class="editor-hint">支持语法高亮与智能补全，多个变更以分号结束；Ctrl+Enter 发起 AI 初审</div>
+          <div class="editor-hint">支持语法高亮与智能补全，多个变更以分号结束；提交工单后系统将异步进行 AI 初审</div>
         </el-form-item>
       </el-form>
-      <div class="actions"><el-button type="primary" :loading="submitting" @click="submit(false)">AI 初审并提交</el-button></div>
+      <div class="actions"><el-button type="primary" :loading="submitting" @click="submit">提交工单</el-button></div>
     </el-card>
 
     <el-card class="overview-card">
@@ -96,25 +96,12 @@
     </el-card>
     </div>
 
-    <el-card v-if="reviews.length" class="review-card">
-      <template #header><div class="review-header"><span>AI 初审结果</span><el-tag :type="allPassed ? 'success' : 'danger'">{{ allPassed ? '全部通过' : '存在未通过语句' }}</el-tag></div></template>
-      <el-alert v-if="summary" :title="summary" :type="allPassed ? 'success' : 'warning'" show-icon :closable="false" />
-      <el-table :data="reviews" stripe class="review-table">
-        <el-table-column prop="line" label="#" width="60" />
-        <el-table-column prop="sql" label="SQL" min-width="300" show-overflow-tooltip />
-        <el-table-column label="结论" width="100"><template #default="scope"><el-tag :type="scope.row.passed ? 'success' : 'danger'">{{ scope.row.passed ? '通过' : '不通过' }}</el-tag></template></el-table-column>
-        <el-table-column prop="risk_level" label="风险" width="90" />
-        <el-table-column prop="reason" label="原因" min-width="220" />
-        <el-table-column prop="suggestion" label="修改建议" min-width="220" />
-      </el-table>
-      <div v-if="!allPassed" class="actions"><el-button type="danger" :loading="submitting" @click="forceSubmit">强制提交</el-button></div>
-    </el-card>
   </div>
 </template>
 
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from "vue";
-import { ElMessage, ElMessageBox } from "element-plus";
+import { ElMessage } from "element-plus";
 import { Connection, Document, Folder, Grid, Key, Search, View } from "@element-plus/icons-vue";
 import { listClusters } from "../api/modules/clusters";
 import {
@@ -130,8 +117,6 @@ const clusters = ref([]);
 const databases = ref([]);
 const databaseLoading = ref(false);
 const submitting = ref(false);
-const reviews = ref([]);
-const summary = ref("");
 const overviewLoading = ref(false);
 const tableKeyword = ref("");
 const sqlEditorRef = ref(null);
@@ -145,7 +130,6 @@ const databaseTypes = [
   { label: "PostgreSQL", value: "postgresql" },
 ];
 const form = reactive({ title: "", project: "", db_type: "", environment: "", cluster_id: null, database: "", sql: "" });
-const allPassed = computed(() => reviews.value.length > 0 && reviews.value.every((item) => item.passed));
 const projects = computed(() => Array.from(new Set(clusters.value.map((item) => item.business_line || item.namespace).filter(Boolean))).sort());
 const environments = computed(() => Array.from(new Set(clusters.value
   .filter((item) => (item.business_line || item.namespace) === form.project && item.db_type === form.db_type)
@@ -375,28 +359,16 @@ function preloadUsedTableColumns() {
   }
 }
 
-async function submit(forceSubmit) {
+async function submit() {
   if (!form.project || !form.db_type || !form.environment || !form.cluster_id || !form.database || !form.sql.trim()) return ElMessage.warning("请按项目、数据库、环境、集群顺序选择数据源，并填写目标库和变更语句");
   submitting.value = true;
   try {
-    const { data } = await submitSqlRelease({ ...form, force_submit: forceSubmit });
-    reviews.value = data.data?.reviews || [];
-    summary.value = data.data?.ai_summary || "";
-    ElMessage.success("上线申请已提交");
+    await submitSqlRelease({ ...form });
+    ElMessage.success("工单已提交，AI 初审正在后台进行");
     form.title = ""; form.sql = "";
   } catch (error) {
-    const payload = error.response?.data;
-    if (payload?.data?.reviews) {
-      reviews.value = payload.data.reviews;
-      summary.value = payload.data.summary || "";
-    }
-    ElMessage.error(payload?.message || "提交失败");
+    ElMessage.error(error.response?.data?.message || "提交失败");
   } finally { submitting.value = false; }
-}
-
-async function forceSubmit() {
-  await ElMessageBox.confirm("AI 初审未通过，强制提交后将由管理员决定是否执行。确认继续吗？", "风险确认", { type: "warning", confirmButtonText: "强制提交" });
-  await submit(true);
 }
 
 onMounted(async () => {
@@ -416,8 +388,6 @@ watch(
 .release-card, .overview-card { min-width: 0; }
 .release-form { margin-top: 20px; }
 .actions { display: flex; justify-content: flex-end; margin-top: 16px; }
-.review-header { display: flex; align-items: center; justify-content: space-between; }
-.review-table { margin-top: 16px; }
 .overview-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .overview-title { font-weight: 600; }
 .overview-subtitle { margin-top: 4px; font-size: 12px; color: #94a3b8; }

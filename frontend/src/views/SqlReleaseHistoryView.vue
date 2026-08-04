@@ -1,7 +1,7 @@
 <template>
   <div class="page">
     <el-card>
-      <template #header><div class="header"><span>上线历史</span><el-button @click="loadRows">刷新</el-button></div></template>
+      <template #header><div class="header"><span>工单历史</span><el-button @click="loadRows">刷新</el-button></div></template>
       <el-table :data="rows" stripe v-loading="loading">
         <el-table-column prop="id" label="ID" width="70" />
         <el-table-column prop="title" label="标题" min-width="180" />
@@ -9,13 +9,13 @@
         <el-table-column prop="applicant_name" label="申请人" width="120" />
         <el-table-column prop="cluster_name" label="数据源" min-width="150" />
         <el-table-column prop="database" label="数据库" width="140" />
-        <el-table-column label="AI 初审" width="110"><template #default="scope"><el-tag :type="scope.row.ai_passed ? 'success' : 'danger'">{{ scope.row.ai_passed ? '通过' : '强制提交' }}</el-tag></template></el-table-column>
+        <el-table-column label="AI 初审" width="110"><template #default="scope"><el-tag :type="reviewType(scope.row)">{{ reviewLabel(scope.row) }}</el-tag></template></el-table-column>
         <el-table-column label="状态" width="100"><template #default="scope"><el-tag :type="statusType(scope.row.status)">{{ statusLabel(scope.row.status) }}</el-tag></template></el-table-column>
         <el-table-column prop="created_at" label="提交时间" width="180" />
         <el-table-column label="操作" width="180" fixed="right">
           <template #default="scope">
             <el-button link type="primary" @click="openDetail(scope.row)">详情</el-button>
-            <el-button v-if="isAdmin && scope.row.status === 'pending'" link type="danger" :loading="executingId === scope.row.id" @click="execute(scope.row)">执行</el-button>
+            <el-button v-if="scope.row.can_execute && ['pending', 'review_rejected'].includes(scope.row.status)" link type="danger" :loading="executingId === scope.row.id" @click="execute(scope.row)">执行</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -29,6 +29,7 @@
           <el-descriptions-item label="数据库类型">{{ dbTypeLabel(current.db_type) }}</el-descriptions-item>
           <el-descriptions-item v-if="isAdmin" label="回滚文件">{{ current.rollback_backup_path || '未生成（无数据变更或尚未执行）' }}</el-descriptions-item>
         </el-descriptions>
+        <el-alert v-if="current.ai_summary" :title="current.ai_summary" :type="current.ai_passed ? 'success' : 'warning'" show-icon :closable="false" class="review-summary" />
         <h4>{{ current.db_type === 'mongodb' ? 'Mongo 命令' : 'SQL' }}</h4><pre>{{ current.sql }}</pre>
         <h4>逐条 AI 初审</h4>
         <el-table :data="current.reviews" size="small"><el-table-column prop="line" label="#" width="50" /><el-table-column prop="sql" label="SQL" min-width="260" /><el-table-column label="结论" width="90"><template #default="scope"><el-tag :type="scope.row.passed ? 'success' : 'danger'">{{ scope.row.passed ? '通过' : '不通过' }}</el-tag></template></el-table-column><el-table-column prop="reason" label="原因" min-width="220" /><el-table-column prop="suggestion" label="建议" min-width="220" /></el-table>
@@ -38,22 +39,28 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { executeSqlRelease, listSqlReleases } from "../api/modules/sqlReleases";
 const rows = ref([]), loading = ref(false), page = ref(1), pageSize = ref(10), total = ref(0), drawer = ref(false), current = ref(null), executingId = ref(null);
 const isAdmin = computed(() => { try { return JSON.parse(localStorage.getItem("dbms_user") || "{}").role === "admin"; } catch { return false; } });
-const statusLabel = (value) => ({ pending: "待执行", executing: "执行中", success: "成功", failed: "失败" }[value] || value);
-const statusType = (value) => ({ pending: "warning", executing: "primary", success: "success", failed: "danger" }[value] || "info");
+const statusLabel = (value) => ({ reviewing: "初审中", review_rejected: "初审未通过", review_failed: "初审失败", pending: "待执行", executing: "执行中", success: "成功", failed: "失败" }[value] || value);
+const statusType = (value) => ({ reviewing: "info", review_rejected: "warning", review_failed: "danger", pending: "warning", executing: "primary", success: "success", failed: "danger" }[value] || "info");
+const reviewLabel = (row) => row.status === "reviewing" ? "审核中" : row.status === "review_failed" ? "失败" : row.ai_passed ? "通过" : "未通过";
+const reviewType = (row) => row.status === "reviewing" ? "info" : row.status === "review_failed" ? "danger" : row.ai_passed ? "success" : "warning";
 const dbTypeLabel = (value) => ({ mysql: "MySQL", mongodb: "MongoDB", postgresql: "PostgreSQL" }[value] || value || "MySQL");
-async function loadRows() { loading.value = true; try { const { data } = await listSqlReleases({ page: page.value, page_size: pageSize.value }); rows.value = data.data?.items || []; total.value = data.data?.total || 0; } finally { loading.value = false; } }
+let reviewPollTimer = null;
+function scheduleReviewPoll() { clearTimeout(reviewPollTimer); if (rows.value.some((row) => row.status === "reviewing")) reviewPollTimer = setTimeout(loadRows, 3000); }
+async function loadRows() { loading.value = true; try { const { data } = await listSqlReleases({ page: page.value, page_size: pageSize.value }); rows.value = data.data?.items || []; total.value = data.data?.total || 0; } finally { loading.value = false; scheduleReviewPoll(); } }
 function openDetail(row) { current.value = row; drawer.value = true; }
-async function execute(row) { await ElMessageBox.confirm("管理员执行后会直接变更数据库；数据变更将先按影响记录生成对应数据库的回滚文件。确认执行？", "执行确认", { type: "warning" }); executingId.value = row.id; try { await executeSqlRelease(row.id); ElMessage.success("执行成功"); await loadRows(); } catch (error) { ElMessage.error(error.response?.data?.message || "执行失败"); await loadRows(); } finally { executingId.value = null; } }
+async function execute(row) { const rejected = row.status === "review_rejected"; const message = rejected ? "AI 初审未通过。确认接受审核提示的风险并继续执行？执行前仍会生成回滚文件。" : "执行后会直接变更数据库；数据变更将先按影响记录生成对应数据库的回滚文件。确认执行？"; await ElMessageBox.confirm(message, rejected ? "风险确认" : "执行确认", { type: "warning", confirmButtonText: rejected ? "确认风险并执行" : "执行" }); executingId.value = row.id; try { await executeSqlRelease(row.id, { confirm_risk: rejected }); ElMessage.success("执行成功"); await loadRows(); } catch (error) { ElMessage.error(error.response?.data?.message || "执行失败"); await loadRows(); } finally { executingId.value = null; } }
 onMounted(loadRows);
+onBeforeUnmount(() => clearTimeout(reviewPollTimer));
 </script>
 
 <style scoped>
 .header { display: flex; justify-content: space-between; align-items: center; }
 .el-pagination { margin-top: 16px; justify-content: flex-end; }
 pre { padding: 12px; overflow: auto; background: #0f172a; color: #e2e8f0; border-radius: 6px; white-space: pre-wrap; }
+.review-summary { margin-top: 16px; }
 </style>

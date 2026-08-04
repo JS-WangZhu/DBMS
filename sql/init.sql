@@ -571,6 +571,7 @@ CREATE TABLE `role_group_cluster_permissions`  (
   `cluster_id` int NOT NULL,
   `can_query` tinyint(1) NOT NULL,
   `can_change` tinyint(1) NOT NULL,
+  `can_execute` tinyint(1) NOT NULL DEFAULT 0,
   PRIMARY KEY (`id`) USING BTREE
 ) ENGINE = InnoDB AUTO_INCREMENT = 6 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = DYNAMIC;
 
@@ -708,6 +709,7 @@ CREATE TABLE `user_cluster_permissions`  (
   `cluster_id` int NOT NULL,
   `can_query` tinyint(1) NOT NULL,
   `can_change` tinyint(1) NOT NULL,
+  `can_execute` tinyint(1) NOT NULL DEFAULT 0,
   PRIMARY KEY (`id`) USING BTREE
 ) ENGINE = InnoDB AUTO_INCREMENT = 106 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = DYNAMIC;
 

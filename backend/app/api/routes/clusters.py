@@ -330,7 +330,7 @@ def list_clusters():
     if environment:
         query = query.filter_by(environment=environment)
     user = get_current_user()
-    if user and user.role != "admin" and action in {"query", "change"}:
+    if user and user.role != "admin" and action in {"query", "change", "execute"}:
         allowed_cluster_ids = list_allowed_cluster_ids(action)
         if not allowed_cluster_ids:
             return ok_response(data=[])

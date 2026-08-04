@@ -12,8 +12,8 @@ export function listSqlReleases(params = {}) {
   return client.get("/sql-releases", { params });
 }
 
-export function executeSqlRelease(id) {
-  return client.post(`/sql-releases/${id}/execute`);
+export function executeSqlRelease(id, payload = {}) {
+  return client.post(`/sql-releases/${id}/execute`, payload);
 }
 
 export function listSqlReleaseDatabases(clusterId, dbType) {

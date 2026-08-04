@@ -118,7 +118,7 @@ const routes = [
       { path: "/data-access/ai-analysis", component: AIAnalysisView, meta: { title: "智能分析" } },
       { path: "/data-access/history", component: DataAccessHistoryView, meta: { title: "历史记录" } },
       { path: "/data-release/apply", component: SqlReleaseApplyView, meta: { title: "SQL上线" } },
-      { path: "/data-release/history", component: SqlReleaseHistoryView, meta: { title: "上线历史" } },
+      { path: "/data-release/history", component: SqlReleaseHistoryView, meta: { title: "工单历史" } },
       { path: "/tasks/schedules", component: TaskScheduleView, meta: { title: "调度管理" } },
       { path: "/tasks/results", component: TaskResultView, meta: { title: "结果查询" } },
       { path: "/tools/aliyun-dns", component: AliyunDnsToolView, meta: { title: "阿里云域名工具" } },

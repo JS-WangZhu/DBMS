@@ -50,7 +50,7 @@ MENU_CATALOG = [
     {"key": "ai_analysis", "label": "智能分析"},
     {"key": "data_history", "label": "历史记录"},
     {"key": "sql_release_apply", "label": "SQL上线"},
-    {"key": "sql_release_history", "label": "上线历史"},
+    {"key": "sql_release_history", "label": "工单历史"},
     {"key": "task_schedule", "label": "调度管理"},
     {"key": "task_results", "label": "结果查询"},
     {"key": "backup_mysql_policies", "label": "MySQL策略"},
@@ -123,6 +123,7 @@ def get_permissions(user_id: int):
             "cluster_id": item.cluster_id,
             "can_query": bool(item.can_query),
             "can_change": bool(item.can_change),
+            "can_execute": bool(item.can_execute),
         }
         for item in cluster_rows
     ]
@@ -140,10 +141,11 @@ def get_permissions(user_id: int):
         for item in group_cluster_rows:
             row = merged.setdefault(
                 item.cluster_id,
-                {"cluster_id": item.cluster_id, "can_query": False, "can_change": False},
+                {"cluster_id": item.cluster_id, "can_query": False, "can_change": False, "can_execute": False},
             )
             row["can_query"] = row["can_query"] or bool(item.can_query)
             row["can_change"] = row["can_change"] or bool(item.can_change)
+            row["can_execute"] = row["can_execute"] or bool(item.can_execute)
         cluster_permissions = list(merged.values())
     return ok_response(
         data={
@@ -171,6 +173,7 @@ def get_my_permissions():
             "cluster_id": item.cluster_id,
             "can_query": bool(item.can_query),
             "can_change": bool(item.can_change),
+            "can_execute": bool(item.can_execute),
         }
         for item in cluster_rows
     ]
@@ -187,10 +190,11 @@ def get_my_permissions():
         for item in group_cluster_rows:
             row = merged.setdefault(
                 item.cluster_id,
-                {"cluster_id": item.cluster_id, "can_query": False, "can_change": False},
+                {"cluster_id": item.cluster_id, "can_query": False, "can_change": False, "can_execute": False},
             )
             row["can_query"] = row["can_query"] or bool(item.can_query)
             row["can_change"] = row["can_change"] or bool(item.can_change)
+            row["can_execute"] = row["can_execute"] or bool(item.can_execute)
         cluster_permissions = list(merged.values())
     return ok_response(
         data={
@@ -234,6 +238,7 @@ def update_permissions(user_id: int):
                     cluster_id=cluster_id,
                     can_query=bool(item.get("can_query")),
                     can_change=bool(item.get("can_change")),
+                    can_execute=bool(item.get("can_execute")),
                 )
             )
 
@@ -285,6 +290,7 @@ def list_role_groups():
                 "cluster_id": item.cluster_id,
                 "can_query": bool(item.can_query),
                 "can_change": bool(item.can_change),
+                "can_execute": bool(item.can_execute),
             }
             for item in RoleGroupClusterPermission.query.filter_by(role_group_id=row.id).all()
         ]
@@ -332,6 +338,7 @@ def create_role_group():
                 cluster_id=cluster_id,
                 can_query=bool(item.get("can_query")),
                 can_change=bool(item.get("can_change")),
+                can_execute=bool(item.get("can_execute")),
             )
         )
     db.session.commit()
@@ -375,6 +382,7 @@ def update_role_group(group_id: int):
                     cluster_id=cluster_id,
                     can_query=bool(item.get("can_query")),
                     can_change=bool(item.get("can_change")),
+                    can_execute=bool(item.get("can_execute")),
                 )
             )
     db.session.commit()

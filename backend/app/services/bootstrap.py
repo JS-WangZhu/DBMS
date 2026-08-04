@@ -33,6 +33,8 @@ def ensure_backup_extra_columns():
         "audit_logs",
         "user_menu_permissions",
         "user_cluster_permissions",
+        "role_group_cluster_permissions",
+        "data_source_group_cluster_permissions",
         "api_keys",
         "inspection_alerts",
         "sso_configs",
@@ -71,6 +73,15 @@ def ensure_backup_extra_columns():
         statements.append("ALTER TABLE sso_configs ADD COLUMN avatar_field VARCHAR(128) NOT NULL DEFAULT ''")
     if table_columns["sql_releases"] and "db_type" not in table_columns["sql_releases"]:
         statements.append("ALTER TABLE sql_releases ADD COLUMN db_type VARCHAR(32) NOT NULL DEFAULT 'mysql'")
+    for permission_table in (
+        "user_cluster_permissions",
+        "role_group_cluster_permissions",
+        "data_source_group_cluster_permissions",
+    ):
+        if table_columns[permission_table] and "can_execute" not in table_columns[permission_table]:
+            statements.append(
+                f"ALTER TABLE {permission_table} ADD COLUMN can_execute BOOLEAN NOT NULL DEFAULT FALSE"
+            )
     if table_columns["db_clusters"] and "namespace" not in table_columns["db_clusters"]:
         statements.append("ALTER TABLE db_clusters ADD COLUMN namespace VARCHAR(64) NOT NULL DEFAULT 'default'")
     if table_columns["db_clusters"] and "business_line" not in table_columns["db_clusters"]:

@@ -29,15 +29,26 @@ def _normalize_permissions(raw):
         seen.add(cluster_id)
         can_query = item.get("can_query") is True
         can_change = item.get("can_change") is True
-        if can_query or can_change:
-            result.append({"cluster_id": cluster_id, "can_query": can_query, "can_change": can_change})
+        can_execute = item.get("can_execute") is True
+        if can_query or can_change or can_execute:
+            result.append({
+                "cluster_id": cluster_id,
+                "can_query": can_query,
+                "can_change": can_change,
+                "can_execute": can_execute,
+            })
     return result
 
 
 def _group_dict(group):
     data = group.to_dict()
     data["permissions"] = [
-        {"cluster_id": row.cluster_id, "can_query": bool(row.can_query), "can_change": bool(row.can_change)}
+        {
+            "cluster_id": row.cluster_id,
+            "can_query": bool(row.can_query),
+            "can_change": bool(row.can_change),
+            "can_execute": bool(row.can_execute),
+        }
         for row in DataSourceGroupClusterPermission.query.filter_by(group_id=group.id).all()
     ]
     data["user_ids"] = [row.user_id for row in UserDataSourceGroup.query.filter_by(group_id=group.id).all()]
@@ -61,12 +72,18 @@ def overview():
 def get_user_data_source_permissions(user_id):
     user = User.query.get_or_404(user_id)
     direct = [
-        {"cluster_id": row.cluster_id, "can_query": bool(row.can_query), "can_change": bool(row.can_change)}
+        {
+            "cluster_id": row.cluster_id,
+            "can_query": bool(row.can_query),
+            "can_change": bool(row.can_change),
+            "can_execute": bool(row.can_execute),
+        }
         for row in UserClusterPermission.query.filter_by(user_id=user.id).all()
     ]
     group_ids = [row.group_id for row in UserDataSourceGroup.query.filter_by(user_id=user.id).all()]
     effective = get_effective_cluster_permissions(user.id) if user.role != "admin" else {
-        row.id: {"can_query": True, "can_change": True} for row in DatabaseCluster.query.all()
+        row.id: {"can_query": True, "can_change": True, "can_execute": True}
+        for row in DatabaseCluster.query.all()
     }
     return ok_response(data={
         "user": user.to_dict(),

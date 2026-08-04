@@ -7,6 +7,7 @@
           <el-button v-if="hasFilters" link type="primary" @click="resetFilters">清空筛选</el-button>
           <el-button type="success" plain :disabled="disabled || !filteredPermissions.length" @click="enableFilteredPermission('can_query')">一键查询</el-button>
           <el-button type="danger" plain :disabled="disabled || !filteredPermissions.length" @click="enableFilteredPermission('can_change')">一键变更</el-button>
+          <el-button type="warning" plain :disabled="disabled || !filteredPermissions.length" @click="enableFilteredPermission('can_execute')">一键执行</el-button>
         </div>
       </div>
       <div class="filter-grid">
@@ -49,11 +50,17 @@
           <el-switch :model-value="row.can_change" :disabled="disabled" @update:model-value="update(row.cluster_id, 'can_change', $event)" />
         </template>
       </el-table-column>
-      <el-table-column label="最终有效" width="180">
+      <el-table-column label="直接执行" width="130">
+        <template #default="{ row }">
+          <el-switch :model-value="row.can_execute" :disabled="disabled" @update:model-value="update(row.cluster_id, 'can_execute', $event)" />
+        </template>
+      </el-table-column>
+      <el-table-column label="最终有效" width="240">
         <template #default="{ row }">
           <template v-if="effective[row.cluster_id]">
             <el-tag v-if="effective[row.cluster_id].can_query" type="success">查询</el-tag>
             <el-tag v-if="effective[row.cluster_id].can_change" type="danger">变更</el-tag>
+            <el-tag v-if="effective[row.cluster_id].can_execute" type="warning">执行</el-tag>
           </template>
           <span v-else>-</span>
         </template>

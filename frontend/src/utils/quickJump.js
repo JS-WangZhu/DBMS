@@ -30,7 +30,7 @@ export const QUICK_JUMP_MENUS = [
   menu("data_change", "/data-access/change", "数据变更", "数据访问", "shu ju bian geng"),
   menu("data_history", "/data-access/history", "历史记录", "数据访问", "li shi ji lu"),
   menu("sql_release_apply", "/data-release/apply", "SQL上线", "数据发布", "sql shang xian"),
-  menu("sql_release_history", "/data-release/history", "上线历史", "数据发布", "shang xian li shi"),
+  menu("sql_release_history", "/data-release/history", "工单历史", "数据发布", "gong dan li shi"),
   menu("task_schedule", "/tasks/schedules", "调度管理", "任务管理", "diao du guan li"),
   menu("task_results", "/tasks/results", "结果查询", "任务管理", "jie guo cha xun"),
   menu("aliyun_dns_tool", "/tools/aliyun-dns", "阿里云域名工具", "快捷工具", "a li yun yu ming gong ju", ["aliyun", "dns"]),

@@ -190,7 +190,7 @@
           </el-menu-item>
           <el-menu-item v-if="hasMenu('sql_release_history')" index="/data-release/history">
             <el-icon><Clock /></el-icon>
-            <span>上线历史</span>
+            <span>工单历史</span>
           </el-menu-item>
         </el-sub-menu>
 

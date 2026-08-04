@@ -1,8 +1,14 @@
 from datetime import datetime
 
-from flask import Blueprint, request
+from flask import Blueprint, current_app, request
+from sqlalchemy import or_
 
-from app.api.routes.common import admin_required, get_current_user, require_cluster_permission, require_menu_permission
+from app.api.routes.common import (
+    get_current_user,
+    list_allowed_cluster_ids,
+    require_cluster_permission,
+    require_menu_permission,
+)
 from app.extensions import db
 from app.models.db_asset import DatabaseCluster, DatabaseInstance
 from app.models.sql_release import SqlRelease
@@ -25,6 +31,7 @@ from app.services.sql_release_service import (
     split_sql_statements,
     validate_mongo_release_statement,
 )
+from app.services.sql_release_review import dispatch_sql_release_review
 from app.services.postgresql_backup import list_databases as list_postgresql_databases
 from app.services.postgresql_backup import list_objects as list_postgresql_objects
 from app.services.postgresql_backup import list_table_columns as list_postgresql_table_columns
@@ -40,8 +47,14 @@ def _cluster_seed_nodes(db_type, cluster_id):
     return sorted({f"{item.resolved_ip or item.host_input}:{item.port}" for item in rows if item.resolved_ip or item.host_input})
 
 
-def _serialize_release(row, user=None):
+def _serialize_release(row, user=None, executable_cluster_ids=None):
     data = row.to_dict()
+    if user:
+        data["can_execute"] = user.role == "admin" or (
+            row.cluster_id in executable_cluster_ids
+            if executable_cluster_ids is not None
+            else require_cluster_permission(row.cluster_id, "execute")
+        )
     if user and user.role != "admin":
         data.pop("rollback_backup_path", None)
     return data
@@ -266,33 +279,36 @@ def review_sql_release():
 @require_menu_permission("sql_release_apply")
 def submit_sql_release():
     payload = request.get_json(silent=True) or {}
-    result, error = _review(payload)
+    cluster, instance, database, statements, error = _resolve_payload(payload)
     if error:
         code = 403 if error == "permission denied" else 400
         return error_response(error, code=code)
-    force = payload.get("force_submit") is True
-    public_result = {key: value for key, value in result.items() if key not in {"cluster", "instance"}}
-    if not result["passed"] and not force:
-        return error_response("AI 初审未通过，请修改后重试；如确认风险可强制提交", code=422, data=public_result)
     user = get_current_user()
     release = SqlRelease(
-        title=str(payload.get("title") or "").strip() or f"{result['database']} SQL 上线",
+        title=str(payload.get("title") or "").strip() or f"{database} SQL 上线",
         applicant_id=user.id,
-        cluster_id=result["cluster"].id,
-        instance_id=result["instance"].id,
-        db_type=result["db_type"],
-        database_name=result["database"],
-        sql_text=";\n".join(result["statements"]) + ";",
-        status="pending",
-        ai_passed=result["passed"],
-        force_submitted=force,
-        ai_summary=result["summary"],
-        review_json=result["reviews"],
+        cluster_id=cluster.id,
+        instance_id=instance.id,
+        db_type=cluster.db_type,
+        database_name=database,
+        sql_text=";\n".join(statements) + ";",
+        status="reviewing",
+        ai_passed=False,
+        force_submitted=False,
+        ai_summary="AI 初审进行中",
+        review_json=[],
     )
     db.session.add(release)
     db.session.commit()
-    log_audit(user_id=user.id, action="sql_release.submit", target_type="sql_release", target_id=str(release.id), detail={"force_submitted": force, "ai_passed": result["passed"]})
-    return ok_response(data=_serialize_release(release, user), message="已提交管理员执行", code=201)
+    log_audit(
+        user_id=user.id,
+        action="sql_release.submit",
+        target_type="sql_release",
+        target_id=str(release.id),
+        detail={"status": release.status},
+    )
+    dispatch_sql_release_review(current_app._get_current_object(), release.id)
+    return ok_response(data=_serialize_release(release, user, set()), message="工单已提交，AI 初审正在异步进行", code=201)
 
 
 @bp.get("")
@@ -300,8 +316,13 @@ def submit_sql_release():
 def list_sql_releases():
     user = get_current_user()
     query = SqlRelease.query
+    executable_cluster_ids = None
     if user.role != "admin":
-        query = query.filter_by(applicant_id=user.id)
+        executable_cluster_ids = set(list_allowed_cluster_ids("execute"))
+        scope_filters = [SqlRelease.applicant_id == user.id]
+        if executable_cluster_ids:
+            scope_filters.append(SqlRelease.cluster_id.in_(executable_cluster_ids))
+        query = query.filter(or_(*scope_filters))
     status = str(request.args.get("status") or "").strip()
     if status:
         query = query.filter_by(status=status)
@@ -312,7 +333,12 @@ def list_sql_releases():
         page, page_size = 1, 10
     total = query.count()
     rows = query.order_by(SqlRelease.id.desc()).offset((page - 1) * page_size).limit(page_size).all()
-    return ok_response(data={"items": [_serialize_release(row, user) for row in rows], "total": total, "page": page, "page_size": page_size})
+    return ok_response(data={
+        "items": [_serialize_release(row, user, executable_cluster_ids) for row in rows],
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+    })
 
 
 @bp.get("/<int:release_id>")
@@ -320,17 +346,26 @@ def list_sql_releases():
 def get_sql_release(release_id):
     row = SqlRelease.query.get_or_404(release_id)
     user = get_current_user()
-    if user.role != "admin" and row.applicant_id != user.id:
+    executable_cluster_ids = None if user.role == "admin" else set(list_allowed_cluster_ids("execute"))
+    if user.role != "admin" and row.applicant_id != user.id and row.cluster_id not in executable_cluster_ids:
         return error_response("permission denied", code=403)
-    return ok_response(data=_serialize_release(row, user))
+    return ok_response(data=_serialize_release(row, user, executable_cluster_ids))
 
 
 @bp.post("/<int:release_id>/execute")
-@admin_required
+@require_menu_permission("sql_release_history")
 def execute_sql_release(release_id):
     release = SqlRelease.query.get_or_404(release_id)
-    if release.status != "pending":
-        return error_response("only pending release can be executed", code=409)
+    user = get_current_user()
+    if user.role != "admin" and not require_cluster_permission(release.cluster_id, "execute"):
+        return error_response("permission denied", code=403)
+    confirm_risk = (request.get_json(silent=True) or {}).get("confirm_risk") is True
+    if release.status == "review_rejected":
+        if not confirm_risk:
+            return error_response("AI 初审未通过，执行前必须明确确认风险", code=409)
+        release.force_submitted = True
+    elif release.status != "pending":
+        return error_response("AI 初审完成并通过后才能执行", code=409)
     instance = DatabaseInstance.query.get(release.instance_id)
     if not instance or not instance.enabled:
         return error_response("release instance is unavailable", code=400)
@@ -363,12 +398,11 @@ def execute_sql_release(release_id):
             release.rollback_backup_path = generated_rollback_path
         release.status = "failed"
         release.execution_result_json = {"error": str(exc)}
-    user = get_current_user()
     release.executed_by = user.id
     release.executed_at = datetime.utcnow()
     db.session.commit()
     log_audit(user_id=user.id, action="sql_release.execute", target_type="sql_release", target_id=str(release.id), detail={"status": release.status, "rollback_backup_path": backup_path})
     if release.status == "failed":
         message = "执行失败，可使用已生成的回滚文件恢复" if backup_path else "回滚文件生成失败，已中止执行"
-        return error_response(message, code=500, data=release.to_dict())
-    return ok_response(data=release.to_dict(), message="执行成功")
+        return error_response(message, code=500, data=_serialize_release(release, user))
+    return ok_response(data=_serialize_release(release, user), message="执行成功")

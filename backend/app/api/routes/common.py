@@ -114,6 +114,8 @@ def require_cluster_permission(cluster_id: int, action: str):
         return bool(row.get("can_query"))
     if action == "change":
         return bool(row.get("can_change"))
+    if action == "execute":
+        return bool(row.get("can_execute"))
     return False
 
 
@@ -135,19 +137,22 @@ def get_effective_cluster_permissions(user_id: int):
         effective[row.cluster_id] = {
             "can_query": bool(row.can_query),
             "can_change": bool(row.can_change),
+            "can_execute": bool(row.can_execute),
         }
     role_group_ids = [row.role_group_id for row in UserRoleGroup.query.filter_by(user_id=user_id).all()]
     if role_group_ids:
         for row in RoleGroupClusterPermission.query.filter(RoleGroupClusterPermission.role_group_id.in_(role_group_ids)).all():
-            merged = effective.setdefault(row.cluster_id, {"can_query": False, "can_change": False})
+            merged = effective.setdefault(row.cluster_id, {"can_query": False, "can_change": False, "can_execute": False})
             merged["can_query"] = merged["can_query"] or bool(row.can_query)
             merged["can_change"] = merged["can_change"] or bool(row.can_change)
+            merged["can_execute"] = merged["can_execute"] or bool(row.can_execute)
     data_source_group_ids = [row.group_id for row in UserDataSourceGroup.query.filter_by(user_id=user_id).all()]
     if data_source_group_ids:
         for row in DataSourceGroupClusterPermission.query.filter(DataSourceGroupClusterPermission.group_id.in_(data_source_group_ids)).all():
-            merged = effective.setdefault(row.cluster_id, {"can_query": False, "can_change": False})
+            merged = effective.setdefault(row.cluster_id, {"can_query": False, "can_change": False, "can_execute": False})
             merged["can_query"] = merged["can_query"] or bool(row.can_query)
             merged["can_change"] = merged["can_change"] or bool(row.can_change)
+            merged["can_execute"] = merged["can_execute"] or bool(row.can_execute)
     return effective
 
 
@@ -162,4 +167,6 @@ def list_allowed_cluster_ids(action: str):
         return [cid for cid, perm in effective.items() if perm.get("can_query")]
     if action == "change":
         return [cid for cid, perm in effective.items() if perm.get("can_change")]
+    if action == "execute":
+        return [cid for cid, perm in effective.items() if perm.get("can_execute")]
     return []

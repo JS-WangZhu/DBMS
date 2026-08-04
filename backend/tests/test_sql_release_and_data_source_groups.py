@@ -20,6 +20,7 @@ from app.services.sql_release_service import (
     execute_postgresql_with_partial_rollback,
     validate_mongo_release_statement,
 )
+from app.services.sql_release_review import run_sql_release_review
 
 
 def _login(client, username, password):
@@ -41,7 +42,7 @@ def _assets(app):
         return user.id, cluster.id, instance.id
 
 
-def test_data_source_group_grants_effective_change_permission(app, client):
+def test_data_source_group_and_direct_permissions_include_execute(app, client):
     user_id, cluster_id, _ = _assets(app)
     admin_headers = _login(client, "admin", "admin123")
     created = client.post(
@@ -54,16 +55,20 @@ def test_data_source_group_grants_effective_change_permission(app, client):
     updated = client.put(
         f"/api/v1/data-source-permissions/users/{user_id}",
         headers=admin_headers,
-        json={"group_ids": [group_id], "direct_permissions": []},
+        json={
+            "group_ids": [group_id],
+            "direct_permissions": [{"cluster_id": cluster_id, "can_execute": True}],
+        },
     )
     assert updated.status_code == 200
     detail = client.get(f"/api/v1/data-source-permissions/users/{user_id}", headers=admin_headers).get_json()["data"]
     effective = {row["cluster_id"]: row for row in detail["effective_permissions"]}
     assert effective[cluster_id]["can_change"] is True
     assert effective[cluster_id]["can_query"] is False
+    assert effective[cluster_id]["can_execute"] is True
 
 
-def test_ai_rejection_requires_force_and_history_is_user_scoped(app, client, monkeypatch):
+def test_submit_is_immediate_and_async_rejection_requires_execution_confirmation(app, client, monkeypatch):
     user_id, cluster_id, instance_id = _assets(app)
     with app.app_context():
         db.session.add_all([
@@ -85,10 +90,18 @@ def test_ai_rejection_requires_force_and_history_is_user_scoped(app, client, mon
         "name": "id", "data_type": "bigint", "column_type": "bigint", "column_key": "PRI",
         "nullable": False, "default": None, "comment": "订单ID", "position": 1,
     }])
-    monkeypatch.setattr(routes, "review_release", lambda *args: ([{
+    dispatched = []
+    monkeypatch.setattr(routes, "dispatch_sql_release_review", lambda _app, release_id: dispatched.append(release_id))
+    import app.services.sql_release_review as review_worker
+    monkeypatch.setattr(review_worker, "review_release", lambda *args: ([{
         "line": 1, "sql": "DELETE FROM orders", "passed": False, "risk_level": "high",
         "reason": "缺少 WHERE 条件", "suggestion": "增加精确 WHERE 条件",
     }], "存在高风险语句"))
+    monkeypatch.setattr(
+        routes,
+        "execute_mysql_with_partial_rollback",
+        lambda *_args, **_kwargs: ({"affected_rows": 1}, "/tmp/release-rollback.sql"),
+    )
     user_headers = _login(client, "release-user", "password123")
     overview = client.get(
         "/api/v1/sql-releases/mysql/objects",
@@ -119,15 +132,125 @@ def test_ai_rejection_requires_force_and_history_is_user_scoped(app, client, mon
     )
     assert mismatched_environment.status_code == 400
     assert "environment does not match cluster" in mismatched_environment.get_json()["message"]
-    rejected = client.post("/api/v1/sql-releases", headers=user_headers, json=payload)
-    assert rejected.status_code == 422
-    assert rejected.get_json()["data"]["reviews"][0]["passed"] is False
-    forced = client.post("/api/v1/sql-releases", headers=user_headers, json={**payload, "force_submit": True})
-    assert forced.status_code == 201
-    assert forced.get_json()["data"]["force_submitted"] is True
+    submitted = client.post("/api/v1/sql-releases", headers=user_headers, json=payload)
+    assert submitted.status_code == 201
+    assert submitted.get_json()["data"]["status"] == "reviewing"
+    release_id = submitted.get_json()["data"]["id"]
+    assert dispatched == [release_id]
+
+    run_sql_release_review(app, release_id)
+    with app.app_context():
+        release = SqlRelease.query.get(release_id)
+        assert release.status == "review_rejected"
+        assert release.review_json[0]["passed"] is False
+
     history = client.get("/api/v1/sql-releases", headers=user_headers)
     assert history.status_code == 200
     assert [row["applicant_id"] for row in history.get_json()["data"]["items"]] == [user_id]
+    g.pop("current_user", None)
+    admin_headers = _login(client, "admin", "admin123")
+    without_confirmation = client.post(f"/api/v1/sql-releases/{release_id}/execute", headers=admin_headers)
+    assert without_confirmation.status_code == 409
+    confirmed = client.post(
+        f"/api/v1/sql-releases/{release_id}/execute",
+        headers=admin_headers,
+        json={"confirm_risk": True},
+    )
+    assert confirmed.status_code == 200
+    with app.app_context():
+        assert SqlRelease.query.get(release_id).force_submitted is True
+
+
+def test_personal_execute_permission_scopes_history_and_execution(app, client, monkeypatch):
+    applicant_id, cluster_id, instance_id = _assets(app)
+    with app.app_context():
+        executor = User(username="release-executor", role="user", status="active", auth_source="local")
+        executor.set_password("password123")
+        outsider = User(username="release-outsider", role="user", status="active", auth_source="local")
+        outsider.set_password("password123")
+        unauthorized_cluster = DatabaseCluster(
+            name="mysql-unauthorized",
+            db_type="mysql",
+            business_line="other",
+            environment="test",
+        )
+        db.session.add_all([executor, outsider, unauthorized_cluster])
+        db.session.flush()
+        unauthorized_instance = DatabaseInstance(
+            name="mysql-unauthorized-primary",
+            db_type="mysql",
+            host_input="127.0.0.2",
+            port=3306,
+            username="root",
+            cluster_id=unauthorized_cluster.id,
+        )
+        db.session.add(unauthorized_instance)
+        db.session.flush()
+        db.session.add_all([
+            UserMenuPermission(user_id=applicant_id, menu_key="sql_release_history"),
+            UserMenuPermission(user_id=executor.id, menu_key="sql_release_history"),
+            UserClusterPermission(user_id=executor.id, cluster_id=cluster_id, can_execute=True),
+            SqlRelease(
+                title="execute permission",
+                applicant_id=applicant_id,
+                cluster_id=cluster_id,
+                instance_id=instance_id,
+                database_name="billing",
+                sql_text="UPDATE orders SET status='paid' WHERE id=1;",
+                status="pending",
+                ai_passed=True,
+                force_submitted=False,
+                review_json=[{"line": 1, "sql": "UPDATE orders", "passed": True}],
+            ),
+            SqlRelease(
+                title="unauthorized release",
+                applicant_id=outsider.id,
+                cluster_id=unauthorized_cluster.id,
+                instance_id=unauthorized_instance.id,
+                database_name="other_db",
+                sql_text="UPDATE records SET status='done' WHERE id=1;",
+                status="pending",
+                ai_passed=True,
+                force_submitted=False,
+                review_json=[{"line": 1, "sql": "UPDATE records", "passed": True}],
+            ),
+        ])
+        db.session.commit()
+        release_id = SqlRelease.query.filter_by(title="execute permission").first().id
+        unauthorized_release_id = SqlRelease.query.filter_by(title="unauthorized release").first().id
+
+    import app.api.routes.sql_releases as routes
+    monkeypatch.setattr(
+        routes,
+        "execute_mysql_with_partial_rollback",
+        lambda *_args, **_kwargs: ({"affected_rows": 1}, None),
+    )
+    applicant_headers = _login(client, "release-user", "password123")
+    denied = client.post(f"/api/v1/sql-releases/{release_id}/execute", headers=applicant_headers)
+    assert denied.status_code == 403
+
+    g.pop("current_user", None)
+    executor_headers = _login(client, "release-executor", "password123")
+    history = client.get("/api/v1/sql-releases", headers=executor_headers)
+    assert history.status_code == 200
+    assert [item["id"] for item in history.get_json()["data"]["items"]] == [release_id]
+    assert history.get_json()["data"]["items"][0]["can_execute"] is True
+    unauthorized_detail = client.get(
+        f"/api/v1/sql-releases/{unauthorized_release_id}",
+        headers=executor_headers,
+    )
+    assert unauthorized_detail.status_code == 403
+    executed = client.post(f"/api/v1/sql-releases/{release_id}/execute", headers=executor_headers)
+    assert executed.status_code == 200
+
+    g.pop("current_user", None)
+    admin_headers = _login(client, "admin", "admin123")
+    admin_history = client.get("/api/v1/sql-releases", headers=admin_headers)
+    assert admin_history.status_code == 200
+    assert {item["id"] for item in admin_history.get_json()["data"]["items"]} == {
+        release_id,
+        unauthorized_release_id,
+    }
 
 
 def test_partial_rollback_generation_failure_prevents_execution(app, client, monkeypatch):
@@ -459,7 +582,9 @@ def test_release_submit_and_execute_dispatches_by_database_type(app, client, mon
         monkeypatch.setattr(routes, "list_postgresql_table_columns", lambda *_args: [{
             "name": "id", "data_type": "bigint", "column_key": "PRI",
         }])
-    monkeypatch.setattr(routes, "review_release", lambda *_args: ([{
+    monkeypatch.setattr(routes, "dispatch_sql_release_review", lambda *_args: None)
+    import app.services.sql_release_review as review_worker
+    monkeypatch.setattr(review_worker, "review_release", lambda *_args: ([{
         "line": 1, "sql": statement, "passed": True, "risk_level": "low", "reason": "ok", "suggestion": "",
     }], "通过"))
     called = []
@@ -489,7 +614,11 @@ def test_release_submit_and_execute_dispatches_by_database_type(app, client, mon
     submitted = client.post("/api/v1/sql-releases", headers=user_headers, json=payload)
     assert submitted.status_code == 201
     assert submitted.get_json()["data"]["db_type"] == db_type
+    assert submitted.get_json()["data"]["status"] == "reviewing"
     release_id = submitted.get_json()["data"]["id"]
+    run_sql_release_review(app, release_id)
+    with app.app_context():
+        assert SqlRelease.query.get(release_id).status == "pending"
     admin_login = client.post("/api/v1/auth/login", json={"username": "admin", "password": "admin123"})
     assert admin_login.status_code == 200
     assert admin_login.get_json()["data"]["user"]["role"] == "admin"
