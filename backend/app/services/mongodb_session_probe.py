@@ -225,11 +225,21 @@ def _format_operation_user(item: dict) -> str:
     return ", ".join(labels)
 
 
+def _operation_command(item: dict) -> dict:
+    command = item.get("command")
+    if isinstance(command, dict) and command:
+        return command
+
+    # MongoDB 3.4 reports the operation payload in `query` for legacy
+    # OP_QUERY operations (including commands and cursor getMore details).
+    query = item.get("query")
+    return query if isinstance(query, dict) else {}
+
+
 def _normalize_operation(item: dict, app_name: str) -> dict | None:
     operation_id = item.get("opid")
     if operation_id is None:
         return None
-    command = item.get("command") if isinstance(item.get("command"), dict) else {}
     return {
         "id": str(operation_id),
         "operation": item.get("op"),
@@ -241,7 +251,7 @@ def _normalize_operation(item: dict, app_name: str) -> dict | None:
         "time_seconds": max(0, int(item.get("secs_running") or item.get("microsecs_running", 0) / 1000000 or 0)),
         "active": bool(item.get("active")),
         "waiting_for_lock": bool(item.get("waitingForLock")),
-        "command": _json_safe(command),
+        "command": _json_safe(_operation_command(item)),
         "is_probe_connection": _is_probe_operation(item, app_name),
     }
 

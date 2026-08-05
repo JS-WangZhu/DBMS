@@ -20,6 +20,7 @@ class FakeAdmin:
                 {"opid": 10, "op": "command", "ns": "orders.$cmd", "client": "10.0.0.5:50000", "effectiveUsers": [{"user": "orders_app", "db": "admin"}], "appName": "orders-api", "secs_running": 65, "active": True, "command": {"find": "orders", "filter": {"status": "open"}}},
                 {"opid": 11, "op": "command", "ns": "admin.$cmd", "appName": self.connection.appname, "secs_running": 0, "active": True, "command": {"currentOp": 1}},
                 {"opid": 12, "op": "getmore", "ns": "local.oplog.rs", "appName": "replication", "secs_running": 120, "active": True, "command": {"getMore": 123}},
+                {"opid": 13, "op": "query", "ns": "orders.orders", "client": "10.0.0.6:50001", "secs_running": 30, "active": True, "query": {"status": "pending"}},
             ]}
         return {"ok": 1}
 
@@ -56,11 +57,12 @@ def _start(monkeypatch):
 def test_session_probe_fetches_formats_kills_and_closes(monkeypatch):
     clients, started = _start(monkeypatch)
     result = probe.fetch_operations(started["token"], user_id=11)
-    assert [item["id"] for item in result["sessions"]] == ["10", "11"]
+    assert [item["id"] for item in result["sessions"]] == ["10", "13", "11"]
     assert result["sessions"][0]["command"] == {"find": "orders", "filter": {"status": "open"}}
     assert result["sessions"][0]["user"] == "orders_app@admin"
-    assert result["sessions"][1]["user"] == ""
-    assert result["sessions"][1]["is_probe_connection"] is True
+    assert result["sessions"][1]["command"] == {"status": "pending"}
+    assert result["sessions"][2]["user"] == ""
+    assert result["sessions"][2]["is_probe_connection"] is True
     assert probe.kill_operation(started["token"], user_id=11, operation_id="10") == {"operation_id": "10", "killed": True}
     current_op_commands = [command for command in clients[0].commands if isinstance(command, dict) and command.get("currentOp")]
     assert current_op_commands == [
@@ -95,3 +97,15 @@ def test_operation_user_supports_authenticated_users_and_legacy_values():
     }) == "reporter@admin, reader@analytics"
     assert probe._format_operation_user({"user": "legacy_user"}) == "legacy_user"
     assert probe._format_operation_user({}) == ""
+
+
+def test_operation_command_prefers_command_and_falls_back_to_mongodb_34_query():
+    assert probe._operation_command({
+        "command": {"aggregate": "orders"},
+        "query": {"legacy": True},
+    }) == {"aggregate": "orders"}
+    assert probe._operation_command({
+        "command": {},
+        "query": {"find": "orders", "filter": {"status": "pending"}},
+    }) == {"find": "orders", "filter": {"status": "pending"}}
+    assert probe._operation_command({"query": "redacted"}) == {}
