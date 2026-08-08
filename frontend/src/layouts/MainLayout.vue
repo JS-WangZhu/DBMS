@@ -406,7 +406,7 @@
         <div class="route-content" :class="{ 'is-entering': contentEntering }">
           <router-view v-slot="{ Component }">
             <keep-alive>
-              <component :is="Component" />
+              <component :is="Component" :key="route.path" />
             </keep-alive>
           </router-view>
         </div>
@@ -768,7 +768,7 @@ function onTabChange(tabId) {
   if (!target || target.path === route.path) {
     return;
   }
-  router.push(target.path);
+  router.push(target.fullPath || target.path);
 }
 
 function removeTab(tabId) {
@@ -789,7 +789,7 @@ function removeTab(tabId) {
     const fallback = tabs.value[idx] || tabs.value[idx - 1];
     if (fallback) {
       activeTabId.value = fallback.id;
-      router.push(fallback.path);
+      router.push(fallback.fullPath || fallback.path);
     }
   }
 }
@@ -824,7 +824,7 @@ function closeOthers() {
   tabs.value = [targetTab];
   activeTabId.value = targetTab.id;
   contextMenu.value.visible = false;
-  router.push(targetTab.path);
+  router.push(targetTab.fullPath || targetTab.path);
 }
 
 function closeAll() {
@@ -922,7 +922,7 @@ function playContentTransition() {
 }
 
 watch(
-  () => route.path,
+  () => route.fullPath,
   () => {
     ensureRouteTab(route);
     enforceRoutePermission();

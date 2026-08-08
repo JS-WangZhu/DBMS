@@ -478,6 +478,8 @@ def reconcile_instance_status_alerts(instances, payload_by_instance: dict, cfg: 
             InspectionAlert.instance_id.in_(list(instance_map)),
             InspectionAlert.issue_key == "instance_status_probe",
         )
+        .order_by(InspectionAlert.id.asc())
+        .with_for_update()
         .all()
     )
     alert_map = {row.instance_id: row for row in alerts}
@@ -545,6 +547,7 @@ def reconcile_instance_status_alerts(instances, payload_by_instance: dict, cfg: 
                 and not alert.is_muted(now)
                 and instance.cluster_id not in muted_cluster_ids
             ):
+                db.session.commit()
                 try:
                     notify_result = _send_event_notification("alert", cfg, instance, cluster, issue)
                 except Exception as exc:
@@ -558,6 +561,7 @@ def reconcile_instance_status_alerts(instances, payload_by_instance: dict, cfg: 
                     sent_alerts += 1
                     alert.notify_count = int(alert.notify_count or 0) + 1
                     alert.last_notified_at = now
+                    db.session.commit()
             continue
 
         if not alert or alert.status != "open":
@@ -566,6 +570,10 @@ def reconcile_instance_status_alerts(instances, payload_by_instance: dict, cfg: 
         alert.recovered_at = now
         alert.last_payload_json = payload
         recovered += 1
+
+    # Persist lifecycle changes before notifier target queries/network I/O.
+    # Delivery failures keep recovery_notified_at empty for a later retry.
+    db.session.commit()
 
     # 恢复通知失败时保留待发送状态，后续状态探测周期继续重试。
     for alert in alerts:
@@ -589,6 +597,7 @@ def reconcile_instance_status_alerts(instances, payload_by_instance: dict, cfg: 
         if notify_result.get("ok"):
             sent_recoveries += 1
             alert.recovery_notified_at = now
+            db.session.commit()
 
     return {
         "opened": opened,
@@ -731,7 +740,16 @@ def run_inspection_cycle(trigger: str = "manual", force: bool = False):
                 collected_at=now,
             )
 
-        alerts = InspectionAlert.query.filter(InspectionAlert.instance_id.in_(list(instance_map.keys()))).all() if instance_map else []
+        alerts = (
+            InspectionAlert.query
+            .filter(
+                InspectionAlert.instance_id.in_(list(instance_map.keys())),
+                InspectionAlert.issue_key != "instance_status_probe",
+            )
+            .order_by(InspectionAlert.id.asc())
+            .with_for_update()
+            .all()
+        ) if instance_map else []
         alert_map = {(row.instance_id, row.issue_key): row for row in alerts}
         current_keys = set()
         muted_cluster_ids = set(cfg.get_muted_cluster_ids())
@@ -741,6 +759,7 @@ def run_inspection_cycle(trigger: str = "manual", force: bool = False):
         sent_recoveries = 0
         suppressed_alerts = 0
         repeat_seconds = cfg.get_notify_repeat_seconds()
+        pending_alert_notifications = []
 
         for instance_id, issues in issue_map.items():
             instance = instance_map.get(instance_id)
@@ -799,11 +818,7 @@ def run_inspection_cycle(trigger: str = "manual", force: bool = False):
                     and not alert_muted
                     and instance.cluster_id not in muted_cluster_ids
                 ):
-                    notify_result = _send_event_notification("alert", cfg, instance, cluster, issue)
-                    if notify_result.get("ok"):
-                        sent_alerts += 1
-                        alert.notify_count = int(alert.notify_count or 0) + 1
-                        alert.last_notified_at = now
+                    pending_alert_notifications.append((instance, cluster, issue, alert))
 
         for alert in alerts:
             key = (alert.instance_id, alert.issue_key)
@@ -819,6 +834,7 @@ def run_inspection_cycle(trigger: str = "manual", force: bool = False):
             alert.recovered_at = now
             recovered_alerts += 1
 
+        pending_recovery_notifications = []
         # A recovery is persisted independently from notification delivery.
         # Retry undelivered recovery notifications on later cycles instead of
         # losing them forever after a transient webhook/network timeout.
@@ -830,10 +846,46 @@ def run_inspection_cycle(trigger: str = "manual", force: bool = False):
                 continue
             cluster = cluster_map.get(instance.cluster_id)
             if cfg.notify_recovery and not alert.is_muted(now) and instance.cluster_id not in muted_cluster_ids:
+                pending_recovery_notifications.append((instance, cluster, alert))
+
+        # Persist alert lifecycle changes before notification target queries or
+        # network I/O. Otherwise those queries invoke autoflush while the cycle
+        # still owns every changed alert row, extending lock time and making a
+        # concurrent monitor cycle prone to MySQL 1205 lock-wait failures.
+        db.session.commit()
+
+        for instance, cluster, issue, alert in pending_alert_notifications:
+            try:
+                notify_result = _send_event_notification("alert", cfg, instance, cluster, issue)
+            except Exception as exc:
+                current_app.logger.warning(
+                    "inspection alert notification failed: instance_id=%s issue_key=%s err=%s",
+                    instance.id,
+                    issue.get("issue_key"),
+                    exc,
+                )
+                notify_result = {"ok": False}
+            if notify_result.get("ok"):
+                sent_alerts += 1
+                alert.notify_count = int(alert.notify_count or 0) + 1
+                alert.last_notified_at = now
+                db.session.commit()
+
+        for instance, cluster, alert in pending_recovery_notifications:
+            try:
                 notify_result = _send_event_notification("recovery", cfg, instance, cluster, alert)
-                if notify_result.get("ok"):
-                    sent_recoveries += 1
-                    alert.recovery_notified_at = now
+            except Exception as exc:
+                current_app.logger.warning(
+                    "inspection recovery notification failed: instance_id=%s issue_key=%s err=%s",
+                    instance.id,
+                    alert.issue_key,
+                    exc,
+                )
+                notify_result = {"ok": False}
+            if notify_result.get("ok"):
+                sent_recoveries += 1
+                alert.recovery_notified_at = now
+                db.session.commit()
 
         abnormal_instances = sum(1 for item in issue_map.values() if item)
         issue_total = sum(len(item) for item in issue_map.values()) + agent_abnormal

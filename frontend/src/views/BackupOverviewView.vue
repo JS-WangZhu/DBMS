@@ -152,6 +152,7 @@ import { ElMessage } from "element-plus";
 import { Refresh } from "@element-plus/icons-vue";
 
 import { backupOverview } from "../api/modules/backups";
+import { useTabActivationRefresh } from "../composables/useTabActivationRefresh";
 import {
   buildClusterLabel,
   dbTypeDisplayName,
@@ -276,6 +277,7 @@ async function loadOverview() {
 }
 
 onMounted(loadOverview);
+useTabActivationRefresh(loadOverview);
 </script>
 
 <style scoped>

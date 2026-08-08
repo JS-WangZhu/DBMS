@@ -104,6 +104,7 @@ import { onMounted, reactive, ref } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 
 import { createBackupKey, deleteBackupKey, getBackupPrivateKey, listBackupKeys, updateBackupKey } from "../api/modules/backups";
+import { useTabActivationRefresh } from "../composables/useTabActivationRefresh";
 
 const keys = ref([]);
 const dialogVisible = ref(false);
@@ -274,6 +275,7 @@ async function deleteKey(row) {
 }
 
 onMounted(loadKeys);
+useTabActivationRefresh(loadKeys);
 </script>
 
 <style scoped>

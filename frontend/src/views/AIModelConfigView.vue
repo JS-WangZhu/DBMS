@@ -61,6 +61,7 @@
 import { onMounted, ref } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { listAIConfigs, createAIConfig, updateAIConfig, deleteAIConfig } from "../api/modules/ai";
+import { useTabActivationRefresh } from "../composables/useTabActivationRefresh";
 
 const rows = ref([]);
 const loading = ref(false);
@@ -145,6 +146,7 @@ async function removeConfig(row) {
 }
 
 onMounted(loadConfigs);
+useTabActivationRefresh(loadConfigs);
 </script>
 
 <style scoped>

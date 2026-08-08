@@ -166,6 +166,7 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref } from "vue";
+import { useTabActivationRefresh } from "../composables/useTabActivationRefresh";
 import { ElMessage, ElMessageBox } from "element-plus";
 
 import {
@@ -606,6 +607,7 @@ function onKeySelectChange(keyId) {
   }
 }
 onMounted(refreshAll);
+useTabActivationRefresh(refreshAll);
 </script>
 
 <style scoped>

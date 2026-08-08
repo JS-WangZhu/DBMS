@@ -12,8 +12,24 @@ export function listSqlReleases(params = {}) {
   return client.get("/sql-releases", { params });
 }
 
+export function getSqlRelease(id) {
+  return client.get(`/sql-releases/${id}`);
+}
+
+export function getSqlReleaseReviewProgress(id) {
+  return client.get(`/sql-releases/${id}/review-progress`);
+}
+
+export function forceSubmitSqlRelease(id) {
+  return client.post(`/sql-releases/${id}/force-submit`);
+}
+
 export function executeSqlRelease(id, payload = {}) {
   return client.post(`/sql-releases/${id}/execute`, payload);
+}
+
+export function rollbackSqlRelease(id, lines = null) {
+  return client.post(`/sql-releases/${id}/rollback`, lines == null ? {} : { lines });
 }
 
 export function listSqlReleaseDatabases(clusterId, dbType) {

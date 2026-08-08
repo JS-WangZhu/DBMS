@@ -524,6 +524,7 @@ import { useRoute } from "vue-router";
 import { Coin, Files, Lightning, DataAnalysis, Download, Filter, Monitor } from "@element-plus/icons-vue";
 
 import { collectClusterHealth, listClusters } from "../api/modules/clusters";
+import { useTabActivationRefresh } from "../composables/useTabActivationRefresh";
   import { createDorisInstance, dorisFeStatus, listDorisInstances } from "../api/modules/doris";
   import { createJumpServerAccess, deleteInstance, getInstanceStatusConfig, updateInstance as updateInstanceById } from "../api/modules/instances";
   import { listJumpServerOptions } from "../api/modules/jumpserver";
@@ -3012,6 +3013,10 @@ onActivated(async () => {
   setupHealthTimer();
   setupRelativeTimer();
   setupRefreshTimer();
+});
+
+useTabActivationRefresh(async () => {
+  await Promise.all([loadProbeAgents(), loadJumpServerOptions(), reloadAll()]);
 });
 
 onDeactivated(() => {

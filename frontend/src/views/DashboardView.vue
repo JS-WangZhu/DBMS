@@ -67,6 +67,7 @@ import { Refresh } from "@element-plus/icons-vue";
 
 import { listInstances } from "../api/modules/instances";
 import { getClusterStats } from "../api/modules/clusters";
+import { useTabActivationRefresh } from "../composables/useTabActivationRefresh";
 import MysqlIcon from "../components/icons/MysqlIcon.vue";
 import MongoIcon from "../components/icons/MongoIcon.vue";
 import RedisIcon from "../components/icons/RedisIcon.vue";
@@ -252,6 +253,7 @@ onMounted(() => {
   loadStats();
   window.addEventListener("resize", handleResize);
 });
+useTabActivationRefresh(loadStats);
 
 onBeforeUnmount(() => {
   window.removeEventListener("resize", handleResize);

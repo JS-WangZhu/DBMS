@@ -130,6 +130,7 @@ import { CopyDocument, Delete, Plus } from "@element-plus/icons-vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 
 import { createMcpApiKey, deleteMcpApiKey, listMcpApiKeys } from "../api/modules/mcp_platform";
+import { useTabActivationRefresh } from "../composables/useTabActivationRefresh";
 
 const loading = ref(false);
 const saving = ref(false);
@@ -247,6 +248,7 @@ async function removeKey(row) {
 }
 
 onMounted(loadKeys);
+useTabActivationRefresh(loadKeys);
 </script>
 
 <style scoped>

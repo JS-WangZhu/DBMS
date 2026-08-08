@@ -1,5 +1,9 @@
 from app.extensions import db
 from app.models.base import TimestampMixin
+from sqlalchemy.dialects import mysql
+
+
+_LONG_TEXT = db.Text().with_variant(mysql.LONGTEXT(), "mysql")
 
 
 class SqlRelease(db.Model, TimestampMixin):
@@ -49,6 +53,8 @@ class SqlRelease(db.Model, TimestampMixin):
     instance = db.relationship("DatabaseInstance")
 
     def to_dict(self):
+        reviews = self.review_json or []
+        completed = sum(1 for item in reviews if item.get("status") == "completed")
         return {
             "id": self.id,
             "title": self.title,
@@ -65,7 +71,12 @@ class SqlRelease(db.Model, TimestampMixin):
             "ai_passed": bool(self.ai_passed),
             "force_submitted": bool(self.force_submitted),
             "ai_summary": self.ai_summary,
-            "reviews": self.review_json or [],
+            "reviews": reviews,
+            "review_progress": {
+                "completed": completed,
+                "total": len(reviews),
+                "percent": round(completed * 100 / len(reviews)) if reviews else 0,
+            },
             "execution_result": self.execution_result_json,
             "rollback_backup_path": self.rollback_backup_path,
             "executed_by": self.executed_by,
@@ -74,3 +85,28 @@ class SqlRelease(db.Model, TimestampMixin):
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
+
+
+class SqlReleaseRollbackBackup(db.Model, TimestampMixin):
+    __tablename__ = "sql_release_rollback_backups"
+    __table_args__ = (
+        db.UniqueConstraint("release_id", "statement_line", name="uq_sql_release_backup_line"),
+    )
+
+    id = db.Column(db.BigInteger().with_variant(db.Integer, "sqlite"), primary_key=True)
+    release_id = db.Column(
+        db.Integer,
+        db.ForeignKey("sql_releases.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    statement_line = db.Column(db.Integer, nullable=False)
+    db_type = db.Column(db.String(32), nullable=False)
+    database_name = db.Column(db.String(128), nullable=False)
+    table_name = db.Column(db.String(255), nullable=True)
+    operation = db.Column(db.String(32), nullable=False)
+    row_count = db.Column(db.Integer, nullable=False, default=0)
+    rows_encrypted = db.Column(_LONG_TEXT, nullable=False)
+    rollback_sql_encrypted = db.Column(_LONG_TEXT, nullable=False)
+
+    release = db.relationship("SqlRelease", backref=db.backref("rollback_backups", lazy="dynamic"))

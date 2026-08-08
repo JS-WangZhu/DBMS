@@ -97,6 +97,7 @@
 import { onMounted, reactive, ref } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { deleteTaskResults, getTaskResult, listTaskResults, retryTaskResult } from "../api/modules/tasks";
+import { useTabActivationRefresh } from "../composables/useTabActivationRefresh";
 
 const loading = ref(false);
 const rows = ref([]);
@@ -189,6 +190,7 @@ async function onPageChange(page) {
 }
 
 onMounted(loadData);
+useTabActivationRefresh(loadData);
 </script>
 
 <style scoped>

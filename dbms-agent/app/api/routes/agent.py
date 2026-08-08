@@ -1046,6 +1046,38 @@ def probe_database_instance():
     return ok_response(data=result)
 
 
+@bp.route("/sql-releases/execute", methods=["POST"])
+@_require_api_key
+def execute_sql_release():
+    from app.services.sql_release_executor import SqlReleaseExecutionError, execute_sql_release as execute_release
+
+    payload = request.get_json(silent=True) or {}
+    instance = payload.get("instance")
+    statements = payload.get("statements")
+    if not isinstance(instance, dict):
+        return error_response("instance is required", code=400)
+    if not isinstance(statements, list) or not statements:
+        return error_response("statements are required", code=400)
+    try:
+        timeout_seconds = min(max(int(payload.get("timeout_seconds") or 86400), 1), 86400)
+        result = execute_release(
+            instance=instance,
+            database=str(payload.get("database") or "").strip(),
+            statements=[str(item or "").strip() for item in statements],
+            db_type=payload.get("db_type"),
+            timeout_seconds=timeout_seconds,
+        )
+        result["execution_source"] = "agent"
+        result["database_user"] = instance.get("username") or ""
+        return ok_response(data=result)
+    except SqlReleaseExecutionError as exc:
+        data = dict(exc.result or {})
+        data.update({"execution_source": "agent", "database_user": instance.get("username") or ""})
+        return error_response(f"SQL release execution failed: {exc}", code=502, data=data)
+    except Exception as exc:
+        return error_response(f"SQL release execution failed: {exc}", code=502)
+
+
 @bp.route("/health", methods=["GET"])
 def health_check():
     """健康检查接口 - 无数据库依赖"""

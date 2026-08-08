@@ -61,6 +61,7 @@ import { onMounted, ref } from "vue";
 import { ElMessage } from "element-plus";
 
 import { listChangeHistory, listQueryHistory } from "../api/modules/data_access";
+import { useTabActivationRefresh } from "../composables/useTabActivationRefresh";
 
 const activeTab = ref("query");
 const loading = ref(false);
@@ -143,6 +144,7 @@ async function onReset() {
 }
 
 onMounted(loadHistory);
+useTabActivationRefresh(loadHistory);
 </script>
 
 <style scoped>

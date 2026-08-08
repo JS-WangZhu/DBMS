@@ -90,6 +90,7 @@ import {
 } from "../api/modules/physical_discovery";
 import { discoveryStatusType } from "../utils/physicalDiscovery";
 import { formatBeijingTime } from "../utils/time";
+import { useTabActivationRefresh } from "../composables/useTabActivationRefresh";
 
 const config = reactive({ enabled: false, poll_interval_minutes: 30, connect_timeout_seconds: 10, batch_size: 500 });
 const vcenters = ref([]); const loading = ref(false); const dialogVisible = ref(false);
@@ -120,6 +121,7 @@ async function runNow(row) { await runVcenterDiscovery(row.id); ElMessage.succes
 async function remove(row) { await ElMessageBox.confirm(`确认删除 ${row.name}？`, "提示"); await deleteVcenter(row.id); await loadAll(); }
 async function showDetails(row) { details.value = (await listDiscoveryDetails(row.id)).data.data || []; detailVisible.value = true; }
 onMounted(loadAll);
+useTabActivationRefresh(loadAll);
 </script>
 
 <style scoped>

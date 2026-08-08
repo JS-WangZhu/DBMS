@@ -96,15 +96,67 @@
     </el-card>
     </div>
 
+    <el-dialog
+      v-model="reviewDialogVisible"
+      width="760px"
+      class="review-progress-dialog"
+      :close-on-click-modal="false"
+      @closed="onReviewDialogClosed"
+    >
+      <template #header>
+        <div class="review-dialog-header">
+          <div class="review-orbit" :class="{ done: reviewFinished }"><span></span><i></i></div>
+          <div>
+            <h3>{{ reviewDialogTitle }}</h3>
+            <p>工单 #{{ reviewRelease?.id }} · {{ reviewRelease?.title }}</p>
+          </div>
+        </div>
+      </template>
+      <div v-if="reviewRelease" class="review-progress-body">
+        <div class="review-progress-overview">
+          <div><strong>{{ reviewCompleted }}</strong><span>/ {{ reviewTotal }} 条已审核</span></div>
+          <span>{{ reviewRelease.ai_summary }}</span>
+        </div>
+        <el-progress :percentage="reviewPercent" :status="reviewProgressStatus" :stroke-width="10" />
+        <transition-group name="review-item" tag="div" class="review-statement-list">
+          <div v-for="item in reviewRelease.reviews" :key="item.line" class="review-statement" :class="[`is-${item.status}`, { 'is-passed': item.status === 'completed' && item.passed, 'is-rejected': item.status === 'completed' && !item.passed }]">
+            <div class="review-state-mark">
+              <el-icon v-if="item.status === 'completed' && item.passed"><CircleCheck /></el-icon>
+              <el-icon v-else-if="item.status === 'completed' || item.status === 'failed'"><CircleClose /></el-icon>
+              <el-icon v-else-if="item.status === 'reviewing'" class="is-loading"><Loading /></el-icon>
+              <span v-else>{{ item.line }}</span>
+            </div>
+            <div class="review-statement-main">
+              <div><strong>第 {{ item.line }} 条</strong><el-tag size="small" :type="reviewItemType(item)">{{ reviewItemLabel(item) }}</el-tag></div>
+              <code>{{ item.sql }}</code>
+              <p>{{ item.reason }}</p>
+              <p v-if="item.suggestion" class="review-suggestion">建议：{{ item.suggestion }}</p>
+            </div>
+          </div>
+        </transition-group>
+      </div>
+      <template #footer>
+        <span class="review-background-tip">{{ reviewFinished ? "审核结果已保存至工单" : "关闭后审核仍会在后台继续" }}</span>
+        <template v-if="reviewRelease?.status === 'review_rejected'">
+          <el-button @click="returnRejectedToEdit">返回重新修改</el-button>
+          <el-button type="danger" :loading="forceSubmitting" @click="forceSubmitRejected">已知影响，强制提交</el-button>
+        </template>
+        <el-button v-else type="primary" @click="reviewDialogVisible = false">{{ reviewFinished ? "完成" : "转至后台运行" }}</el-button>
+      </template>
+
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref, watch } from "vue";
-import { ElMessage } from "element-plus";
-import { Connection, Document, Folder, Grid, Key, Search, View } from "@element-plus/icons-vue";
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
+import { useRoute, useRouter } from "vue-router";
+import { ElMessage, ElMessageBox } from "element-plus";
+import { CircleCheck, CircleClose, Connection, Document, Folder, Grid, Key, Loading, Search, View } from "@element-plus/icons-vue";
 import { listClusters } from "../api/modules/clusters";
 import {
+  getSqlReleaseReviewProgress,
+  forceSubmitSqlRelease,
   listSqlReleaseDatabases,
   listSqlReleaseObjects,
   listSqlReleaseTableColumns,
@@ -112,7 +164,10 @@ import {
 } from "../api/modules/sqlReleases";
 import SqlEditor from "../components/SqlEditor.vue";
 import { extractReleaseObjectNames } from "../utils/sqlRelease";
+import { useTabActivationRefresh } from "../composables/useTabActivationRefresh";
 
+const route = useRoute();
+const router = useRouter();
 const clusters = ref([]);
 const databases = ref([]);
 const databaseLoading = ref(false);
@@ -123,13 +178,28 @@ const sqlEditorRef = ref(null);
 const tableColumnsCache = reactive({});
 const loadingColumns = reactive(new Set());
 const schemaGeneration = ref(0);
+const reviewDialogVisible = ref(false);
+const reviewRelease = ref(null);
+const submittedDraft = ref(null);
+const forceSubmitting = ref(false);
+let reviewPollTimer = null;
+let reviewDialogMovedToBackground = false;
+
 const tableObjects = ref({ tables: [], collections: [], views: [], procedures: [], functions: [], triggers: [], events: [] });
 const databaseTypes = [
   { label: "MySQL", value: "mysql" },
   { label: "MongoDB", value: "mongodb" },
   { label: "PostgreSQL", value: "postgresql" },
 ];
-const form = reactive({ title: "", project: "", db_type: "", environment: "", cluster_id: null, database: "", sql: "" });
+const form = reactive({ title: "", project: "", db_type: "", environment: "", cluster_id: null, instance_id: null, database: "", sql: "" });
+const reviewFinished = computed(() => reviewRelease.value && reviewRelease.value.status !== "reviewing");
+const reviewCompleted = computed(() => reviewRelease.value?.review_progress?.completed || 0);
+const reviewTotal = computed(() => reviewRelease.value?.review_progress?.total || reviewRelease.value?.reviews?.length || 0);
+const reviewPercent = computed(() => reviewRelease.value?.review_progress?.percent || 0);
+const reviewDialogTitle = computed(() => reviewRelease.value?.status === "pending" ? "AI 初审已通过" : reviewRelease.value?.status === "review_rejected" ? "AI 初审发现风险" : reviewRelease.value?.status === "review_failed" ? "AI 初审异常" : "AI 正在逐条审核");
+const reviewProgressStatus = computed(() => reviewRelease.value?.status === "pending" ? "success" : ["review_rejected", "review_failed"].includes(reviewRelease.value?.status) ? "exception" : undefined);
+
+const REVIEW_POLL_INTERVAL = 1200;
 const projects = computed(() => Array.from(new Set(clusters.value.map((item) => item.business_line || item.namespace).filter(Boolean))).sort());
 const environments = computed(() => Array.from(new Set(clusters.value
   .filter((item) => (item.business_line || item.namespace) === form.project && item.db_type === form.db_type)
@@ -276,6 +346,7 @@ function onSchemaNodeClick(data) {
 
 function resetClusterSelection() {
   form.cluster_id = null;
+  form.instance_id = null;
   form.database = "";
   databases.value = [];
   clearTableOverview();
@@ -313,6 +384,7 @@ async function loadDatabases() {
   try {
     const { data } = await listSqlReleaseDatabases(form.cluster_id, form.db_type);
     databases.value = data.data?.databases || [];
+    form.instance_id = data.data?.instance_id || null;
   } catch (error) {
     ElMessage.error(error.response?.data?.message || "数据库列表加载失败");
   } finally { databaseLoading.value = false; }
@@ -359,23 +431,176 @@ function preloadUsedTableColumns() {
   }
 }
 
+
+function reviewItemLabel(item) {
+  if (item.status === "reviewing") return "审核中";
+  if (item.status === "pending") return "等待";
+  if (item.status === "failed") return "失败";
+  if (item.status === "skipped") return "未处理";
+  return item.passed ? "通过" : "不通过";
+}
+
+function reviewItemType(item) {
+  if (item.status === "reviewing" || item.status === "pending") return "info";
+  if (item.status === "completed" && item.passed) return "success";
+  return "danger";
+}
+
+function stopReviewPolling() {
+  clearTimeout(reviewPollTimer);
+  reviewPollTimer = null;
+}
+
+function scheduleReviewPoll() {
+  stopReviewPolling();
+  if (reviewDialogVisible.value && reviewRelease.value?.status === "reviewing") {
+    reviewPollTimer = setTimeout(loadReviewProgress, REVIEW_POLL_INTERVAL);
+  }
+}
+
+async function loadReviewProgress() {
+  if (!reviewDialogVisible.value || !reviewRelease.value?.id) return;
+  try {
+    const { data } = await getSqlReleaseReviewProgress(reviewRelease.value.id);
+    reviewRelease.value = data.data;
+  } catch (error) {
+    ElMessage.error(error.response?.data?.message || "审核进度获取失败，任务仍在后台运行");
+    reviewDialogVisible.value = false;
+    return;
+  }
+  scheduleReviewPoll();
+}
+
+function openReviewProgress(release) {
+  stopReviewPolling();
+  reviewRelease.value = release;
+  reviewDialogMovedToBackground = false;
+  reviewDialogVisible.value = true;
+  scheduleReviewPoll();
+}
+
+function onReviewDialogClosed() {
+  stopReviewPolling();
+  if (!reviewFinished.value && !reviewDialogMovedToBackground) {
+    reviewDialogMovedToBackground = true;
+    ElMessage.info("审核已转至后台，可稍后在工单历史查看结果");
+  }
+}
+
 async function submit() {
   if (!form.project || !form.db_type || !form.environment || !form.cluster_id || !form.database || !form.sql.trim()) return ElMessage.warning("请按项目、数据库、环境、集群顺序选择数据源，并填写目标库和变更语句");
+  const statementCount = Math.max(1, form.sql.split(";").filter((item) => item.trim()).length);
+  try {
+    await ElMessageBox.confirm(
+      `即将向 ${form.project}/${form.environment}/${form.database} 提交 ${statementCount} 条${form.db_type === "mongodb" ? "命令" : " SQL"}，提交后将进入 AI 初审。请确认目标数据源和变更内容无误。`,
+      "提交工单二次确认",
+      { type: "warning", confirmButtonText: "确认提交", cancelButtonText: "返回检查" },
+    );
+  } catch {
+    return;
+  }
+  submittedDraft.value = { ...form };
   submitting.value = true;
   try {
-    await submitSqlRelease({ ...form });
-    ElMessage.success("工单已提交，AI 初审正在后台进行");
+    const { data } = await submitSqlRelease({ ...form });
+    openReviewProgress(data.data);
+    ElMessage.success("工单已提交，正在逐条进行 AI 初审");
     form.title = ""; form.sql = "";
   } catch (error) {
     ElMessage.error(error.response?.data?.message || "提交失败");
   } finally { submitting.value = false; }
 }
 
-onMounted(async () => {
+function returnRejectedToEdit() {
+  const draft = submittedDraft.value;
+  if (draft) {
+    Object.assign(form, draft);
+  } else if (reviewRelease.value) {
+    form.title = reviewRelease.value.title || "";
+    form.sql = reviewRelease.value.sql || "";
+  }
+  reviewDialogVisible.value = false;
+  ElMessage.info("已恢复本次工单内容，请按初审建议修改后重新提交");
+}
+
+async function forceSubmitRejected() {
+  if (!reviewRelease.value?.id || reviewRelease.value.status !== "review_rejected") return;
+  try {
+    await ElMessageBox.confirm(
+      "AI 初审未通过。强制提交表示你已阅读全部风险与影响，工单将进入待执行状态，后续仍需具备执行权限的 DBMS 用户执行。",
+      "强制提交确认",
+      { type: "error", confirmButtonText: "已知影响，确认提交", cancelButtonText: "返回修改" },
+    );
+  } catch {
+    return;
+  }
+  forceSubmitting.value = true;
+  try {
+    const { data } = await forceSubmitSqlRelease(reviewRelease.value.id);
+    reviewRelease.value = data.data;
+    submittedDraft.value = null;
+    ElMessage.success(data.message || "工单已强制提交，等待执行");
+    reviewDialogVisible.value = false;
+  } catch (error) {
+    ElMessage.error(error.response?.data?.message || "强制提交失败");
+  } finally {
+    forceSubmitting.value = false;
+  }
+}
+
+async function restoreResubmitDraft() {
+  const requestedReleaseId = String(route.query.resubmit || "");
+  if (!requestedReleaseId) return;
+  let draft = null;
+  try {
+    draft = JSON.parse(sessionStorage.getItem("sql_release_resubmit_draft") || "null");
+  } catch {
+    draft = null;
+  }
+  sessionStorage.removeItem("sql_release_resubmit_draft");
+  await router.replace({ path: route.path });
+  if (!draft || String(draft.source_release_id || "") !== requestedReleaseId) {
+    ElMessage.warning("再次提交信息已失效，请返回工单历史重新操作");
+    return;
+  }
+
+  form.title = String(draft.title || "");
+  form.sql = String(draft.sql || "");
+  const cluster = clusters.value.find((item) => (
+    Number(item.id) === Number(draft.cluster_id)
+    && item.db_type === draft.db_type
+  ));
+  if (!cluster) {
+    ElMessage.warning("原工单的数据源当前不可选，已保留标题和 SQL，请重新选择目标数据源");
+    return;
+  }
+
+  form.project = cluster.business_line || cluster.namespace || "";
+  form.db_type = cluster.db_type || draft.db_type || "";
+  form.environment = cluster.environment || "";
+  form.cluster_id = cluster.id;
+  await loadDatabases();
+  form.instance_id = draft.instance_id || form.instance_id;
+  form.database = String(draft.database || "");
+  await loadTableOverview();
+  ElMessage.success(`已载入工单 #${requestedReleaseId}，修改后可重新提交`);
+}
+
+async function loadAllowedClusters() {
   const responses = await Promise.all(databaseTypes.map((item) => listClusters(item.value, { action: "change" })));
   clusters.value = responses.flatMap(({ data }) => data.data || []);
+}
+
+onMounted(async () => {
+  await loadAllowedClusters();
+  await restoreResubmitDraft();
+});
+useTabActivationRefresh(async () => {
+  await loadAllowedClusters();
+  await restoreResubmitDraft();
 });
 
+onBeforeUnmount(stopReviewPolling);
 watch(
   () => Array.from(usedTableNames.value).sort().join("|"),
   preloadUsedTableColumns
@@ -406,4 +631,29 @@ watch(
 .tree-suffix { flex: 0 0 auto; margin-left: 6px; color: #94a3b8; font-size: 12px; font-weight: 400; }
 :deep(.object-tree .el-tree-node__content) { min-height: 34px; height: auto; padding-right: 4px; }
 @media (max-width: 1180px) { .release-workspace { grid-template-columns: 1fr; } .overview-body { max-height: 520px; } }
+.review-dialog-header { display: flex; align-items: center; gap: 14px; }
+.review-dialog-header h3 { margin: 0 0 5px; color: #172033; font-size: 19px; }
+.review-dialog-header p { margin: 0; color: #8491a5; font-size: 12px; }
+.review-orbit { position: relative; width: 42px; height: 42px; border: 2px solid #d9e9ff; border-radius: 50%; }
+.review-orbit::before { content: ""; position: absolute; inset: 5px; border: 2px solid #1677ff; border-right-color: transparent; border-radius: 50%; animation: review-spin 1s linear infinite; }
+.review-orbit span { position: absolute; top: 16px; left: 16px; width: 6px; height: 6px; border-radius: 50%; background: #1677ff; }
+.review-orbit.done::before { border-color: #20a162; animation: none; }
+.review-orbit.done span { background: #20a162; }
+.review-progress-overview { display: flex; align-items: baseline; justify-content: space-between; gap: 18px; margin-bottom: 10px; color: #7b879a; font-size: 12px; }
+.review-progress-overview strong { margin-right: 3px; color: #172033; font-size: 28px; }
+.review-statement-list { display: grid; gap: 10px; max-height: 430px; margin-top: 18px; overflow: auto; padding-right: 4px; }
+.review-statement { display: grid; grid-template-columns: 34px minmax(0,1fr); gap: 11px; padding: 13px; border: 1px solid #e5eaf2; border-radius: 8px; background: #fff; transition: .25s ease; }
+.review-statement.is-reviewing { border-color: #8fc1ff; background: #f6faff; box-shadow: 0 5px 18px rgba(22,119,255,.09); transform: translateX(3px); }
+.review-state-mark { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; color: #738197; background: #eef2f7; }
+.is-passed .review-state-mark { color: #fff; background: #20a162; }
+.is-rejected .review-state-mark,.is-failed .review-state-mark { color: #fff; background: #e5484d; }
+.is-reviewing .review-state-mark { color: #1677ff; background: #e7f2ff; }
+.review-statement-main>div { display: flex; align-items: center; gap: 8px; }
+.review-statement-main code { display: block; margin: 7px 0; color: #27364b; white-space: pre-wrap; word-break: break-all; }
+.review-statement-main p { margin: 0; color: #7b879a; font-size: 12px; }
+.review-suggestion { margin-top: 5px!important; color: #b56a00!important; }
+.review-background-tip { float: left; line-height: 32px; color: #8a95a7; font-size: 12px; }
+.review-item-enter-active,.review-item-leave-active { transition: all .25s ease; }
+.review-item-enter-from,.review-item-leave-to { opacity: 0; transform: translateY(8px); }
+@keyframes review-spin { to { transform: rotate(360deg); } }
 </style>

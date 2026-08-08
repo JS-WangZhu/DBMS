@@ -440,6 +440,7 @@ import {
 import SqlEditor from "../components/SqlEditor.vue";
 import { listClusters } from "../api/modules/clusters";
 import { listInstances } from "../api/modules/instances";
+import { useTabActivationRefresh } from "../composables/useTabActivationRefresh";
 import {
   cancelDataAccessExecution,
   describeMongoCollection,
@@ -1512,6 +1513,7 @@ onMounted(async () => {
     await loadMongoSchema();
   }
 });
+useTabActivationRefresh(reloadOptions);
 </script>
 
 <style scoped>

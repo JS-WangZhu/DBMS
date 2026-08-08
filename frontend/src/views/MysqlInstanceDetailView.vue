@@ -104,6 +104,7 @@ import { ElMessage } from "element-plus";
 import { listClusters } from "../api/modules/clusters";
 import { listInstances } from "../api/modules/instances";
 import { getInstancePerformance } from "../api/modules/monitoring";
+import { useTabActivationRefresh } from "../composables/useTabActivationRefresh";
 
 const instances = ref([]);
 const clusters = ref([]);
@@ -331,6 +332,12 @@ onMounted(async () => {
   await loadPerformance();
 });
 onActivated(() => nextTick(() => resizeCharts()));
+useTabActivationRefresh(async () => {
+  await Promise.all([loadClusters(), loadInstances()]);
+  await loadPerformance();
+  await nextTick();
+  resizeCharts();
+});
 onBeforeUnmount(() => {
   window.removeEventListener("resize", resizeCharts);
   chartInstances.forEach((chart) => chart.dispose());

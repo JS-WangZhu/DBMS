@@ -71,6 +71,7 @@ import { ElMessage, ElMessageBox } from "element-plus";
 
 import { createRoleGroup, deleteRoleGroup, listRoleGroups, updateRoleGroup } from "../api/modules/users";
 import { buildMenuPermissionTree } from "../utils/menuPermissionTree";
+import { useTabActivationRefresh } from "../composables/useTabActivationRefresh";
 
 const rows = ref([]);
 const loading = ref(false);
@@ -203,6 +204,7 @@ async function removeRoleGroup(row) {
 onMounted(async () => {
   await loadRoleGroups();
 });
+useTabActivationRefresh(loadRoleGroups);
 </script>
 
 <style scoped>

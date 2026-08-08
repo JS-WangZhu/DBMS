@@ -110,6 +110,7 @@ import { onMounted, ref } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { createHAConfig, deleteHAConfig, listHAConfigs, updateHAConfig, verifyHAConfig } from "../api/modules/ha";
 import { listNotifyTargets } from "../api/modules/backups";
+import { useTabActivationRefresh } from "../composables/useTabActivationRefresh";
 
 const rows = ref([]);
 const loading = ref(false);
@@ -241,6 +242,9 @@ async function removeConfig(row) {
 }
 
 onMounted(async () => {
+  await Promise.all([loadConfigs(), loadNotifyTargetOptions()]);
+});
+useTabActivationRefresh(async () => {
   await Promise.all([loadConfigs(), loadNotifyTargetOptions()]);
 });
 </script>

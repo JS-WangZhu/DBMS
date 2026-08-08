@@ -146,6 +146,7 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from "vue";
+import { useTabActivationRefresh } from "../composables/useTabActivationRefresh";
   import { ElMessage, ElMessageBox } from "element-plus";
   import { useRoute } from "vue-router";
 
@@ -499,6 +500,7 @@ async function removeCluster(row) {
 }
 
 onMounted(loadClusters);
+useTabActivationRefresh(loadClusters);
 
 watch(
   () => dbType.value,

@@ -82,6 +82,7 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref } from "vue";
+import { useTabActivationRefresh } from "../composables/useTabActivationRefresh";
 import { ElMessage, ElMessageBox } from "element-plus";
 
 import {
@@ -239,6 +240,9 @@ async function verifyToolConfig(row) {
 onMounted(() => {
   loadToolConfigs();
   loadBackupAgents();
+});
+useTabActivationRefresh(async () => {
+  await Promise.all([loadToolConfigs(), loadBackupAgents()]);
 });
 </script>
 

@@ -137,6 +137,7 @@ import {
   updateJumpServerConfig,
 } from "../api/modules/jumpserver";
 import { formatBeijingTime } from "../utils/time";
+import { useTabActivationRefresh } from "../composables/useTabActivationRefresh";
 
 const DEFAULT_TEMPLATE = "{base_url}/luna/?asset={asset_id}";
 const rows = ref([]);
@@ -300,6 +301,7 @@ async function removeConfig(row) {
 }
 
 onMounted(loadConfigs);
+useTabActivationRefresh(loadConfigs);
 </script>
 
 <style scoped>

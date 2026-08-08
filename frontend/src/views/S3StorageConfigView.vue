@@ -96,6 +96,7 @@ import {
   listS3StorageConfigsDirect,
   updateS3StorageConfig,
 } from "../api/modules/backups";
+import { useTabActivationRefresh } from "../composables/useTabActivationRefresh";
 
 const configs = ref([]);
 const loading = ref(false);
@@ -261,6 +262,7 @@ async function removeConfig(row) {
 }
 
 onMounted(loadConfigs);
+useTabActivationRefresh(loadConfigs);
 </script>
 
 <style scoped>

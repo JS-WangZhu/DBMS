@@ -362,6 +362,7 @@ import {
   updateCluster,
 } from "../api/modules/clusters";
 import { formatBeijingTime } from "../utils/time";
+import { useTabActivationRefresh } from "../composables/useTabActivationRefresh";
 
 const loading = ref(false);
 const saving = ref(false);
@@ -1057,6 +1058,7 @@ async function submitHaSwitch() {
 }
 
 onMounted(loadData);
+useTabActivationRefresh(loadData);
 
 watch(
   () => [keyword.value, selectedBusinessLine.value, selectedEnvironment.value, selectedStatus.value, selectedClusterId.value],

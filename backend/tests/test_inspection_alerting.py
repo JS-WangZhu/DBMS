@@ -137,13 +137,104 @@ def test_failed_recovery_notification_is_retried(app, monkeypatch):
         assert sent.count("recovery") == 2
 
 
-def test_instance_status_probe_alert_opens_and_recovers(app, monkeypatch):
-    sent = []
+def test_alert_lifecycle_is_committed_before_recovery_notification(app, monkeypatch):
+    results = iter([
+        {"ok": False, "error": "request timeout"},
+        {"ok": True, "ping_ok": True},
+    ])
+    dirty_alerts_at_notification = []
+
     monkeypatch.setattr(
         inspection_service,
-        "_send_event_notification",
-        lambda event_type, *_args: sent.append(event_type) or {"ok": True},
+        "_collect_instance",
+        lambda instance_id, *_args: (instance_id, next(results), "running"),
     )
+    monkeypatch.setattr(inspection_service, "enqueue_snapshot_flush", lambda **kwargs: None)
+
+    def fake_notify(event_type, *_args):
+        if event_type == "recovery":
+            dirty_alerts_at_notification.extend(
+                row for row in db.session.dirty if isinstance(row, InspectionAlert)
+            )
+        return {"ok": True}
+
+    monkeypatch.setattr(inspection_service, "_send_event_notification", fake_notify)
+
+    with app.app_context():
+        instance = DatabaseInstance(
+            name="recovery-commit-boundary",
+            db_type="mysql",
+            host_input="127.0.0.1",
+            port=3306,
+            enabled=True,
+        )
+        db.session.add(instance)
+        cfg = inspection_service.get_or_create_inspection_config()
+        cfg.notify_enabled = True
+        cfg.notify_recovery = True
+        cfg.notify_target_ids_json = [1]
+        db.session.commit()
+
+        assert inspection_service.run_inspection_cycle(force=True)["ok"] is True
+        assert inspection_service.run_inspection_cycle(force=True)["ok"] is True
+        assert dirty_alerts_at_notification == []
+
+
+def test_full_inspection_does_not_recover_status_probe_alert(app, monkeypatch):
+    monkeypatch.setattr(
+        inspection_service,
+        "_collect_instance",
+        lambda instance_id, *_args: (
+            instance_id,
+            {"ok": True, "ping_ok": True, "collected_at": datetime.now().isoformat()},
+            "running",
+        ),
+    )
+    monkeypatch.setattr(inspection_service, "enqueue_snapshot_flush", lambda **kwargs: None)
+
+    with app.app_context():
+        instance = DatabaseInstance(
+            name="status-alert-owner",
+            db_type="mysql",
+            host_input="127.0.0.1",
+            port=3306,
+            enabled=True,
+        )
+        db.session.add(instance)
+        db.session.flush()
+        alert = InspectionAlert(
+            instance_id=instance.id,
+            db_type="mysql",
+            issue_key="instance_status_probe",
+            issue_name="实例状态异常",
+            status="open",
+            first_seen_at=datetime.now(),
+            last_seen_at=datetime.now(),
+        )
+        db.session.add(alert)
+        db.session.commit()
+
+        result = inspection_service.run_inspection_cycle(force=True)
+        db.session.refresh(alert)
+
+        assert result["ok"] is True
+        assert alert.status == "open"
+        assert alert.recovered_at is None
+
+
+def test_instance_status_probe_alert_opens_and_recovers(app, monkeypatch):
+    sent = []
+    dirty_alerts_at_notification = []
+
+    def fake_notify(event_type, *_args):
+        sent.append(event_type)
+        if event_type == "recovery":
+            dirty_alerts_at_notification.extend(
+                row for row in db.session.dirty if isinstance(row, InspectionAlert)
+            )
+        return {"ok": True}
+
+    monkeypatch.setattr(inspection_service, "_send_event_notification", fake_notify)
 
     with app.app_context():
         instance = DatabaseInstance(
@@ -188,6 +279,7 @@ def test_instance_status_probe_alert_opens_and_recovers(app, monkeypatch):
         assert alert.recovered_at is not None
         assert alert.recovery_notified_at is not None
         assert sent == ["alert", "recovery"]
+        assert dirty_alerts_at_notification == []
 
 
 def test_instance_status_probe_missing_result_is_an_alert(app, monkeypatch):

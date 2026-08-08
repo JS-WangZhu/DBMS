@@ -211,6 +211,7 @@ import {
   listClusterTopologyHistory,
 } from "../api/modules/clusters";
 import { formatBeijingTime } from "../utils/time";
+import { useTabActivationRefresh } from "../composables/useTabActivationRefresh";
 
 const loading = ref(false);
 const rows = ref([]);
@@ -361,6 +362,7 @@ watch(
 );
 
 onMounted(loadData);
+useTabActivationRefresh(loadData);
 </script>
 
 <style scoped>

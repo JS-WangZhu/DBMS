@@ -88,6 +88,7 @@ import { Check, Close } from "@element-plus/icons-vue";
 import { listClusters as listAllowedClusters } from "../api/modules/clusters";
 import { performAIAnalysis } from "../api/modules/ai";
 import { listMysqlDatabases, listMongoDatabases } from "../api/modules/data_access";
+import { useTabActivationRefresh } from "../composables/useTabActivationRefresh";
 
 const form = reactive({
   db_type: "mysql",
@@ -385,6 +386,7 @@ async function startAnalysis() {
 }
 
 onMounted(loadClusters);
+useTabActivationRefresh(loadClusters);
 </script>
 
 <style scoped>

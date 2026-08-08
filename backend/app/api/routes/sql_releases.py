@@ -11,7 +11,8 @@ from app.api.routes.common import (
 )
 from app.extensions import db
 from app.models.db_asset import DatabaseCluster, DatabaseInstance
-from app.models.sql_release import SqlRelease
+from app.models.sql_release import SqlRelease, SqlReleaseRollbackBackup
+from app.models.user import User
 from app.services.audit import log_audit
 from app.services.data_access import (
     describe_mongo_collection,
@@ -27,11 +28,13 @@ from app.services.sql_release_service import (
     execute_mongodb_with_partial_rollback,
     execute_mysql_with_partial_rollback,
     execute_postgresql_with_partial_rollback,
+    execute_release_rollback,
     review_release,
     split_sql_statements,
     validate_mongo_release_statement,
 )
 from app.services.sql_release_review import dispatch_sql_release_review
+from app.services.sql_release_agent import execute_sql_release_on_agent
 from app.services.postgresql_backup import list_databases as list_postgresql_databases
 from app.services.postgresql_backup import list_objects as list_postgresql_objects
 from app.services.postgresql_backup import list_table_columns as list_postgresql_table_columns
@@ -47,14 +50,60 @@ def _cluster_seed_nodes(db_type, cluster_id):
     return sorted({f"{item.resolved_ip or item.host_input}:{item.port}" for item in rows if item.resolved_ip or item.host_input})
 
 
-def _serialize_release(row, user=None, executable_cluster_ids=None):
+def _serialize_release(row, user=None, executable_cluster_ids=None, include_rollback_sql=False):
     data = row.to_dict()
+    data["execution_mode"] = "agent" if row.instance and row.instance.access_mode == "agent" else "server"
+    data["execution_agent_name"] = row.instance.probe_agent.name if row.instance and row.instance.probe_agent else None
+    can_execute = False
     if user:
-        data["can_execute"] = user.role == "admin" or (
+        can_execute = user.role == "admin" or (
             row.cluster_id in executable_cluster_ids
             if executable_cluster_ids is not None
             else require_cluster_permission(row.cluster_id, "execute")
         )
+        data["can_execute"] = can_execute
+    backups = SqlReleaseRollbackBackup.query.filter_by(release_id=row.id).order_by(
+        SqlReleaseRollbackBackup.statement_line
+    ).all()
+    backup_by_line = {item.statement_line: item for item in backups}
+    execution_by_line = {
+        int(item.get("line") or 0): item
+        for item in ((row.execution_result_json or {}).get("statements") or [])
+        if int(item.get("line") or 0) > 0
+    }
+    source_statements = split_sql_statements(row.sql_text)
+    statement_executions = []
+    for line, sql in enumerate(source_statements, start=1):
+        backup = backup_by_line.get(line)
+        state = dict(execution_by_line.get(line) or {})
+        item = {
+            "line": line,
+            "sql": sql,
+            "status": state.get("status") or "pending",
+            "affected_rows": state.get("affected_rows"),
+            "backup_rows": state.get("backup_rows", backup.row_count if backup else 0),
+            "error": state.get("error"),
+            "rollback_error": state.get("rollback_error"),
+            "rollback_affected_rows": state.get("rollback_affected_rows"),
+            "has_rollback": bool(backup),
+        }
+        if include_rollback_sql and can_execute and backup:
+            item["rollback_sql"] = decrypt_secret(backup.rollback_sql_encrypted)
+        statement_executions.append(item)
+    data["statement_executions"] = statement_executions
+    data["rollback_data_backups"] = [{
+        "line": item.statement_line,
+        "operation": item.operation,
+        "table": item.table_name,
+        "row_count": item.row_count,
+        "created_at": item.created_at.isoformat() if item.created_at else None,
+    } for item in backups]
+    data["can_retry_execute"] = False
+    data["can_rollback"] = bool(
+        can_execute
+        and row.db_type in {"mysql", "postgresql"}
+        and any(item["has_rollback"] and item["status"] in {"success", "rollback_failed"} for item in statement_executions)
+    )
     if user and user.role != "admin":
         data.pop("rollback_backup_path", None)
     return data
@@ -296,7 +345,11 @@ def submit_sql_release():
         ai_passed=False,
         force_submitted=False,
         ai_summary="AI 初审进行中",
-        review_json=[],
+        review_json=[{
+            "line": index, "sql": statement, "passed": None,
+            "risk_level": None, "reason": "等待 AI 初审",
+            "suggestion": "", "status": "pending",
+        } for index, statement in enumerate(statements, start=1)],
     )
     db.session.add(release)
     db.session.commit()
@@ -311,6 +364,41 @@ def submit_sql_release():
     return ok_response(data=_serialize_release(release, user, set()), message="工单已提交，AI 初审正在异步进行", code=201)
 
 
+@bp.get("/<int:release_id>/review-progress")
+@require_menu_permission("sql_release_apply")
+def get_sql_release_review_progress(release_id):
+    release = SqlRelease.query.get_or_404(release_id)
+    user = get_current_user()
+    if user.role != "admin" and release.applicant_id != user.id:
+        return error_response("permission denied", code=403)
+    return ok_response(data=_serialize_release(release, user))
+
+
+@bp.post("/<int:release_id>/force-submit")
+@require_menu_permission("sql_release_apply")
+def force_submit_sql_release(release_id):
+    release = SqlRelease.query.get_or_404(release_id)
+    user = get_current_user()
+    if user.role != "admin" and release.applicant_id != user.id:
+        return error_response("permission denied", code=403)
+    if not require_cluster_permission(release.cluster_id, "change"):
+        return error_response("permission denied", code=403)
+    if release.status != "review_rejected":
+        return error_response("仅 AI 初审未通过的工单可以强制提交", code=409)
+    release.force_submitted = True
+    release.status = "pending"
+    db.session.commit()
+    log_audit(
+        user_id=user.id,
+        action="sql_release.force_submit",
+        target_type="sql_release",
+        target_id=str(release.id),
+        detail={"status": release.status, "ai_passed": False},
+    )
+    return ok_response(data=_serialize_release(release, user), message="已确认影响，工单已强制提交")
+
+
+
 @bp.get("")
 @require_menu_permission("sql_release_history")
 def list_sql_releases():
@@ -323,9 +411,41 @@ def list_sql_releases():
         if executable_cluster_ids:
             scope_filters.append(SqlRelease.cluster_id.in_(executable_cluster_ids))
         query = query.filter(or_(*scope_filters))
+    db_type = str(request.args.get("db_type") or "").strip().lower()
+    if db_type:
+        query = query.filter(SqlRelease.db_type == db_type)
+
+    applicant = str(request.args.get("applicant") or "").strip()
+    if applicant:
+        escaped_applicant = applicant.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        applicant_pattern = f"%{escaped_applicant}%"
+        query = query.join(User, SqlRelease.applicant_id == User.id).filter(or_(
+            User.username.ilike(applicant_pattern, escape="\\"),
+            User.display_name.ilike(applicant_pattern, escape="\\"),
+        ))
+
     status = str(request.args.get("status") or "").strip()
     if status:
-        query = query.filter_by(status=status)
+        query = query.filter(SqlRelease.status == status)
+
+    title_keyword = str(request.args.get("title_keyword") or "").strip()
+    if title_keyword:
+        escaped_title = title_keyword.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        query = query.filter(SqlRelease.title.ilike(f"%{escaped_title}%", escape="\\"))
+
+    start_time = str(request.args.get("start_time") or "").strip()
+    end_time = str(request.args.get("end_time") or "").strip()
+    try:
+        start_dt = datetime.fromisoformat(start_time) if start_time else None
+        end_dt = datetime.fromisoformat(end_time) if end_time else None
+    except ValueError:
+        return error_response("invalid time range", code=400)
+    if start_dt and end_dt and start_dt > end_dt:
+        return error_response("start_time must not be later than end_time", code=400)
+    if start_dt:
+        query = query.filter(SqlRelease.created_at >= start_dt)
+    if end_dt:
+        query = query.filter(SqlRelease.created_at <= end_dt)
     try:
         page = max(int(request.args.get("page", 1)), 1)
         page_size = min(max(int(request.args.get("page_size", 10)), 1), 100)
@@ -349,7 +469,7 @@ def get_sql_release(release_id):
     executable_cluster_ids = None if user.role == "admin" else set(list_allowed_cluster_ids("execute"))
     if user.role != "admin" and row.applicant_id != user.id and row.cluster_id not in executable_cluster_ids:
         return error_response("permission denied", code=403)
-    return ok_response(data=_serialize_release(row, user, executable_cluster_ids))
+    return ok_response(data=_serialize_release(row, user, executable_cluster_ids, include_rollback_sql=True))
 
 
 @bp.post("/<int:release_id>/execute")
@@ -376,8 +496,21 @@ def execute_sql_release(release_id):
     release.status = "executing"
     db.session.commit()
     backup_path = None
+    execution_source = "server"
     try:
-        if db_type == "mysql":
+        if instance.access_mode == "agent":
+            if not instance.probe_agent_id:
+                raise ValueError("实例为 Agent 模式但未绑定可用 Agent")
+            execution_source = "agent"
+            result = execute_sql_release_on_agent(
+                instance,
+                release.database_name,
+                statements,
+                db_type,
+                seed_nodes=_cluster_seed_nodes(db_type, release.cluster_id) if db_type == "mongodb" else None,
+            )
+            backup_path = None
+        elif db_type == "mysql":
             result, backup_path = execute_mysql_with_partial_rollback(instance, release.database_name, statements, release.id)
         elif db_type == "mongodb":
             result, backup_path = execute_mongodb_with_partial_rollback(
@@ -390,19 +523,118 @@ def execute_sql_release(release_id):
             raise ValueError("unsupported database type")
         release.rollback_backup_path = backup_path
         release.status = "success"
-        release.execution_result_json = result
+        release.execution_result_json = {**result, "execution_source": execution_source}
     except Exception as exc:
         generated_rollback_path = getattr(exc, "rollback_path", None)
         if generated_rollback_path:
             backup_path = generated_rollback_path
             release.rollback_backup_path = generated_rollback_path
         release.status = "failed"
-        release.execution_result_json = {"error": str(exc)}
+        execution_result = dict(getattr(exc, "result", None) or release.execution_result_json or {})
+        execution_result["error"] = str(exc)
+        execution_result["execution_source"] = execution_source
+        release.execution_result_json = execution_result
     release.executed_by = user.id
     release.executed_at = datetime.utcnow()
     db.session.commit()
-    log_audit(user_id=user.id, action="sql_release.execute", target_type="sql_release", target_id=str(release.id), detail={"status": release.status, "rollback_backup_path": backup_path})
+    log_audit(user_id=user.id, action="sql_release.execute", target_type="sql_release", target_id=str(release.id), detail={
+        "status": release.status,
+        "rollback_backup_path": backup_path,
+        "execution_source": execution_source,
+        "agent_id": instance.probe_agent_id if execution_source == "agent" else None,
+        "database_user": instance.username,
+    })
     if release.status == "failed":
-        message = "执行失败，可使用已生成的回滚文件恢复" if backup_path else "回滚文件生成失败，已中止执行"
-        return error_response(message, code=500, data=_serialize_release(release, user))
-    return ok_response(data=_serialize_release(release, user), message="执行成功")
+        error_detail = str((release.execution_result_json or {}).get("error") or "").strip()
+        if db_type == "mongodb":
+            message = "MongoDB 执行失败，已停止后续语句（当前不生成回滚备份）"
+        else:
+            message = "执行失败，可使用已生成的回滚文件恢复" if backup_path else "回滚文件生成失败，已中止执行"
+        if error_detail:
+            message = f"{message}：{error_detail}"
+        return error_response(message, code=500, data=_serialize_release(release, user, include_rollback_sql=True))
+    return ok_response(data=_serialize_release(release, user, include_rollback_sql=True), message="执行成功")
+
+
+@bp.post("/<int:release_id>/rollback")
+@require_menu_permission("sql_release_history")
+def rollback_sql_release(release_id):
+    release = SqlRelease.query.get_or_404(release_id)
+    user = get_current_user()
+    if user.role != "admin" and not require_cluster_permission(release.cluster_id, "execute"):
+        return error_response("permission denied", code=403)
+    if release.db_type not in {"mysql", "postgresql"}:
+        return error_response("MongoDB 工单当前不支持回滚", code=400)
+    if release.status in {"executing", "rolling_back"}:
+        return error_response("工单正在执行或回滚，请稍后再试", code=409)
+
+    payload = request.get_json(silent=True) or {}
+    requested_lines = payload.get("lines")
+    if requested_lines is not None:
+        if not isinstance(requested_lines, list):
+            return error_response("lines must be an array", code=400)
+        try:
+            requested_lines = {int(line) for line in requested_lines}
+        except (TypeError, ValueError):
+            return error_response("invalid rollback line", code=400)
+        if not requested_lines:
+            return error_response("请选择需要回滚的 SQL", code=400)
+
+    states = {
+        int(item.get("line") or 0): item
+        for item in ((release.execution_result_json or {}).get("statements") or [])
+    }
+    source_statements = split_sql_statements(release.sql_text)
+    backups = SqlReleaseRollbackBackup.query.filter_by(release_id=release.id).all()
+    eligible = {
+        item.statement_line: item for item in backups
+        if (states.get(item.statement_line) or {}).get("status") in {"success", "rollback_failed"}
+    }
+    selected_lines = requested_lines if requested_lines is not None else set(eligible)
+    invalid_lines = selected_lines.difference(eligible)
+    if invalid_lines:
+        return error_response(
+            f"第 {', '.join(str(line) for line in sorted(invalid_lines))} 条不可回滚",
+            code=409,
+        )
+    if not selected_lines:
+        return error_response("没有可回滚的已成功 SQL", code=409)
+
+    instance = DatabaseInstance.query.get(release.instance_id)
+    if not instance or not instance.enabled:
+        return error_response("release instance is unavailable", code=400)
+    rollback_items = [{
+        "line": line,
+        "source_sql": source_statements[line - 1] if line <= len(source_statements) else "",
+        "rollback_sql": decrypt_secret(eligible[line].rollback_sql_encrypted),
+    } for line in sorted(selected_lines, reverse=True)]
+    release.status = "rolling_back"
+    db.session.commit()
+    try:
+        result = execute_release_rollback(
+            instance, release.database_name, rollback_items,
+            release.db_type, release.id,
+        )
+        latest_states = (release.execution_result_json or {}).get("statements") or []
+        release.status = "partial_rolled_back" if any(
+            item.get("status") == "success" for item in latest_states
+        ) else "rolled_back"
+        message = "部分回滚完成" if release.status == "partial_rolled_back" else "回滚完成"
+    except Exception as exc:
+        result = {"error": str(exc), "line": getattr(exc, "line", None)}
+        release.status = "rollback_failed"
+        message = f"回滚失败：{exc}"
+    db.session.commit()
+    log_audit(
+        user_id=user.id,
+        action="sql_release.rollback",
+        target_type="sql_release",
+        target_id=str(release.id),
+        detail={"status": release.status, "lines": sorted(selected_lines, reverse=True)},
+    )
+    if release.status == "rollback_failed":
+        return error_response(message, code=500, data=_serialize_release(release, user, include_rollback_sql=True))
+    return ok_response(
+        data={"release": _serialize_release(release, user, include_rollback_sql=True), "result": result},
+        message=message,
+    )

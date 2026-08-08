@@ -124,6 +124,7 @@
 import { onMounted, reactive, ref } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { getInspectionOverview, muteInspectionAlert, runInspectionNow } from "../api/modules/inspection";
+import { useTabActivationRefresh } from "../composables/useTabActivationRefresh";
 
 const loading = ref(false);
 const running = ref(false);
@@ -272,6 +273,7 @@ async function onFilterChange() {
 }
 
 onMounted(loadData);
+useTabActivationRefresh(loadData);
 </script>
 
 <style scoped>

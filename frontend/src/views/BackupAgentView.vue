@@ -81,6 +81,7 @@
 
 <script setup>
 import { onMounted, reactive, ref } from "vue";
+import { useTabActivationRefresh } from "../composables/useTabActivationRefresh";
 import { ElMessage, ElMessageBox } from "element-plus";
 
 import {
@@ -227,6 +228,7 @@ async function deleteAgent(agent) {
 }
 
 onMounted(loadAgents);
+useTabActivationRefresh(loadAgents);
 </script>
 
 <style scoped>

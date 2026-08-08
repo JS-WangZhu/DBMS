@@ -194,6 +194,7 @@ import { ElMessage, ElMessageBox } from "element-plus";
 
 import { cancelBackupLog, deleteBackupLog, downloadBackupFile, downloadBackupFileFromAgent, getBackupDownloadUrl, listBackupLogs } from "../api/modules/backups";
 import { formatBeijingTime } from "../utils/time";
+import { useTabActivationRefresh } from "../composables/useTabActivationRefresh";
 
 const loading = ref(false);
 const rows = ref([]);
@@ -488,6 +489,7 @@ async function removeRecord(row, deleteFile) {
 }
 
 onMounted(loadRecords);
+useTabActivationRefresh(loadRecords);
 </script>
 
 <style scoped>

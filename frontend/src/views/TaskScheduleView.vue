@@ -196,6 +196,7 @@ import { onMounted, reactive, ref } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { listClusters } from "../api/modules/clusters";
 import { listInstances } from "../api/modules/instances";
+import { useTabActivationRefresh } from "../composables/useTabActivationRefresh";
 import {
   createTaskSchedule,
   deleteTaskSchedule,
@@ -374,6 +375,7 @@ async function removeTask(row) {
 }
 
 onMounted(loadData);
+useTabActivationRefresh(loadData);
 </script>
 
 <style scoped>

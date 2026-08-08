@@ -129,6 +129,7 @@ import {
   listDataQueryOps,
   updateDataQueryOp,
 } from "../api/modules/data_query_ops";
+import { useTabActivationRefresh } from "../composables/useTabActivationRefresh";
 
 const isAdmin = computed(() => {
   try {
@@ -271,6 +272,7 @@ function dbTypeTagType(type) {
 }
 
 onMounted(loadData);
+useTabActivationRefresh(loadData);
 </script>
 
 <style scoped>

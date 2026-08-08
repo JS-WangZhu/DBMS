@@ -89,6 +89,7 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref } from "vue";
+import { useTabActivationRefresh } from "../composables/useTabActivationRefresh";
 import { ElMessage, ElMessageBox } from "element-plus";
 
 import {
@@ -320,6 +321,10 @@ onMounted(async () => {
   if (selectedConfigId.value && selectedDomain.value) {
     await loadRecords();
   }
+});
+useTabActivationRefresh(async () => {
+  await loadConfigs();
+  if (selectedConfigId.value && selectedDomain.value) await loadRecords();
 });
 </script>
 

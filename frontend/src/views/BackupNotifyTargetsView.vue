@@ -63,6 +63,7 @@
 
 <script setup>
 import { onMounted, reactive, ref } from "vue";
+import { useTabActivationRefresh } from "../composables/useTabActivationRefresh";
 import { ElMessage, ElMessageBox } from "element-plus";
 
 import {
@@ -175,6 +176,7 @@ async function sendTest(row) {
 }
 
 onMounted(loadNotifyTargets);
+useTabActivationRefresh(loadNotifyTargets);
 </script>
 
 <style scoped>

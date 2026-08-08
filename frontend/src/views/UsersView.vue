@@ -163,6 +163,7 @@ import { computed, onMounted, reactive, ref } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 
 import { createUser, deleteUser, listRoleGroupOptions, listUsers, updateUser } from "../api/modules/users";
+import { useTabActivationRefresh } from "../composables/useTabActivationRefresh";
 
 const rows = ref([]);
 const loading = ref(false);
@@ -533,6 +534,9 @@ async function onPageSizeChange() {
 onMounted(() => {
   loadUsers();
   loadRoleGroupOptions();
+});
+useTabActivationRefresh(async () => {
+  await Promise.all([loadUsers(), loadRoleGroupOptions()]);
 });
 </script>
 
