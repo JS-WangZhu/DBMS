@@ -1,0 +1,29 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import { buildMenuPermissionTree } from "./menuPermissionTree.js";
+
+function flattenLeaves(nodes) {
+  return nodes.flatMap((node) => node.children?.length ? flattenLeaves(node.children) : [node.key]);
+}
+
+test("permission tree keeps every catalog item assignable", () => {
+  const catalog = [
+    { key: "dashboard", label: "总览" },
+    { key: "redis_connections", label: "Redis 连接管理" },
+    { key: "postgresql_instances", label: "PostgreSQL 实例管理" },
+    { key: "backup_overview", label: "备份总览" },
+    { key: "future_menu", label: "未来新增菜单" },
+  ];
+
+  const tree = buildMenuPermissionTree(catalog);
+  assert.deepEqual(new Set(flattenLeaves(tree.nodes)), new Set(catalog.map((item) => item.key)));
+  assert.deepEqual(new Set(tree.leafKeys), new Set(catalog.map((item) => item.key)));
+  assert.equal(tree.nodes.at(-1).label, "其他菜单");
+});
+
+test("permission tree applies disabled state to groups and leaves", () => {
+  const tree = buildMenuPermissionTree([{ key: "dashboard", label: "总览" }], { disabled: true });
+  assert.equal(tree.nodes[0].disabled, true);
+  assert.equal(tree.nodes[0].children[0].disabled, true);
+});

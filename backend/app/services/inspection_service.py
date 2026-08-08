@@ -458,6 +458,146 @@ def _send_event_notification(event_type: str, cfg: InspectionConfig, instance: D
     return notify_with_targets(target_ids=target_ids, title=title, content=content)
 
 
+def reconcile_instance_status_alerts(instances, payload_by_instance: dict, cfg: InspectionConfig = None):
+    """将实例状态探测结果纳入巡检告警的发生、持续和恢复生命周期。"""
+    cfg = cfg or get_or_create_inspection_config()
+    instances = list(instances or [])
+    if not instances:
+        return {"opened": 0, "recovered": 0, "sent_alerts": 0, "sent_recoveries": 0}
+
+    now = datetime.now()
+    instance_map = {item.id: item for item in instances}
+    cluster_ids = sorted({item.cluster_id for item in instances if item.cluster_id})
+    cluster_map = {
+        row.id: row
+        for row in DatabaseCluster.query.filter(DatabaseCluster.id.in_(cluster_ids)).all()
+    } if cluster_ids else {}
+    alerts = (
+        InspectionAlert.query
+        .filter(
+            InspectionAlert.instance_id.in_(list(instance_map)),
+            InspectionAlert.issue_key == "instance_status_probe",
+        )
+        .all()
+    )
+    alert_map = {row.instance_id: row for row in alerts}
+    muted_cluster_ids = set(cfg.get_muted_cluster_ids())
+    repeat_seconds = cfg.get_notify_repeat_seconds()
+    opened = recovered = sent_alerts = sent_recoveries = 0
+
+    for instance in instances:
+        payload = payload_by_instance.get(instance.id)
+        if not isinstance(payload, dict):
+            payload = {
+                "ok": False,
+                "error": "instance status probe returned no result",
+                "collected_at": now.isoformat(),
+            }
+        healthy = bool(payload.get("ok") and payload.get("ping_ok"))
+        alert = alert_map.get(instance.id)
+        cluster = cluster_map.get(instance.cluster_id)
+
+        if not healthy:
+            message = str(payload.get("error") or "探活失败（ping/select 失败）")
+            issue = _build_issue("instance_status_probe", "实例状态异常", message, "critical")
+            is_new_or_reopen = False
+            if not alert:
+                alert = InspectionAlert(
+                    instance_id=instance.id,
+                    cluster_id=instance.cluster_id,
+                    db_type=instance.db_type,
+                    issue_key=issue["issue_key"],
+                    issue_name=issue["issue_name"],
+                    severity=issue["severity"],
+                    status="open",
+                    message=issue["message"],
+                    first_seen_at=now,
+                    last_seen_at=now,
+                    recovered_at=None,
+                    last_payload_json=payload,
+                )
+                db.session.add(alert)
+                alert_map[instance.id] = alert
+                opened += 1
+                is_new_or_reopen = True
+            else:
+                if alert.status != "open":
+                    alert.first_seen_at = now
+                    alert.recovered_at = None
+                    alert.recovery_notified_at = None
+                    opened += 1
+                    is_new_or_reopen = True
+                alert.status = "open"
+                alert.last_seen_at = now
+                alert.cluster_id = instance.cluster_id
+                alert.db_type = instance.db_type
+                alert.issue_name = issue["issue_name"]
+                alert.severity = issue["severity"]
+                alert.message = issue["message"]
+                alert.last_payload_json = payload
+
+            repeat_due = bool(
+                alert.last_notified_at is None
+                or (now - alert.last_notified_at).total_seconds() >= repeat_seconds
+            )
+            if (
+                (is_new_or_reopen or repeat_due)
+                and not alert.is_muted(now)
+                and instance.cluster_id not in muted_cluster_ids
+            ):
+                try:
+                    notify_result = _send_event_notification("alert", cfg, instance, cluster, issue)
+                except Exception as exc:
+                    current_app.logger.warning(
+                        "instance status alert notification failed: instance_id=%s err=%s",
+                        instance.id,
+                        exc,
+                    )
+                    notify_result = {"ok": False}
+                if notify_result.get("ok"):
+                    sent_alerts += 1
+                    alert.notify_count = int(alert.notify_count or 0) + 1
+                    alert.last_notified_at = now
+            continue
+
+        if not alert or alert.status != "open":
+            continue
+        alert.status = "recovered"
+        alert.recovered_at = now
+        alert.last_payload_json = payload
+        recovered += 1
+
+    # 恢复通知失败时保留待发送状态，后续状态探测周期继续重试。
+    for alert in alerts:
+        if alert.status != "recovered" or alert.recovery_notified_at is not None:
+            continue
+        instance = instance_map.get(alert.instance_id)
+        if not instance or alert.is_muted(now) or instance.cluster_id in muted_cluster_ids:
+            continue
+        if not cfg.notify_recovery:
+            continue
+        cluster = cluster_map.get(instance.cluster_id)
+        try:
+            notify_result = _send_event_notification("recovery", cfg, instance, cluster, alert)
+        except Exception as exc:
+            current_app.logger.warning(
+                "instance status recovery notification failed: instance_id=%s err=%s",
+                instance.id,
+                exc,
+            )
+            notify_result = {"ok": False}
+        if notify_result.get("ok"):
+            sent_recoveries += 1
+            alert.recovery_notified_at = now
+
+    return {
+        "opened": opened,
+        "recovered": recovered,
+        "sent_alerts": sent_alerts,
+        "sent_recoveries": sent_recoveries,
+    }
+
+
 def run_inspection_cycle(trigger: str = "manual", force: bool = False):
     if not _INSPECTION_LOCK.acquire(blocking=False):
         return {"ok": False, "message": "inspection is already running", "code": 409}

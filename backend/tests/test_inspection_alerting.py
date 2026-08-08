@@ -4,6 +4,7 @@ from app.extensions import db
 from app.models.db_asset import DatabaseInstance
 from app.models.inspection import InspectionAlert
 from app.services import inspection_service
+from app.tasks import scheduler as task_scheduler
 
 
 def _admin_headers(client):
@@ -134,3 +135,138 @@ def test_failed_recovery_notification_is_retried(app, monkeypatch):
         db.session.refresh(alert)
         assert alert.recovery_notified_at is not None
         assert sent.count("recovery") == 2
+
+
+def test_instance_status_probe_alert_opens_and_recovers(app, monkeypatch):
+    sent = []
+    monkeypatch.setattr(
+        inspection_service,
+        "_send_event_notification",
+        lambda event_type, *_args: sent.append(event_type) or {"ok": True},
+    )
+
+    with app.app_context():
+        instance = DatabaseInstance(
+            name="status-probe-alert",
+            db_type="mysql",
+            host_input="127.0.0.1",
+            port=3306,
+            enabled=True,
+        )
+        db.session.add(instance)
+        cfg = inspection_service.get_or_create_inspection_config()
+        cfg.notify_enabled = True
+        cfg.notify_recovery = True
+        cfg.notify_target_ids_json = [1]
+        db.session.commit()
+
+        result = inspection_service.reconcile_instance_status_alerts(
+            [instance],
+            {instance.id: {"ok": False, "error": "connect timeout"}},
+            cfg,
+        )
+        db.session.commit()
+        alert = InspectionAlert.query.filter_by(
+            instance_id=instance.id,
+            issue_key="instance_status_probe",
+        ).one()
+        assert result["opened"] == 1
+        assert alert.status == "open"
+        assert alert.message == "connect timeout"
+        assert alert.notify_count == 1
+        assert sent == ["alert"]
+
+        result = inspection_service.reconcile_instance_status_alerts(
+            [instance],
+            {instance.id: {"ok": True, "ping_ok": True}},
+            cfg,
+        )
+        db.session.commit()
+        db.session.refresh(alert)
+        assert result["recovered"] == 1
+        assert alert.status == "recovered"
+        assert alert.recovered_at is not None
+        assert alert.recovery_notified_at is not None
+        assert sent == ["alert", "recovery"]
+
+
+def test_instance_status_probe_missing_result_is_an_alert(app, monkeypatch):
+    monkeypatch.setattr(
+        inspection_service,
+        "_send_event_notification",
+        lambda *_args: {"ok": False},
+    )
+
+    with app.app_context():
+        instance = DatabaseInstance(
+            name="status-probe-missing",
+            db_type="redis",
+            host_input="127.0.0.1",
+            port=6379,
+            enabled=True,
+        )
+        db.session.add(instance)
+        db.session.commit()
+
+        result = inspection_service.reconcile_instance_status_alerts([instance], {})
+        db.session.commit()
+        alert = InspectionAlert.query.filter_by(
+            instance_id=instance.id,
+            issue_key="instance_status_probe",
+        ).one()
+        assert result["opened"] == 1
+        assert alert.status == "open"
+        assert alert.message == "instance status probe returned no result"
+
+
+def test_monitor_collect_drives_status_alert_and_recovery(app, monkeypatch):
+    probe_results = iter([
+        {"ok": False, "error": "network timeout"},
+        {"ok": True, "ping_ok": True},
+    ])
+    monkeypatch.setattr(
+        task_scheduler,
+        "_collect_instance_snapshot",
+        lambda instance_id, *_args: (
+            instance_id,
+            (payload := next(probe_results)),
+            "running" if payload.get("ok") and payload.get("ping_ok") else "error",
+        ),
+    )
+    monkeypatch.setattr(task_scheduler, "_cache_and_flush_monitor_snapshot", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(task_scheduler, "_refresh_mysql_cluster_ha", lambda *_args: None)
+    monkeypatch.setattr(task_scheduler, "_refresh_cluster_topology_history", lambda *_args: None)
+    monkeypatch.setattr(task_scheduler, "warm_instance_list_cache", lambda: None)
+    monkeypatch.setattr(
+        inspection_service,
+        "_send_event_notification",
+        lambda *_args: {"ok": True},
+    )
+
+    with app.app_context():
+        instance = DatabaseInstance(
+            name="monitor-alert-integration",
+            db_type="redis",
+            host_input="127.0.0.1",
+            port=6379,
+            enabled=True,
+        )
+        db.session.add(instance)
+        cfg = inspection_service.get_or_create_inspection_config()
+        cfg.notify_enabled = True
+        cfg.notify_recovery = True
+        cfg.notify_target_ids_json = [1]
+        db.session.commit()
+
+        task_scheduler.job_monitor_collect(app)
+        alert = InspectionAlert.query.filter_by(
+            instance_id=instance.id,
+            issue_key="instance_status_probe",
+        ).one()
+        assert alert.status == "open"
+        assert alert.message == "network timeout"
+
+        task_scheduler.job_monitor_collect(app)
+        db.session.refresh(alert)
+        assert alert.status == "recovered"
+        assert alert.recovery_notified_at is not None

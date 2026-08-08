@@ -15,7 +15,13 @@ from app.services.remote_backup_service import submit_remote_backup, sync_runnin
 from app.services.backup_executor import run_backup_policy
 from app.services.collectors import collect_instance_metrics
 from app.services.dns_resolver import refresh_all_dns, resolve_host
-from app.services.inspection_service import get_or_create_inspection_config, run_inspection_cycle
+from app.services.inspection_service import (
+    _sanitize_payload_for_secrets,
+    get_or_create_inspection_config,
+    mask_sensitive_text,
+    reconcile_instance_status_alerts,
+    run_inspection_cycle,
+)
 from app.services.instance_service import warm_instance_list_cache
 from app.services.instance_status_config import get_or_create_instance_status_config
 from app.services.monitor_snapshot_service import warm_latest_snapshot_cache
@@ -362,13 +368,14 @@ def _collect_instance_snapshot(instance_id: int, instance_data: dict, password: 
     try:
         instance_stub = SimpleNamespace(**instance_data)
         data = collect_instance_metrics(instance=instance_stub, password=password) or {}
-        payload = dict(data)
+        payload = _sanitize_payload_for_secrets(dict(data), secrets=[password])
         payload.setdefault("ok", False)
         payload.setdefault("collected_at", datetime.now().isoformat())
         running_status = "running" if payload.get("ok") and payload.get("ping_ok") else "error"
         return instance_id, payload, running_status
     except Exception as exc:
-        payload = {"ok": False, "error": f"collect failed: {exc}", "collected_at": datetime.now().isoformat()}
+        error = mask_sensitive_text(f"collect failed: {exc}", secrets=[password])
+        payload = {"ok": False, "error": error, "collected_at": datetime.now().isoformat()}
         return instance_id, payload, "error"
 
 
@@ -542,6 +549,7 @@ def job_monitor_collect(app):
                     payload = {"ok": False, "error": f"decrypt failed: {exc}", "collected_at": datetime.now().isoformat()}
                     instance.running_status = "error"
                     fail_count += 1
+                    payload_by_instance[instance.id] = payload
                     _cache_and_flush_monitor_snapshot(instance, payload, "error")
                     continue
 
@@ -619,13 +627,15 @@ def job_monitor_collect(app):
 
             _refresh_mysql_cluster_ha(instances, payload_by_instance)
             _refresh_cluster_topology_history(instances, payload_by_instance)
+            alert_summary = reconcile_instance_status_alerts(instances, payload_by_instance)
             db.session.commit()
             warm_instance_list_cache()
             current_app.logger.info(
-                "monitor_collect tick: total=%s ok=%s fail=%s",
+                "monitor_collect tick: total=%s ok=%s fail=%s alerts=%s",
                 len(instances),
                 ok_count,
                 fail_count,
+                alert_summary,
             )
         except Exception as exc:
             db.session.rollback()

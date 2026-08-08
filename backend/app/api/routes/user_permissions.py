@@ -56,6 +56,7 @@ MENU_CATALOG = [
     {"key": "backup_mysql_policies", "label": "MySQL策略"},
     {"key": "backup_postgresql_policies", "label": "PostgreSQL策略"},
     {"key": "backup_mongo_policies", "label": "MongoDB策略"},
+    {"key": "backup_overview", "label": "备份总览"},
     {"key": "backup_records", "label": "备份记录"},
     {"key": "backup_tool_configs", "label": "备份工具管理"},
     {"key": "backup_agents", "label": "Agent管理"},

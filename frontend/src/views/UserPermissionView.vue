@@ -62,6 +62,7 @@ import { ElMessage, ElMessageBox } from "element-plus";
 
 import { listUsers } from "../api/modules/users";
 import { createUserApiKey, deleteUserApiKey, listUserPermissions, updateUserPermissions } from "../api/modules/backups";
+import { buildMenuPermissionTree } from "../utils/menuPermissionTree";
 
 const users = ref([]);
 const selectedUserId = ref(null);
@@ -102,7 +103,7 @@ async function loadPermissions() {
   const payload = data.data || {};
   const catalog = Array.isArray(payload.menu_catalog) ? payload.menu_catalog : [];
   menuCatalog.value = catalog;
-  const tree = buildMenuTree(catalog, isAdminUser.value);
+  const tree = buildMenuPermissionTree(catalog, { disabled: isAdminUser.value });
   menuTreeData.value = tree.nodes;
   menuLeafKeys.value = tree.leafKeys;
   const allKeys = catalog.map((item) => item.key);
@@ -131,46 +132,6 @@ async function savePermissions() {
   } finally {
     saving.value = false;
   }
-}
-
-function buildMenuTree(catalog, disabled) {
-  const leafMap = new Map((catalog || []).map((item) => [item.key, { key: item.key, label: item.label, disabled }]));
-  const rootNodes = [
-    { key: "dashboard", label: "总览", children: ["dashboard"] },
-    { key: "resource_management", label: "资源管理", children: ["database_apply", "database_recycle", "application_history"] },
-    { key: "service_manage", label: "服务管理", children: [
-      { key: "mysql", label: "MySQL", children: ["mysql_instances", "mysql_instance_detail", "mysql_clusters", "mysql_connections", "mysql_session_probe"] },
-      { key: "mongodb", label: "MongoDB", children: ["mongodb_instances", "mongodb_instance_detail", "mongodb_clusters", "mongodb_connections", "mongodb_session_probe"] },
-      { key: "redis", label: "Redis", children: ["redis_instances", "redis_clusters"] },
-      { key: "doris", label: "Doris", children: ["doris_instances", "doris_clusters"] },
-    ] },
-    { key: "inspection", label: "巡检管理", children: ["inspection_manage", "inspection_param_config"] },
-    { key: "data_access", label: "数据访问", children: ["data_query", "data_change", "data_history"] },
-    { key: "data_release", label: "数据发布", children: ["sql_release_apply", "sql_release_history"] },
-    { key: "task_management", label: "任务管理", children: ["task_schedule", "task_results"] },
-    { key: "backup", label: "备份管理", children: [
-      { key: "backup_policies", label: "策略管理", children: ["backup_mysql_policies", "backup_postgresql_policies", "backup_mongo_policies"] },
-      "backup_records",
-      { key: "backup_config", label: "配置管理", children: ["backup_tool_configs", "backup_s3_storage", "backup_keys"] },
-    ] },
-    { key: "config", label: "配置管理", children: ["ai_model_config", "backup_agents", "ha_config", "instance_status_config", "data_query_op_config", "backup_notify_targets", "mcp_platform", "sso_config"] },
-    { key: "users", label: "用户管理", children: ["users_info", "users_permissions", "users_role_groups", "users_data_sources"] },
-  ];
-
-  function convert(node) {
-    if (typeof node === "string") {
-      return leafMap.get(node) || null;
-    }
-    const children = (node.children || []).map(convert).filter(Boolean);
-    if (!children.length) {
-      return null;
-    }
-    return { key: node.key, label: node.label, disabled, children };
-  }
-
-  const nodes = rootNodes.map(convert).filter(Boolean);
-  const leafKeys = Array.from(leafMap.keys());
-  return { nodes, leafKeys };
 }
 
 async function createApiKey() {
