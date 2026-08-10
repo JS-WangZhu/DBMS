@@ -24,6 +24,7 @@ import DataQueryView from "../views/DataQueryView.vue";
 import SqlReleaseApplyView from "../views/SqlReleaseApplyView.vue";
 import SqlReleaseHistoryView from "../views/SqlReleaseHistoryView.vue";
 import DataSourcePermissionView from "../views/DataSourcePermissionView.vue";
+import DataSourcePermissionApplyView from "../views/DataSourcePermissionApplyView.vue";
 import InstanceManageView from "../views/InstanceManageView.vue";
 import InstanceStatusConfigView from "../views/InstanceStatusConfigView.vue";
 import JumpServerConfigView from "../views/JumpServerConfigView.vue";
@@ -117,6 +118,7 @@ const routes = [
       { path: "/data-access/change", component: DataChangeView, meta: { title: "数据变更" } },
       { path: "/data-access/ai-analysis", component: AIAnalysisView, meta: { title: "智能分析" } },
       { path: "/data-access/history", component: DataAccessHistoryView, meta: { title: "历史记录" } },
+      { path: "/data-access/permission-apply", component: DataSourcePermissionApplyView, meta: { title: "权限申请" } },
       { path: "/data-release/apply", component: SqlReleaseApplyView, meta: { title: "SQL上线" } },
       { path: "/data-release/history", component: SqlReleaseHistoryView, meta: { title: "工单历史" } },
       { path: "/tasks/schedules", component: TaskScheduleView, meta: { title: "调度管理" } },

@@ -5,7 +5,12 @@ from app.extensions import db
 from app.models.db_asset import DatabaseCluster, DatabaseInstance
 from app.models.user import User
 from app.models.user_permission import UserClusterPermission, UserMenuPermission
-from app.services.data_access import execute_postgresql, validate_postgresql_query
+from app.services.data_access import (
+    _mysql_result_column_types,
+    _postgresql_result_column_types,
+    execute_postgresql,
+    validate_postgresql_query,
+)
 
 
 def _login(client, username, password):
@@ -112,7 +117,7 @@ class _FakePgCursor:
     def execute(self, sql):
         self.sql = sql
         if str(sql).strip().upper().startswith("SELECT"):
-            self.description = [SimpleNamespace(name="id")]
+            self.description = [SimpleNamespace(name="id", type_code=23)]
             self.rowcount = 1
         else:
             self.description = None
@@ -145,6 +150,76 @@ class _FakePgConnection:
         pass
 
 
+def test_mysql_result_column_types_include_native_length():
+    from pymysql.constants import FIELD_TYPE
+
+    description = [
+        ("id", FIELD_TYPE.LONG, None, 11, 11, 0, True),
+        ("name", FIELD_TYPE.VAR_STRING, None, 64, 64, 0, True),
+    ]
+    assert _mysql_result_column_types(description) == ["int", "varchar(64)"]
+
+
+def test_postgresql_result_column_types_include_native_length_and_precision():
+    description = [
+        SimpleNamespace(type_code=1043, internal_size=64, precision=None, scale=None),
+        SimpleNamespace(type_code=1700, internal_size=-1, precision=10, scale=2),
+    ]
+    assert _postgresql_result_column_types(description) == ["character varying(64)", "numeric(10,2)"]
+
+def test_result_column_types_prefer_database_catalog_native_declarations():
+    class MetadataCursor:
+        def __init__(self, rows):
+            self.rows = rows
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, sql, params):
+            self.sql = sql
+            self.params = params
+
+        def fetchall(self):
+            return self.rows
+
+    class MetadataConnection:
+        def __init__(self, rows):
+            self.rows = rows
+
+        def cursor(self):
+            return MetadataCursor(self.rows)
+
+    mysql_fields = [SimpleNamespace(
+        db=b"billing", org_table="orders", org_name="amount", charsetnr=63,
+    )]
+    mysql_description = [("amount", 246, None, 12, 12, 2, True)]
+    mysql_connection = MetadataConnection([{
+        "table_schema": "billing",
+        "table_name": "orders",
+        "column_name": "amount",
+        "column_type": "decimal(10,2) unsigned",
+    }])
+    assert _mysql_result_column_types(
+        mysql_description, mysql_fields, mysql_connection
+    ) == ["decimal(10,2) unsigned"]
+
+    pg_description = [SimpleNamespace(
+        type_code=1043,
+        internal_size=32,
+        precision=None,
+        scale=None,
+        table_oid=42,
+        table_column=3,
+    )]
+    pg_connection = MetadataConnection([(42, 3, "character varying(128)")])
+    assert _postgresql_result_column_types(pg_description, pg_connection) == [
+        "character varying(128)"
+    ]
+
+
 def test_execute_postgresql_returns_rows_and_commits_changes(monkeypatch):
     import psycopg2
 
@@ -162,6 +237,7 @@ def test_execute_postgresql_returns_rows_and_commits_changes(monkeypatch):
     )
     query_result = execute_postgresql(instance, "SELECT 1 AS id", 30, False, database="billing")
     assert query_result["columns"] == ["id"]
+    assert query_result["column_types"] == ["integer"]
     assert query_result["rows"] == [{"id": 1}]
     assert connections[0].autocommit is True
 

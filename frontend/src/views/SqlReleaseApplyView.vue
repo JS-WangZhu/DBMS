@@ -13,7 +13,10 @@
         </el-form-item>
         <el-form-item label="数据库">
           <el-select v-model="form.db_type" :disabled="!form.project" placeholder="再选择数据库" style="width: 100%" @change="onDbTypeChange">
-            <el-option v-for="item in databaseTypes" :key="item.value" :value="item.value" :label="item.label" />
+            <template #prefix><component :is="databaseTypeIcons[form.db_type]" v-if="form.db_type" class="database-type-selected-icon" /></template>
+            <el-option v-for="item in databaseTypes" :key="item.value" :value="item.value" :label="item.label">
+              <span class="database-type-option"><component :is="item.icon" />{{ item.label }}</span>
+            </el-option>
           </el-select>
         </el-form-item>
         <el-form-item label="环境">
@@ -163,6 +166,9 @@ import {
   submitSqlRelease,
 } from "../api/modules/sqlReleases";
 import SqlEditor from "../components/SqlEditor.vue";
+import MysqlIcon from "../components/icons/MysqlIcon.vue";
+import MongoIcon from "../components/icons/MongoIcon.vue";
+import PostgreSQLIcon from "../components/icons/PostgreSQLIcon.vue";
 import { extractReleaseObjectNames } from "../utils/sqlRelease";
 import { useTabActivationRefresh } from "../composables/useTabActivationRefresh";
 
@@ -187,10 +193,11 @@ let reviewDialogMovedToBackground = false;
 
 const tableObjects = ref({ tables: [], collections: [], views: [], procedures: [], functions: [], triggers: [], events: [] });
 const databaseTypes = [
-  { label: "MySQL", value: "mysql" },
-  { label: "MongoDB", value: "mongodb" },
-  { label: "PostgreSQL", value: "postgresql" },
+  { label: "MySQL", value: "mysql", icon: MysqlIcon },
+  { label: "MongoDB", value: "mongodb", icon: MongoIcon },
+  { label: "PostgreSQL", value: "postgresql", icon: PostgreSQLIcon },
 ];
+const databaseTypeIcons = Object.fromEntries(databaseTypes.map((item) => [item.value, item.icon]));
 const form = reactive({ title: "", project: "", db_type: "", environment: "", cluster_id: null, instance_id: null, database: "", sql: "" });
 const reviewFinished = computed(() => reviewRelease.value && reviewRelease.value.status !== "reviewing");
 const reviewCompleted = computed(() => reviewRelease.value?.review_progress?.completed || 0);
@@ -612,6 +619,9 @@ watch(
 .release-workspace { display: grid; grid-template-columns: minmax(0, 1fr) 420px; gap: 16px; align-items: start; }
 .release-card, .overview-card { min-width: 0; }
 .release-form { margin-top: 20px; }
+.database-type-option { display: inline-flex; align-items: center; gap: 8px; }
+.database-type-option :deep(svg) { width: 16px; height: 16px; }
+.database-type-selected-icon { width: 16px; height: 16px; }
 .actions { display: flex; justify-content: flex-end; margin-top: 16px; }
 .overview-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .overview-title { font-weight: 600; }

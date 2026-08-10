@@ -5,7 +5,12 @@ from app.extensions import db
 from app.models.audit_log import AuditLog
 from app.models.auth_session import AuthSession
 from app.models.user import User
-from app.models.user_permission import RoleGroup, UserRoleGroup
+from app.models.user_permission import (
+    DataSourcePermissionApplication,
+    DataSourcePermissionApplicationItem,
+    RoleGroup,
+    UserRoleGroup,
+)
 from app.services.audit import log_audit
 from app.services.auth_session import revoke_user_sessions
 from app.utils.response import error_response, ok_response
@@ -165,6 +170,19 @@ def delete_user(user_id):
         AuditLog.query.filter_by(user_id=user.id).update({"user_id": None}, synchronize_session=False)
         AuthSession.query.filter_by(user_id=user.id).delete(synchronize_session=False)
         UserRoleGroup.query.filter_by(user_id=user.id).delete(synchronize_session=False)
+        DataSourcePermissionApplication.query.filter_by(reviewer_id=user.id).update(
+            {"reviewer_id": None}, synchronize_session=False
+        )
+        application_ids = [
+            row.id for row in DataSourcePermissionApplication.query.filter_by(applicant_id=user.id).all()
+        ]
+        if application_ids:
+            DataSourcePermissionApplicationItem.query.filter(
+                DataSourcePermissionApplicationItem.application_id.in_(application_ids)
+            ).delete(synchronize_session=False)
+            DataSourcePermissionApplication.query.filter(
+                DataSourcePermissionApplication.id.in_(application_ids)
+            ).delete(synchronize_session=False)
         db.session.delete(user)
         db.session.commit()
     except Exception as exc:

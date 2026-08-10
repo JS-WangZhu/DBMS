@@ -29,6 +29,7 @@ export const QUICK_JUMP_MENUS = [
   menu("data_query", "/data-access/query", "数据查询", "数据访问", "shu ju cha xun"),
   menu("data_change", "/data-access/change", "数据变更", "数据访问", "shu ju bian geng"),
   menu("data_history", "/data-access/history", "历史记录", "数据访问", "li shi ji lu"),
+  menu("data_permission_apply", "/data-access/permission-apply", "权限申请", "数据访问", "quan xian shen qing", ["生产权限申请"]),
   menu("sql_release_apply", "/data-release/apply", "SQL上线", "数据发布", "sql shang xian"),
   menu("sql_release_history", "/data-release/history", "工单历史", "数据发布", "gong dan li shi"),
   menu("task_schedule", "/tasks/schedules", "调度管理", "任务管理", "diao du guan li"),

@@ -82,7 +82,7 @@ def delete_ai_config(config_id):
     return ok_response()
 
 @bp.post("/analyze")
-@require_menu_permission("ai_analysis")
+@require_menu_permission("data_query")
 def perform_ai_analysis():
     payload = request.get_json(silent=True) or {}
     db_type = payload.get("db_type")
@@ -139,7 +139,7 @@ def perform_ai_analysis():
         return error_response(f"Analysis failed: {str(e)}", code=500)
 
 @bp.post("/analyze/stream")
-@require_menu_permission("ai_analysis")
+@require_menu_permission("data_query")
 def perform_ai_analysis_stream():
     payload = request.get_json(silent=True) or {}
     db_type = payload.get("db_type")

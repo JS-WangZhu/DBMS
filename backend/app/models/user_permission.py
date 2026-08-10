@@ -136,3 +136,44 @@ class UserDataSourceGroup(db.Model, TimestampMixin):
         nullable=False,
     )
     group_id = db.Column(db.Integer, db.ForeignKey("data_source_groups.id"), nullable=False)
+
+
+class DataSourcePermissionApplication(db.Model, TimestampMixin):
+    __tablename__ = "data_source_permission_applications"
+
+    id = db.Column(db.Integer, primary_key=True)
+    applicant_id = db.Column(
+        db.BigInteger().with_variant(db.Integer, "sqlite"),
+        db.ForeignKey("users.id"),
+        nullable=False,
+    )
+    status = db.Column(db.String(16), nullable=False, default="pending", index=True)
+    reason = db.Column(db.String(500), nullable=True)
+    review_comment = db.Column(db.String(500), nullable=True)
+    reviewer_id = db.Column(
+        db.BigInteger().with_variant(db.Integer, "sqlite"),
+        db.ForeignKey("users.id"),
+        nullable=True,
+    )
+    reviewed_at = db.Column(db.DateTime, nullable=True)
+
+
+class DataSourcePermissionApplicationItem(db.Model, TimestampMixin):
+    __tablename__ = "data_source_permission_application_items"
+    __table_args__ = (
+        db.UniqueConstraint("application_id", "cluster_id", name="uq_permission_application_cluster"),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    application_id = db.Column(
+        db.Integer,
+        db.ForeignKey("data_source_permission_applications.id"),
+        nullable=False,
+    )
+    cluster_id = db.Column(
+        db.BigInteger().with_variant(db.Integer, "sqlite"),
+        db.ForeignKey("db_clusters.id"),
+        nullable=False,
+    )
+    can_query = db.Column(db.Boolean, nullable=False, default=False)
+    can_change = db.Column(db.Boolean, nullable=False, default=False)

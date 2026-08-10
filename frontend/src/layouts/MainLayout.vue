@@ -156,7 +156,7 @@
             <span>巡检参数</span>
           </el-menu-item>
         </el-sub-menu>
-        <el-sub-menu v-if="hasAnyMenu(['data_query','data_change','data_history'])" index="data-access">
+        <el-sub-menu v-if="hasAnyMenu(['data_query','data_change','data_history','data_permission_apply'])" index="data-access">
           <template #title>
             <el-icon><View /></el-icon>
             <span>数据访问</span>
@@ -176,6 +176,10 @@
           <el-menu-item v-if="hasMenu('data_history')" index="/data-access/history">
             <el-icon><Clock /></el-icon>
             <span>历史记录</span>
+          </el-menu-item>
+          <el-menu-item v-if="hasMenu('data_permission_apply')" index="/data-access/permission-apply">
+            <el-icon><Key /></el-icon>
+            <span>权限申请</span>
           </el-menu-item>
         </el-sub-menu>
 
@@ -358,17 +362,20 @@
             <div class="subtitle">DBMS 数据库管理平台</div>
           </div>
         </div>
-        <div class="user-block">
-          <el-avatar :size="34" :src="displayAvatarUrl || undefined" @error="onAvatarError">
-            {{ userInitial }}
-          </el-avatar>
-          <div class="user-copy">
-            <strong>{{ username }}</strong>
-            <span>{{ currentRole }}</span>
-          </div>
-          <span class="user-divider"></span>
+        <el-popover placement="bottom-end" trigger="hover" :show-arrow="false" popper-class="user-action-popover">
+          <template #reference>
+            <div class="user-block" tabindex="0">
+              <el-avatar :size="34" :src="displayAvatarUrl || undefined" @error="onAvatarError">
+                {{ userInitial }}
+              </el-avatar>
+              <div class="user-copy">
+                <strong>{{ username }}</strong>
+                <span>{{ currentRole }}</span>
+              </div>
+            </div>
+          </template>
           <el-button class="logout-button" text @click="logout">退出登录</el-button>
-        </div>
+        </el-popover>
       </el-header>
       <el-main class="main-area">
         <div class="tabs-wrap">
@@ -581,6 +588,7 @@ const routePermissionMap = {
   "/data-access/change": "data_change",
   "/data-access/history": "data_history",
   "/data-access/ai-analysis": "ai_analysis",
+  "/data-access/permission-apply": "data_permission_apply",
   "/data-release/apply": "sql_release_apply",
   "/data-release/history": "sql_release_history",
   "/tasks/schedules": "task_schedule",
@@ -680,6 +688,7 @@ const tabIconMap = {
   "/data-access/change": EditPen,
   "/data-access/history": Clock,
   "/data-access/ai-analysis": Cpu,
+  "/data-access/permission-apply": Key,
   "/data-release/apply": EditPen,
   "/data-release/history": Clock,
   "/tasks/schedules": Operation,
@@ -1548,6 +1557,8 @@ async function logout() {
   align-items: center;
   gap: 10px;
   color: var(--text-regular);
+  cursor: default;
+  outline: none;
 }
 
 .user-block :deep(.el-avatar) {
@@ -1574,13 +1585,6 @@ async function logout() {
   margin-top: 2px;
   color: var(--text-placeholder);
   font-size: 11px;
-}
-
-.user-divider {
-  width: 1px;
-  height: 22px;
-  margin: 0 2px;
-  background: var(--border-soft);
 }
 
 .logout-button {

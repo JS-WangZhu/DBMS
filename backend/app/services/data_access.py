@@ -384,6 +384,162 @@ def pick_instance(db_type: str, cluster_id: int, instance_id: int, for_change: b
     return None
 
 
+def _mysql_protocol_column_type(item, field=None):
+    from pymysql.constants import FIELD_TYPE
+
+    type_names = {
+        FIELD_TYPE.DECIMAL: "decimal",
+        FIELD_TYPE.TINY: "tinyint",
+        FIELD_TYPE.SHORT: "smallint",
+        FIELD_TYPE.LONG: "int",
+        FIELD_TYPE.FLOAT: "float",
+        FIELD_TYPE.DOUBLE: "double",
+        FIELD_TYPE.NULL: "null",
+        FIELD_TYPE.TIMESTAMP: "timestamp",
+        FIELD_TYPE.LONGLONG: "bigint",
+        FIELD_TYPE.INT24: "mediumint",
+        FIELD_TYPE.DATE: "date",
+        FIELD_TYPE.TIME: "time",
+        FIELD_TYPE.DATETIME: "datetime",
+        FIELD_TYPE.YEAR: "year",
+        FIELD_TYPE.NEWDATE: "date",
+        FIELD_TYPE.VARCHAR: "varchar",
+        FIELD_TYPE.BIT: "bit",
+        FIELD_TYPE.JSON: "json",
+        FIELD_TYPE.NEWDECIMAL: "decimal",
+        FIELD_TYPE.ENUM: "enum",
+        FIELD_TYPE.SET: "set",
+        FIELD_TYPE.TINY_BLOB: "tinyblob",
+        FIELD_TYPE.MEDIUM_BLOB: "mediumblob",
+        FIELD_TYPE.LONG_BLOB: "longblob",
+        FIELD_TYPE.BLOB: "blob",
+        FIELD_TYPE.VAR_STRING: "varchar",
+        FIELD_TYPE.STRING: "char",
+        FIELD_TYPE.GEOMETRY: "geometry",
+    }
+    type_code = item[1]
+    type_name = type_names.get(type_code, f"type {type_code}")
+    binary = getattr(field, "charsetnr", None) == 63
+    if binary and type_code in {FIELD_TYPE.VARCHAR, FIELD_TYPE.VAR_STRING}:
+        type_name = "varbinary"
+    elif binary and type_code == FIELD_TYPE.STRING:
+        type_name = "binary"
+    elif not binary and type_code in {
+        FIELD_TYPE.TINY_BLOB,
+        FIELD_TYPE.MEDIUM_BLOB,
+        FIELD_TYPE.LONG_BLOB,
+        FIELD_TYPE.BLOB,
+    }:
+        type_name = {
+            FIELD_TYPE.TINY_BLOB: "tinytext",
+            FIELD_TYPE.MEDIUM_BLOB: "mediumtext",
+            FIELD_TYPE.LONG_BLOB: "longtext",
+            FIELD_TYPE.BLOB: "text",
+        }[type_code]
+
+    size = item[3] if len(item) > 3 else None
+    precision = item[4] if len(item) > 4 else None
+    scale = item[5] if len(item) > 5 else None
+    if type_code in {FIELD_TYPE.DECIMAL, FIELD_TYPE.NEWDECIMAL} and precision:
+        return f"{type_name}({precision},{scale or 0})"
+    if type_code in {FIELD_TYPE.VARCHAR, FIELD_TYPE.VAR_STRING, FIELD_TYPE.STRING, FIELD_TYPE.BIT} and size:
+        return f"{type_name}({size})"
+    if type_code in {FIELD_TYPE.TIME, FIELD_TYPE.DATETIME, FIELD_TYPE.TIMESTAMP} and scale:
+        return f"{type_name}({scale})"
+    return type_name
+
+
+def _mysql_result_column_types(description, fields=None, connection=None):
+    """Prefer MySQL COLUMN_TYPE, including native length/precision/unsigned."""
+    fields = list(fields or [])
+    result = [
+        _mysql_protocol_column_type(item, fields[index] if index < len(fields) else None)
+        for index, item in enumerate(description or [])
+    ]
+    origins = {}
+    for index, field in enumerate(fields):
+        schema = getattr(field, "db", "")
+        if isinstance(schema, bytes):
+            schema = schema.decode("utf-8", errors="replace")
+        key = (schema, getattr(field, "org_table", ""), getattr(field, "org_name", ""))
+        if all(key):
+            origins.setdefault(key, []).append(index)
+    if not origins or connection is None:
+        return result
+    where_sql = " OR ".join(["(TABLE_SCHEMA=%s AND TABLE_NAME=%s AND COLUMN_NAME=%s)"] * len(origins))
+    params = [value for key in origins for value in key]
+    try:
+        with connection.cursor() as metadata_cursor:
+            metadata_cursor.execute(
+                "SELECT TABLE_SCHEMA AS table_schema, TABLE_NAME AS table_name, "
+                "COLUMN_NAME AS column_name, COLUMN_TYPE AS column_type "
+                f"FROM information_schema.COLUMNS WHERE {where_sql}",
+                params,
+            )
+            for row in metadata_cursor.fetchall() or []:
+                key = (row.get("table_schema"), row.get("table_name"), row.get("column_name"))
+                for index in origins.get(key, []):
+                    result[index] = str(row.get("column_type") or result[index]).lower()
+    except Exception:
+        pass
+    return result
+
+
+def _postgresql_fallback_column_type(item):
+    from psycopg2.extensions import string_types
+
+    type_names = {
+        16: "boolean", 17: "bytea", 18: '"char"', 19: "name", 20: "bigint",
+        21: "smallint", 23: "integer", 25: "text", 26: "oid", 114: "json",
+        700: "real", 701: "double precision", 1042: "character", 1043: "character varying",
+        1082: "date", 1083: "time without time zone", 1114: "timestamp without time zone",
+        1184: "timestamp with time zone", 1186: "interval", 1266: "time with time zone",
+        1700: "numeric", 2950: "uuid", 3802: "jsonb",
+    }
+    type_code = getattr(item, "type_code", None)
+    caster = string_types.get(type_code)
+    fallback = getattr(caster, "name", None) or (f"oid {type_code}" if type_code is not None else "unknown")
+    type_name = type_names.get(type_code) or str(fallback).lower()
+    size = getattr(item, "internal_size", None)
+    precision = getattr(item, "precision", None)
+    scale = getattr(item, "scale", None)
+    if type_code in {1042, 1043} and size and size > 0:
+        return f"{type_name}({size})"
+    if type_code == 1700 and precision is not None:
+        return f"numeric({precision},{scale or 0})"
+    if type_code in {1083, 1114, 1184, 1266} and scale:
+        return type_name.replace(" ", f"({scale}) ", 1)
+    return type_name
+
+
+def _postgresql_result_column_types(description, connection=None):
+    """Prefer pg_catalog native formatted types, including typmod length."""
+    result = [_postgresql_fallback_column_type(item) for item in (description or [])]
+    origins = {}
+    for index, item in enumerate(description or []):
+        table_oid = getattr(item, "table_oid", None)
+        table_column = getattr(item, "table_column", None)
+        if table_oid and table_column:
+            origins.setdefault((int(table_oid), int(table_column)), []).append(index)
+    if not origins or connection is None:
+        return result
+    where_sql = " OR ".join(["(a.attrelid=%s::oid AND a.attnum=%s)"] * len(origins))
+    params = [value for key in origins for value in key]
+    try:
+        with connection.cursor() as metadata_cursor:
+            metadata_cursor.execute(
+                "SELECT a.attrelid, a.attnum, pg_catalog.format_type(a.atttypid, a.atttypmod) "
+                f"FROM pg_catalog.pg_attribute a WHERE {where_sql}",
+                params,
+            )
+            for table_oid, table_column, type_name in metadata_cursor.fetchall() or []:
+                for index in origins.get((int(table_oid), int(table_column)), []):
+                    result[index] = str(type_name)
+    except Exception:
+        pass
+    return result
+
+
 def execute_mysql(
     instance: DatabaseInstance,
     sql: str,
@@ -463,9 +619,18 @@ def execute_mysql(
                 if truncated:
                     rows = rows[:QUERY_ROW_LIMIT]
                 columns = [col[0] for col in cursor.description]
+                fields = list(getattr(getattr(cursor, "_result", None), "fields", None) or [])
+                column_types = _mysql_result_column_types(
+                    cursor.description, fields=fields, connection=connection)
                 # 将 datetime/date/Decimal 等类型转换为 JSON 可序列化的字符串，datetime 输出为 ISO 格式
                 rows = [_json_safe(row) for row in rows]
-                return {"columns": columns, "rows": rows, "truncated": truncated, "limit": QUERY_ROW_LIMIT}
+                return {
+                    "columns": columns,
+                    "column_types": column_types,
+                    "rows": rows,
+                    "truncated": truncated,
+                    "limit": QUERY_ROW_LIMIT,
+                }
             return {"columns": [], "rows": [], "affected_rows": cursor.rowcount}
     finally:
         connection.close()
@@ -492,7 +657,7 @@ def execute_postgresql(
     if execution_id:
         set_execution_cancel_callback(execution_id, connection.cancel)
     statements = _split_sql_statements(sql or "")
-    final_rows, final_columns, affected_rows = [], [], 0
+    final_rows, final_columns, final_column_types, affected_rows = [], [], [], 0
     try:
         with connection.cursor(cursor_factory=RealDictCursor) as cursor:
             for statement in statements:
@@ -502,6 +667,11 @@ def execute_postgresql(
                     truncated = len(rows) > QUERY_ROW_LIMIT
                     final_rows = rows[:QUERY_ROW_LIMIT]
                     final_columns = [item.name for item in cursor.description]
+                    metadata_connection = connection if not for_change else None
+                    final_column_types = _postgresql_result_column_types(
+                        cursor.description,
+                        metadata_connection,
+                    )
                 else:
                     truncated = False
                 if isinstance(cursor.rowcount, int) and cursor.rowcount > 0:
@@ -516,6 +686,7 @@ def execute_postgresql(
         connection.close()
     return {
         "columns": final_columns,
+        "column_types": final_column_types,
         "rows": _json_safe(final_rows),
         "affected_rows": affected_rows,
         "statement_count": len(statements),

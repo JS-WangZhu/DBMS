@@ -4,10 +4,11 @@
     <div class="topbar">
       <div class="topbar-left">
         <el-select v-model="form.db_type" size="default" placeholder="选择数据库类型" style="width: 160px" @change="onDbTypeChange">
-          <el-option label="MySQL" value="mysql" />
-          <el-option label="MongoDB" value="mongodb" />
-          <el-option label="PostgreSQL" value="postgresql" />
-          <el-option label="Redis" value="redis" />
+          <template #prefix><component :is="databaseTypeIcons[form.db_type]" v-if="form.db_type" class="database-type-selected-icon" /></template>
+          <el-option label="MySQL" value="mysql"><span class="database-type-option"><MysqlIcon />MySQL</span></el-option>
+          <el-option label="MongoDB" value="mongodb"><span class="database-type-option"><MongoIcon />MongoDB</span></el-option>
+          <el-option label="PostgreSQL" value="postgresql"><span class="database-type-option"><PostgreSQLIcon />PostgreSQL</span></el-option>
+          <el-option label="Redis" value="redis"><span class="database-type-option"><RedisIcon />Redis</span></el-option>
         </el-select>
         <el-select
           v-model="form.business_line"
@@ -300,6 +301,10 @@ import {
 } from "@element-plus/icons-vue";
 
 import SqlEditor from "../components/SqlEditor.vue";
+import MysqlIcon from "../components/icons/MysqlIcon.vue";
+import MongoIcon from "../components/icons/MongoIcon.vue";
+import PostgreSQLIcon from "../components/icons/PostgreSQLIcon.vue";
+import RedisIcon from "../components/icons/RedisIcon.vue";
 import { listClusters } from "../api/modules/clusters";
 import { listInstances } from "../api/modules/instances";
 import { useTabActivationRefresh } from "../composables/useTabActivationRefresh";
@@ -316,6 +321,8 @@ import {
   listPostgresqlObjects,
   listPostgresqlTableColumns,
 } from "../api/modules/data_access";
+
+const databaseTypeIcons = { mysql: MysqlIcon, mongodb: MongoIcon, postgresql: PostgreSQLIcon, redis: RedisIcon };
 
 const form = reactive({
   db_type: "",
@@ -989,6 +996,9 @@ useTabActivationRefresh(reloadOptions);
 }
 
 .topbar-left { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.database-type-option { display: inline-flex; align-items: center; gap: 8px; }
+.database-type-option :deep(svg) { width: 16px; height: 16px; }
+.database-type-selected-icon { width: 16px; height: 16px; }
 .topbar-right { display: flex; align-items: center; gap: 8px; }
 
 .webql-body { flex: 1; min-height: 0; display: flex; gap: 10px; }
