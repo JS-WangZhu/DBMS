@@ -32,6 +32,8 @@ export const QUICK_JUMP_MENUS = [
   menu("data_permission_apply", "/data-access/permission-apply", "权限申请", "数据访问", "quan xian shen qing", ["生产权限申请"]),
   menu("sql_release_apply", "/data-release/apply", "SQL上线", "数据发布", "sql shang xian"),
   menu("sql_release_history", "/data-release/history", "工单历史", "数据发布", "gong dan li shi"),
+  menu("data_copy_tasks", "/data-copy/tasks", "任务管理", "数据复制", "shu ju fu zhi ren wu guan li", ["canal", "mongoshake"]),
+  menu("data_copy_config", "/data-copy/config", "配置中心", "数据复制", "shu ju fu zhi pei zhi zhong xin", ["kafka", "复制账号", "下游接口"]),
   menu("task_schedule", "/tasks/schedules", "调度管理", "任务管理", "diao du guan li"),
   menu("task_results", "/tasks/results", "结果查询", "任务管理", "jie guo cha xun"),
   menu("aliyun_dns_tool", "/tools/aliyun-dns", "阿里云域名工具", "快捷工具", "a li yun yu ming gong ju", ["aliyun", "dns"]),

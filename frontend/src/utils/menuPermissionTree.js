@@ -11,6 +11,7 @@ const MENU_PERMISSION_STRUCTURE = [
   { key: "inspection", label: "巡检管理", children: ["inspection_manage", "inspection_param_config"] },
   { key: "data_access", label: "数据访问", children: ["data_query", "data_change", "data_history", "data_permission_apply"] },
   { key: "data_release", label: "数据发布", children: ["sql_release_apply", "sql_release_history"] },
+  { key: "data_copy", label: "数据复制", children: ["data_copy_tasks", "data_copy_config"] },
   { key: "task_management", label: "任务管理", children: ["task_schedule", "task_results"] },
   { key: "quick_tools", label: "快捷工具", children: ["aliyun_dns_tool"] },
   { key: "backup", label: "备份管理", children: [

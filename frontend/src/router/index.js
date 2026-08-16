@@ -21,6 +21,8 @@ import DataQueryOpConfigView from "../views/DataQueryOpConfigView.vue";
 import DomainConfigManageView from "../views/DomainConfigManageView.vue";
 import HAConfigView from "../views/HAConfigView.vue";
 import DataQueryView from "../views/DataQueryView.vue";
+import DataCopyConfigView from "../views/DataCopyConfigView.vue";
+import DataCopyTaskView from "../views/DataCopyTaskView.vue";
 import SqlReleaseApplyView from "../views/SqlReleaseApplyView.vue";
 import SqlReleaseHistoryView from "../views/SqlReleaseHistoryView.vue";
 import DataSourcePermissionView from "../views/DataSourcePermissionView.vue";
@@ -121,6 +123,8 @@ const routes = [
       { path: "/data-access/permission-apply", component: DataSourcePermissionApplyView, meta: { title: "权限申请" } },
       { path: "/data-release/apply", component: SqlReleaseApplyView, meta: { title: "SQL上线" } },
       { path: "/data-release/history", component: SqlReleaseHistoryView, meta: { title: "工单历史" } },
+      { path: "/data-copy/tasks", component: DataCopyTaskView, meta: { title: "数据复制任务管理" } },
+      { path: "/data-copy/config", component: DataCopyConfigView, meta: { title: "数据复制配置中心" } },
       { path: "/tasks/schedules", component: TaskScheduleView, meta: { title: "调度管理" } },
       { path: "/tasks/results", component: TaskResultView, meta: { title: "结果查询" } },
       { path: "/tools/aliyun-dns", component: AliyunDnsToolView, meta: { title: "阿里云域名工具" } },

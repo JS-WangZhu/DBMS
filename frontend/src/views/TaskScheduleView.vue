@@ -197,6 +197,7 @@ import { ElMessage, ElMessageBox } from "element-plus";
 import { listClusters } from "../api/modules/clusters";
 import { listInstances } from "../api/modules/instances";
 import { useTabActivationRefresh } from "../composables/useTabActivationRefresh";
+import { formatUtcTimeAsBeijing } from "../utils/time";
 import {
   createTaskSchedule,
   deleteTaskSchedule,
@@ -245,9 +246,7 @@ function taskTypeText(type) {
 }
 
 function formatDateTime(value) {
-  if (!value) return "-";
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+  return formatUtcTimeAsBeijing(value);
 }
 
 function instanceLabel(item) {

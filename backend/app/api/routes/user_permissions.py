@@ -51,6 +51,8 @@ MENU_CATALOG = [
     {"key": "data_permission_apply", "label": "权限申请"},
     {"key": "sql_release_apply", "label": "SQL上线"},
     {"key": "sql_release_history", "label": "工单历史"},
+    {"key": "data_copy_tasks", "label": "数据复制任务管理"},
+    {"key": "data_copy_config", "label": "数据复制配置中心"},
     {"key": "task_schedule", "label": "调度管理"},
     {"key": "task_results", "label": "结果查询"},
     {"key": "backup_mysql_policies", "label": "MySQL策略"},

@@ -27,3 +27,15 @@ test("permission tree applies disabled state to groups and leaves", () => {
   assert.equal(tree.nodes[0].disabled, true);
   assert.equal(tree.nodes[0].children[0].disabled, true);
 });
+
+test("data copy permissions are grouped beside data release", () => {
+  const catalog = [
+    { key: "sql_release_apply", label: "SQL上线" },
+    { key: "data_copy_tasks", label: "数据复制任务管理" },
+    { key: "data_copy_config", label: "数据复制配置中心" },
+  ];
+  const tree = buildMenuPermissionTree(catalog);
+  const dataCopy = tree.nodes.find((node) => node.key === "data_copy");
+
+  assert.deepEqual(dataCopy.children.map((item) => item.key), ["data_copy_tasks", "data_copy_config"]);
+});

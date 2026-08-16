@@ -198,6 +198,21 @@
           </el-menu-item>
         </el-sub-menu>
 
+        <el-sub-menu v-if="hasAnyMenu(['data_copy_tasks','data_copy_config'])" index="data-copy">
+          <template #title>
+            <el-icon><Connection /></el-icon>
+            <span>数据复制</span>
+          </template>
+          <el-menu-item v-if="hasMenu('data_copy_tasks')" index="/data-copy/tasks">
+            <el-icon><Operation /></el-icon>
+            <span>任务管理</span>
+          </el-menu-item>
+          <el-menu-item v-if="hasMenu('data_copy_config')" index="/data-copy/config">
+            <el-icon><Setting /></el-icon>
+            <span>配置中心</span>
+          </el-menu-item>
+        </el-sub-menu>
+
         <el-sub-menu v-if="hasAnyMenu(['task_schedule','task_results'])" index="task-management">
           <template #title>
             <el-icon><Calendar /></el-icon>
@@ -591,6 +606,8 @@ const routePermissionMap = {
   "/data-access/permission-apply": "data_permission_apply",
   "/data-release/apply": "sql_release_apply",
   "/data-release/history": "sql_release_history",
+  "/data-copy/tasks": "data_copy_tasks",
+  "/data-copy/config": "data_copy_config",
   "/tasks/schedules": "task_schedule",
   "/tasks/results": "task_results",
   "/tools/aliyun-dns": "aliyun_dns_tool",
@@ -691,6 +708,8 @@ const tabIconMap = {
   "/data-access/permission-apply": Key,
   "/data-release/apply": EditPen,
   "/data-release/history": Clock,
+  "/data-copy/tasks": Operation,
+  "/data-copy/config": Setting,
   "/tasks/schedules": Operation,
   "/tasks/results": Tickets,
   "/tools/aliyun-dns": Position,
