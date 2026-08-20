@@ -18,6 +18,14 @@
         </el-form-item>
 
         <el-form-item label="菜单权限">
+          <el-alert
+            v-if="selectedUserId && inheritedMenuKeys.length"
+            class="inherited-alert"
+            title="灰色勾选项由角色组继承，请在角色组管理中调整；保存用户权限不会将其复制为直接授权。"
+            type="info"
+            :closable="false"
+            show-icon
+          />
           <el-tree
             v-if="selectedUserId"
             ref="menuTreeRef"
@@ -77,6 +85,7 @@ const menuTreeRef = ref(null);
 const menuCatalog = ref([]);
 const menuTreeData = ref([]);
 const menuLeafKeys = ref([]);
+const inheritedMenuKeys = ref([]);
 
 const selectedUser = computed(() => users.value.find((item) => Number(item.id) === Number(selectedUserId.value)) || null);
 const isAdminUser = computed(() => selectedUser.value?.role === "admin");
@@ -103,11 +112,17 @@ async function loadPermissions() {
   const payload = data.data || {};
   const catalog = Array.isArray(payload.menu_catalog) ? payload.menu_catalog : [];
   menuCatalog.value = catalog;
-  const tree = buildMenuPermissionTree(catalog, { disabled: isAdminUser.value });
+  inheritedMenuKeys.value = isAdminUser.value ? [] : (payload.inherited_menu_keys || []);
+  const tree = buildMenuPermissionTree(catalog, {
+    disabled: isAdminUser.value,
+    disabledKeys: inheritedMenuKeys.value,
+  });
   menuTreeData.value = tree.nodes;
   menuLeafKeys.value = tree.leafKeys;
   const allKeys = catalog.map((item) => item.key);
-  form.menu_keys = isAdminUser.value ? allKeys : (payload.menu_keys || []);
+  form.menu_keys = isAdminUser.value
+    ? allKeys
+    : [...new Set([...(payload.menu_keys || []), ...inheritedMenuKeys.value])];
   await nextTick();
   if (menuTreeRef.value) {
     menuTreeRef.value.setCheckedKeys(form.menu_keys);
@@ -121,7 +136,10 @@ async function savePermissions() {
   saving.value = true;
   try {
     const checkedKeys = menuTreeRef.value ? menuTreeRef.value.getCheckedKeys(false) : [];
-    const checkedLeafKeys = checkedKeys.filter((key) => menuLeafKeys.value.includes(key));
+    const inheritedSet = new Set(inheritedMenuKeys.value);
+    const checkedLeafKeys = checkedKeys.filter(
+      (key) => menuLeafKeys.value.includes(key) && !inheritedSet.has(key),
+    );
     form.menu_keys = checkedLeafKeys;
     await updateUserPermissions(selectedUserId.value, {
       menu_keys: checkedLeafKeys,
@@ -192,6 +210,15 @@ onMounted(async () => {
 
 .api-key-actions {
   margin-bottom: 8px;
+}
+
+.menu-tree,
+.inherited-alert {
+  width: 100%;
+}
+
+.inherited-alert {
+  margin-bottom: 12px;
 }
 
 </style>

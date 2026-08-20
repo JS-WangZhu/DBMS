@@ -84,6 +84,11 @@ def _get_probe_session(token: str, user_id: int) -> ProbeSession:
     return session
 
 
+def get_probe_instance_id(token: str, user_id: int) -> int:
+    """Resolve a user-owned probe to its instance without exposing probe data."""
+    return int(_get_probe_session(token, user_id).instance_id)
+
+
 def _as_bool(value, default=False):
     if value is None:
         return default

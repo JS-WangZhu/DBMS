@@ -36,9 +36,15 @@ const MENU_PERMISSION_STRUCTURE = [
   { key: "users", label: "用户管理", children: ["users_info", "users_permissions", "users_role_groups", "users_data_sources"] },
 ];
 
-export function buildMenuPermissionTree(catalog, { disabled = false } = {}) {
+export function buildMenuPermissionTree(catalog, { disabled = false, disabledKeys = [] } = {}) {
+  const disabledKeySet = new Set(disabledKeys || []);
   const leafMap = new Map(
-    (catalog || []).map((item) => [item.key, { key: item.key, label: item.label, disabled }]),
+    (catalog || []).map((item) => [item.key, {
+      key: item.key,
+      label: item.label,
+      disabled: disabled || disabledKeySet.has(item.key),
+      inherited: disabledKeySet.has(item.key),
+    }]),
   );
   const usedKeys = new Set();
 

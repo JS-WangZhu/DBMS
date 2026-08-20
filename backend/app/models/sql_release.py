@@ -62,6 +62,7 @@ class SqlRelease(db.Model, TimestampMixin):
             "applicant_name": self.applicant.display_name or self.applicant.username if self.applicant else None,
             "cluster_id": self.cluster_id,
             "cluster_name": self.cluster.name if self.cluster else None,
+            "environment": self.cluster.environment if self.cluster else None,
             "instance_id": self.instance_id,
             "instance_name": self.instance.name if self.instance else None,
             "db_type": self.db_type or "mysql",

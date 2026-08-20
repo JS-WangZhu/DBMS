@@ -1,8 +1,11 @@
-from flask import g
+import time
 from types import SimpleNamespace
+
+from flask import g
 
 from app.extensions import db
 from app.models.db_asset import DatabaseCluster, DatabaseInstance
+from app.models.data_query_op import DataQueryOperationConfig
 from app.models.user import User
 from app.models.user_permission import UserClusterPermission, UserMenuPermission
 from app.services.data_access import (
@@ -102,11 +105,67 @@ def test_postgresql_query_rejects_write_statements():
     assert "WITH DML" in reason
 
 
+def test_postgresql_query_uses_configured_operation_whitelist(monkeypatch):
+    import app.services.data_access as data_access
+
+    monkeypatch.setattr(data_access, "_get_query_ops", lambda db_type: {"select"} if db_type == "postgresql" else set())
+    assert validate_postgresql_query("SELECT 1") == (True, None)
+    ok, reason = validate_postgresql_query("SHOW statement_timeout")
+    assert ok is False
+    assert "SELECT" in reason
+
+    monkeypatch.setattr(data_access, "_get_query_ops", lambda _db_type: set())
+    ok, reason = validate_postgresql_query("SELECT 1")
+    assert ok is False
+    assert "无" in reason
+
+
+def test_loaded_empty_postgresql_whitelist_does_not_use_fallback(monkeypatch):
+    import app.services.data_access as data_access
+
+    monkeypatch.setitem(data_access._QUERY_OPS_CACHE, "data", {"postgresql": set()})
+    monkeypatch.setitem(data_access._QUERY_OPS_CACHE, "ts", time.monotonic())
+    assert data_access._get_query_ops("postgresql") == set()
+
+
+def test_postgresql_query_operation_config_and_admin_write_control(app, client):
+    with app.app_context():
+        user = User(username="query-op-user", role="user", status="active", auth_source="local")
+        user.set_password("password123")
+        db.session.add(user)
+        db.session.flush()
+        db.session.add(UserMenuPermission(user_id=user.id, menu_key="data_query_op_config"))
+        db.session.commit()
+
+        pg_keys = {
+            row.op_key.upper()
+            for row in DataQueryOperationConfig.query.filter_by(db_type="postgresql").all()
+        }
+        assert pg_keys == {"SELECT", "WITH", "EXPLAIN", "SHOW", "VALUES"}
+
+    user_headers = _login(client, "query-op-user", "password123")
+    listed = client.get("/api/v1/data-query-ops", headers=user_headers)
+    assert listed.status_code == 200
+    assert len(listed.get_json()["data"]["groups"]["postgresql"]) == 5
+    denied = client.post("/api/v1/data-query-ops", headers=user_headers, json={
+        "db_type": "postgresql", "op_key": "TABLE", "label": "查询整表",
+    })
+    assert denied.status_code == 403
+
+    g.pop("current_user", None)
+    admin_headers = _login(client, "admin", "admin123")
+    created = client.post("/api/v1/data-query-ops", headers=admin_headers, json={
+        "db_type": "postgresql", "op_key": "TABLE", "label": "查询整表",
+    })
+    assert created.status_code == 201, created.get_json()
+
+
 class _FakePgCursor:
     def __init__(self):
         self.description = None
         self.rowcount = 0
         self.sql = ""
+        self.executed_sql = []
 
     def __enter__(self):
         return self
@@ -116,6 +175,7 @@ class _FakePgCursor:
 
     def execute(self, sql):
         self.sql = sql
+        self.executed_sql.append(sql)
         if str(sql).strip().upper().startswith("SELECT"):
             self.description = [SimpleNamespace(name="id", type_code=23)]
             self.rowcount = 1
@@ -239,7 +299,8 @@ def test_execute_postgresql_returns_rows_and_commits_changes(monkeypatch):
     assert query_result["columns"] == ["id"]
     assert query_result["column_types"] == ["integer"]
     assert query_result["rows"] == [{"id": 1}]
-    assert connections[0].autocommit is True
+    assert connections[0].autocommit is False
+    assert connections[0].cursor_instance.executed_sql[:2] == ["SET TRANSACTION READ ONLY", "SELECT 1 AS id"]
 
     change_result = execute_postgresql(instance, "UPDATE orders SET status='paid' WHERE id IN (1,2)", 30, True, database="billing")
     assert change_result["affected_rows"] == 2

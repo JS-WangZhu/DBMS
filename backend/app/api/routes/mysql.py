@@ -2,7 +2,7 @@ from flask import Blueprint, request
 
 from datetime import datetime, timedelta
 
-from app.api.routes.common import active_user_required, get_current_user, require_menu_permission
+from app.api.routes.common import active_user_required, admin_required, get_current_user, list_allowed_cluster_ids, require_cluster_permission, require_menu_permission
 from app.extensions import db
 from app.models.db_asset import DatabaseInstance
 from app.models.monitor_snapshot import snapshot_model_for_instance
@@ -15,6 +15,7 @@ from app.services.mysql_session_probe import (
     SessionProbeError,
     close_probe_session,
     fetch_processlist,
+    get_probe_instance_id,
     kill_process,
     start_probe_session,
 )
@@ -33,6 +34,20 @@ def _session_probe_error(exc):
     if "connect failed" in message or "fetch failed" in message or "kill mysql" in message:
         return error_response(message, code=502)
     return error_response(message, code=400)
+
+
+def _require_probe_cluster_permission(token, action):
+    user = get_current_user()
+    try:
+        instance_id = get_probe_instance_id(token=token, user_id=user.id)
+    except SessionProbeError as exc:
+        return None, _session_probe_error(exc)
+    instance = DatabaseInstance.query.filter_by(id=instance_id, db_type="mysql").first()
+    if not instance:
+        return None, error_response("mysql instance not found", code=404)
+    if not require_cluster_permission(instance.cluster_id, action):
+        return None, error_response("cluster permission denied", code=403)
+    return instance, None
 
 
 def _store_manual_status_snapshot(instance, collected_payload):
@@ -172,7 +187,7 @@ def _instance_detail_view(instance_id, payload, source, running_status="unknown"
 
 
 @bp.get("/instances")
-@active_user_required
+@require_menu_permission("mysql_instances")
 def mysql_list_instances():
     page = request.args.get("page", 1)
     page_size = request.args.get('page_size', 10)
@@ -190,6 +205,7 @@ def mysql_list_instances():
         namespace=namespace,
         business_line=business_line,
         environment=environment,
+        allowed_cluster_ids=list_allowed_cluster_ids("view_instance"),
     )
     return ok_response(
         data={
@@ -202,7 +218,7 @@ def mysql_list_instances():
 
 
 @bp.post("/instances")
-@active_user_required
+@admin_required
 def mysql_create_instance():
     payload = request.get_json(silent=True) or {}
     payload.pop("role_label", None)
@@ -217,13 +233,17 @@ def mysql_create_instance():
 
 
 @bp.get("/instances/<int:instance_id>/replication")
-@active_user_required
+@require_menu_permission("mysql_instances")
 def mysql_replication(instance_id):
     instance = DatabaseInstance.query.filter_by(id=instance_id, db_type="mysql").first()
     if not instance:
         return error_response("mysql instance not found", code=404)
+    if not require_cluster_permission(instance.cluster_id, "view_instance"):
+        return error_response("cluster permission denied", code=403)
 
     refresh = request.args.get("refresh", "false").lower() == "true"
+    if refresh and get_current_user().role != "admin":
+        return error_response("admin required for live refresh", code=403)
 
     snapshot = latest_snapshot_for_instance(instance_id=instance.id, db_type=instance.db_type, metric_type="status")
     snapshot_payload = snapshot.payload_json if snapshot else {}
@@ -253,13 +273,17 @@ def mysql_replication(instance_id):
 
 
 @bp.get("/instances/<int:instance_id>/detail")
-@active_user_required
+@require_menu_permission("mysql_instances")
 def mysql_instance_detail(instance_id):
     instance = DatabaseInstance.query.filter_by(id=instance_id, db_type="mysql").first()
     if not instance:
         return error_response("mysql instance not found", code=404)
+    if not require_cluster_permission(instance.cluster_id, "view_instance"):
+        return error_response("cluster permission denied", code=403)
 
     refresh = request.args.get("refresh", "false").lower() == "true"
+    if refresh and get_current_user().role != "admin":
+        return error_response("admin required for live refresh", code=403)
     snapshot = latest_snapshot_for_instance(instance_id=instance.id, db_type=instance.db_type, metric_type="status")
     snapshot_payload = snapshot.payload_json if snapshot else {}
 
@@ -298,6 +322,8 @@ def start_mysql_session_probe():
     instance = DatabaseInstance.query.filter_by(id=instance_id, db_type="mysql", enabled=True).first()
     if not instance:
         return error_response("mysql instance not found", code=404)
+    if not require_cluster_permission(instance.cluster_id, "query"):
+        return error_response("cluster permission denied", code=403)
     password = decrypt_secret(instance.password_encrypted) if instance.password_encrypted else ""
     user = get_current_user()
     try:
@@ -311,12 +337,16 @@ def start_mysql_session_probe():
         target_id=str(instance.id),
         detail={"expires_at": data.get("expires_at")},
     )
+    data["can_kill"] = require_cluster_permission(instance.cluster_id, "change")
     return ok_response(data=data, code=201)
 
 
 @bp.get("/session-probes/<string:token>/processlist")
 @require_menu_permission("mysql_session_probe")
 def get_mysql_processlist(token):
+    _, permission_error = _require_probe_cluster_permission(token, "query")
+    if permission_error:
+        return permission_error
     try:
         data = fetch_processlist(token=token, user_id=get_current_user().id)
     except SessionProbeError as exc:
@@ -327,6 +357,9 @@ def get_mysql_processlist(token):
 @bp.post("/session-probes/<string:token>/kill")
 @require_menu_permission("mysql_session_probe")
 def kill_mysql_process(token):
+    _, permission_error = _require_probe_cluster_permission(token, "change")
+    if permission_error:
+        return permission_error
     payload = request.get_json(silent=True) or {}
     try:
         process_id = int(payload.get("process_id"))

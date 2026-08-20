@@ -214,6 +214,7 @@ def list_instances_paginated(
     namespace=None,
     business_line=None,
     environment=None,
+    allowed_cluster_ids=None,
 ):
     try:
         page = int(page)
@@ -232,6 +233,11 @@ def list_instances_paginated(
         query = query.filter_by(db_type=db_type)
     if enabled is not None:
         query = query.filter_by(enabled=enabled)
+    if allowed_cluster_ids is not None:
+        if not allowed_cluster_ids:
+            query = query.filter(DatabaseInstance.id == -1)
+        else:
+            query = query.filter(DatabaseInstance.cluster_id.in_(allowed_cluster_ids))
     if cluster_id not in (None, ""):
         try:
             query = query.filter_by(cluster_id=int(cluster_id))

@@ -521,32 +521,34 @@ const contextMenu = ref({
 });
 const draggingTabId = ref("");
 
-const username = computed(() => {
+function readStoredUser() {
   try {
-    const user = JSON.parse(localStorage.getItem("dbms_user") || "{}");
-    return String(user.display_name || "").trim() || user.username || "unknown";
+    return JSON.parse(localStorage.getItem("dbms_user") || "{}");
   } catch {
-    return "unknown";
+    return {};
   }
+}
+
+const currentUser = ref(readStoredUser());
+
+const username = computed(() => {
+  const user = currentUser.value || {};
+  return String(user.display_name || "").trim() || user.username || "unknown";
 });
 
 const currentPageTitle = computed(() => route.meta?.title || "总览");
 
 const currentRole = computed(() => {
-  try {
-    const user = JSON.parse(localStorage.getItem("dbms_user") || "{}");
-    const roleLabels = { admin: "管理员", api: "API 用户", user: "普通用户" };
-    return roleLabels[user.role] || user.role || "当前用户";
-  } catch {
-    return "当前用户";
-  }
+  const user = currentUser.value || {};
+  const roleLabels = { admin: "管理员", api: "API 用户", user: "普通用户" };
+  return roleLabels[user.role] || user.role || "当前用户";
 });
 
 const userInitial = computed(() => String(username.value || "U").slice(0, 1).toUpperCase());
 
 const avatarUrl = computed(() => {
   try {
-    const user = JSON.parse(localStorage.getItem("dbms_user") || "{}");
+    const user = currentUser.value || {};
     const value = String(user.avatar_url || "").trim();
     if (!value) {
       return "";
@@ -565,16 +567,12 @@ function onAvatarError() {
 }
 
 const userId = computed(() => {
-  try {
-    const user = JSON.parse(localStorage.getItem("dbms_user") || "{}");
-    return user.id || null;
-  } catch {
-    return null;
-  }
+  return currentUser.value?.id || null;
 });
 
 const menuKeys = ref([]);
 const permissionsLoaded = ref(false);
+const permissionsAvailable = ref(false);
 const quickJumpMenus = computed(() => QUICK_JUMP_MENUS.filter((item) => hasMenu(item.permission)));
 const routePermissionMap = {
   "/dashboard": "dashboard",
@@ -637,13 +635,11 @@ const routePermissionMap = {
 };
 
 function hasMenu(key) {
-  try {
-    const user = JSON.parse(localStorage.getItem("dbms_user") || "{}");
-    if (user.role === "admin") {
-      return true;
-    }
-  } catch {
-    // ignore
+  if (!permissionsLoaded.value || !permissionsAvailable.value) {
+    return false;
+  }
+  if (currentUser.value?.role === "admin") {
+    return true;
   }
   return menuKeys.value.includes(key);
 }
@@ -865,14 +861,21 @@ function closeAll() {
 async function loadMenuPermissions() {
   if (!userId.value) {
     menuKeys.value = [];
+    permissionsAvailable.value = false;
     permissionsLoaded.value = true;
     return;
   }
   try {
     const { data } = await listMyUserPermissions();
-    menuKeys.value = data.data?.menu_keys || [];
+    const payload = data.data || {};
+    const serverUser = payload.user || {};
+    currentUser.value = { ...(currentUser.value || {}), ...serverUser };
+    localStorage.setItem("dbms_user", JSON.stringify(currentUser.value));
+    menuKeys.value = payload.menu_keys || [];
+    permissionsAvailable.value = true;
   } catch {
     menuKeys.value = [];
+    permissionsAvailable.value = false;
   } finally {
     permissionsLoaded.value = true;
     enforceRoutePermission();
@@ -880,14 +883,10 @@ async function loadMenuPermissions() {
 }
 
 function enforceRoutePermission() {
-  try {
-    const user = JSON.parse(localStorage.getItem("dbms_user") || "{}");
-    if (user.role === "admin") {
-      return;
-    }
-  } catch {
-  }
   if (!permissionsLoaded.value) {
+    return;
+  }
+  if (permissionsAvailable.value && currentUser.value?.role === "admin") {
     return;
   }
   if (routeAllowed(route.path)) {

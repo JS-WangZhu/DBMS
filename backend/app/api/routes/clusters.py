@@ -330,7 +330,7 @@ def list_clusters():
     if environment:
         query = query.filter_by(environment=environment)
     user = get_current_user()
-    if user and user.role != "admin" and action in {"query", "change", "execute"}:
+    if user and user.role != "admin" and action in {"query", "change", "execute", "view_instance"}:
         allowed_cluster_ids = list_allowed_cluster_ids(action)
         if not allowed_cluster_ids:
             return ok_response(data=[])
@@ -487,7 +487,7 @@ def delete_cluster(cluster_id):
 
 
 @bp.post("/<int:cluster_id>/health/collect")
-@active_user_required
+@admin_required
 def collect_cluster_health(cluster_id):
     """触发单集群立即健康检测并写入快照"""
     cluster = DatabaseCluster.query.get_or_404(cluster_id)
@@ -592,6 +592,8 @@ def collect_cluster_health(cluster_id):
 def cluster_latest_health(cluster_id):
     """获取集群所有实例的最新健康状态（缓存优先，数据库兜底）"""
     cluster = DatabaseCluster.query.get_or_404(cluster_id)
+    if not require_cluster_permission(cluster.id, "view_instance"):
+        return error_response("cluster permission denied", code=403)
     instances = DatabaseInstance.query.filter_by(cluster_id=cluster.id, enabled=True).all()
 
     results = []

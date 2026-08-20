@@ -12,7 +12,7 @@
               <el-select v-model="selectedGroupIds" multiple filterable :disabled="isAdmin" style="width: 100%" placeholder="加入一个或多个数据源组"><el-option v-for="item in groups" :key="item.id" :value="item.id" :label="item.name" /></el-select>
             </el-form-item>
           </el-form>
-          <el-alert title="有效权限为“直接授权 + 数据源组 + 兼容的历史角色组授权”的并集；灰色标记展示最终有效权限。" type="info" :closable="false" show-icon />
+          <el-alert title="有效权限为“直接授权 + 数据源组 + 兼容的历史角色组授权”的并集；实例查看仅开放对应集群的实例与已采集状态，普通用户为只读访问，页面入口仍需单独授予对应实例管理菜单权限。" type="info" :closable="false" show-icon />
           <permission-table v-model="directPermissions" :clusters="clusters" :effective="effectiveMap" :disabled="isAdmin" />
           <div class="actions"><el-button type="primary" :disabled="!selectedUserId || isAdmin" :loading="saving" @click="saveUser">保存用户数据源权限</el-button></div>
         </el-tab-pane>
@@ -43,7 +43,7 @@ const activeTab = ref("users"), users = ref([]), clusters = ref([]), groups = re
 const groupDialog = ref(false), editingGroupId = ref(null), groupPermissions = ref([]), groupSaving = ref(false), groupForm = reactive({ name: "", description: "" });
 const selectedUser = computed(() => users.value.find((item) => item.id === selectedUserId.value));
 const isAdmin = computed(() => selectedUser.value?.role === "admin");
-const emptyPermissions = (source = []) => clusters.value.map((cluster) => { const found = source.find((item) => item.cluster_id === cluster.id); return { cluster_id: cluster.id, can_query: !!found?.can_query, can_change: !!found?.can_change, can_execute: !!found?.can_execute }; });
+const emptyPermissions = (source = []) => clusters.value.map((cluster) => { const found = source.find((item) => item.cluster_id === cluster.id); return { cluster_id: cluster.id, can_query: !!found?.can_query, can_change: !!found?.can_change, can_execute: !!found?.can_execute, can_view_instance: !!found?.can_view_instance }; });
 async function loadOverview() { const { data } = await getDataSourcePermissionOverview(); users.value = data.data?.users || []; clusters.value = data.data?.clusters || []; groups.value = data.data?.groups || []; if (!selectedUserId.value && users.value.length) selectedUserId.value = users.value[0].id; if (selectedUserId.value) await loadUserPermissions(); }
 async function loadUserPermissions() { if (!selectedUserId.value) return; const { data } = await getUserDataSourcePermissions(selectedUserId.value); const payload = data.data || {}; selectedGroupIds.value = payload.group_ids || []; directPermissions.value = emptyPermissions(payload.direct_permissions || []); effectiveMap.value = Object.fromEntries((payload.effective_permissions || []).map((item) => [item.cluster_id, item])); }
 async function saveUser() { saving.value = true; try { await updateUserDataSourcePermissions(selectedUserId.value, { group_ids: selectedGroupIds.value, direct_permissions: directPermissions.value }); ElMessage.success("数据源权限已保存"); await loadUserPermissions(); } finally { saving.value = false; } }

@@ -1,6 +1,6 @@
 from flask import Blueprint, request
 
-from app.api.routes.common import require_menu_permission
+from app.api.routes.common import admin_required, get_current_user, require_menu_permission
 from app.extensions import db
 from app.models.data_query_op import DataQueryOperationConfig
 from app.services.audit import log_audit
@@ -11,7 +11,7 @@ from app.utils.response import error_response, ok_response
 bp = Blueprint("data_query_ops", __name__, url_prefix="/data-query-ops")
 
 
-SUPPORTED_DB_TYPES = {"mysql", "mongodb", "redis"}
+SUPPORTED_DB_TYPES = {"mysql", "postgresql", "mongodb", "redis"}
 LIST_CACHE_KEY = "dbms:config:data_query_ops:list"
 
 
@@ -40,7 +40,7 @@ def list_ops():
         )
         .all()
     )
-    groups = {"mysql": [], "mongodb": [], "redis": []}
+    groups = {"mysql": [], "postgresql": [], "mongodb": [], "redis": []}
     for row in rows:
         data = row.to_dict()
         groups.setdefault(row.db_type, []).append(data)
@@ -50,7 +50,7 @@ def list_ops():
 
 
 @bp.post("")
-@require_menu_permission("data_query_op_config")
+@admin_required
 def create_op():
     payload = request.get_json(silent=True) or {}
     db_type = (payload.get("db_type") or "").strip().lower()
@@ -58,7 +58,7 @@ def create_op():
     label = (payload.get("label") or "").strip()
 
     if db_type not in SUPPORTED_DB_TYPES:
-        return error_response("db_type must be one of mysql/mongodb/redis", code=400)
+        return error_response("db_type must be one of mysql/postgresql/mongodb/redis", code=400)
     if not op_key:
         return error_response("op_key is required", code=400)
 
@@ -83,7 +83,7 @@ def create_op():
     db.session.commit()
     _invalidate_cache()
     log_audit(
-        user_id=None,
+        user_id=get_current_user().id,
         action="data_query_op.create",
         target_type="data_query_op",
         target_id=str(row.id),
@@ -93,7 +93,7 @@ def create_op():
 
 
 @bp.patch("/<int:op_id>")
-@require_menu_permission("data_query_op_config")
+@admin_required
 def update_op(op_id):
     payload = request.get_json(silent=True) or {}
     row = DataQueryOperationConfig.query.get_or_404(op_id)
@@ -128,7 +128,7 @@ def update_op(op_id):
     db.session.commit()
     _invalidate_cache()
     log_audit(
-        user_id=None,
+        user_id=get_current_user().id,
         action="data_query_op.update",
         target_type="data_query_op",
         target_id=str(row.id),
@@ -138,7 +138,7 @@ def update_op(op_id):
 
 
 @bp.delete("/<int:op_id>")
-@require_menu_permission("data_query_op_config")
+@admin_required
 def delete_op(op_id):
     row = DataQueryOperationConfig.query.get_or_404(op_id)
     if row.is_builtin:
@@ -147,7 +147,7 @@ def delete_op(op_id):
     db.session.commit()
     _invalidate_cache()
     log_audit(
-        user_id=None,
+        user_id=get_current_user().id,
         action="data_query_op.delete",
         target_type="data_query_op",
         target_id=str(op_id),

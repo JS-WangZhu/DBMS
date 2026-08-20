@@ -23,7 +23,7 @@
           <el-select v-model="selectedClusterId" clearable placeholder="选择集群" class="cluster-select" size="small" @change="onClusterSelectChange">
             <el-option v-for="c in filteredClusters" :key="c.id" :label="clusterOptionLabel(c)" :value="c.id" />
           </el-select>
-          <el-button v-if="selectedClusterId" type="warning" size="small" :loading="healthChecking" @click="runClusterHealthCheck">
+          <el-button v-if="isAdmin && selectedClusterId" type="warning" size="small" :loading="healthChecking" @click="runClusterHealthCheck">
             集群检活
           </el-button>
           <el-input v-model="keyword" clearable placeholder="实例名 / 集群 / IP / 域名" class="keyword-input" size="small" />
@@ -395,7 +395,7 @@
             <div class="op-actions">
               <button v-if="isAdmin" type="button" class="table-link table-link--primary" @click.stop="openEditDialog(scope.row)">编辑</button>
               <button v-if="isAdmin" type="button" class="table-link table-link--danger" @click.stop="removeInstance(scope.row)">删除</button>
-              <span v-if="!isAdmin" class="no-perm-hint">无权限</span>
+              <span v-if="!isAdmin" class="no-perm-hint">只读</span>
             </div>
           </template>
         </el-table-column>
@@ -2391,7 +2391,7 @@ async function openJumpServerAsset(row) {
 
 async function loadClusters() {
   try {
-    const { data } = await listClusters(dbType.value);
+    const { data } = await listClusters(dbType.value, { action: "view_instance" });
     clusters.value = data.data || [];
   } catch (error) {
     ElMessage.error(error.response?.data?.message || "加载集群失败");

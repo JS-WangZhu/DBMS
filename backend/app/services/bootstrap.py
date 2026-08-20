@@ -82,6 +82,10 @@ def ensure_backup_extra_columns():
             statements.append(
                 f"ALTER TABLE {permission_table} ADD COLUMN can_execute BOOLEAN NOT NULL DEFAULT FALSE"
             )
+        if table_columns[permission_table] and "can_view_instance" not in table_columns[permission_table]:
+            statements.append(
+                f"ALTER TABLE {permission_table} ADD COLUMN can_view_instance BOOLEAN NOT NULL DEFAULT FALSE"
+            )
     if table_columns["db_clusters"] and "namespace" not in table_columns["db_clusters"]:
         statements.append("ALTER TABLE db_clusters ADD COLUMN namespace VARCHAR(64) NOT NULL DEFAULT 'default'")
     if table_columns["db_clusters"] and "business_line" not in table_columns["db_clusters"]:
@@ -189,6 +193,12 @@ def ensure_backup_extra_columns():
 DATA_QUERY_OPERATIONS_SEED = [
     # MySQL
     {"db_type": "mysql", "op_key": "SELECT", "label": "查询数据", "sort_order": 1},
+    # PostgreSQL
+    {"db_type": "postgresql", "op_key": "SELECT", "label": "查询数据", "sort_order": 1},
+    {"db_type": "postgresql", "op_key": "WITH", "label": "公共表表达式查询", "sort_order": 2},
+    {"db_type": "postgresql", "op_key": "EXPLAIN", "label": "查看执行计划", "sort_order": 3},
+    {"db_type": "postgresql", "op_key": "SHOW", "label": "查看运行参数", "sort_order": 4},
+    {"db_type": "postgresql", "op_key": "VALUES", "label": "构造常量结果集", "sort_order": 5},
     # MongoDB
     {"db_type": "mongodb", "op_key": "find", "label": "文档查询", "sort_order": 1},
     {"db_type": "mongodb", "op_key": "find_one", "label": "查询单条文档", "sort_order": 2},
@@ -246,8 +256,13 @@ def seed_data_query_operations():
         )
         db.session.add(row)
         added += 1
-    if added:
-        try:
+    try:
+        if added:
             db.session.commit()
-        except Exception:
-            db.session.rollback()
+        from app.services import data_access
+        from app.services.redis_cache import delete as redis_delete
+
+        data_access.invalidate_query_ops_cache()
+        redis_delete("dbms:config:data_query_ops:list")
+    except Exception:
+        db.session.rollback()

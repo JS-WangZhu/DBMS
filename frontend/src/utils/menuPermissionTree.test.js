@@ -28,6 +28,22 @@ test("permission tree applies disabled state to groups and leaves", () => {
   assert.equal(tree.nodes[0].children[0].disabled, true);
 });
 
+test("permission tree disables inherited leaves without disabling direct permissions", () => {
+  const tree = buildMenuPermissionTree(
+    [
+      { key: "dashboard", label: "总览" },
+      { key: "mysql_instances", label: "MySQL 实例管理" },
+    ],
+    { disabledKeys: ["mysql_instances"] },
+  );
+  const dashboard = tree.nodes.find((node) => node.key === "dashboard_group").children[0];
+  const mysql = tree.nodes.find((node) => node.key === "service_manage").children[0].children[0];
+
+  assert.equal(dashboard.disabled, false);
+  assert.equal(mysql.disabled, true);
+  assert.equal(mysql.inherited, true);
+});
+
 test("data copy permissions are grouped beside data release", () => {
   const catalog = [
     { key: "sql_release_apply", label: "SQL上线" },

@@ -42,7 +42,7 @@
         <el-table-column prop="title" label="标题" min-width="180" />
         <el-table-column label="类型" width="110"><template #default="scope">{{ dbTypeLabel(scope.row.db_type) }}</template></el-table-column>
         <el-table-column prop="applicant_name" label="申请人" width="120" />
-        <el-table-column prop="cluster_name" label="数据源" min-width="150" />
+        <el-table-column label="数据源" min-width="190"><template #default="scope"><div class="source-with-environment"><span>{{ scope.row.cluster_name || '-' }}</span><el-tag size="small" type="info">{{ scope.row.environment || '未标环境' }}</el-tag></div></template></el-table-column>
         <el-table-column prop="database" label="数据库" width="140" />
         <el-table-column label="AI 初审" width="110"><template #default="scope"><el-tag :type="reviewType(scope.row)">{{ reviewLabel(scope.row) }}</el-tag></template></el-table-column>
         <el-table-column label="状态" width="100"><template #default="scope"><el-tag :type="statusType(scope.row.status)">{{ statusLabel(scope.row.status) }}</el-tag></template></el-table-column>
@@ -61,7 +61,8 @@
       <template v-if="current"><div v-loading="detailLoading">
         <el-descriptions :column="2" border>
           <el-descriptions-item label="标题">{{ current.title }}</el-descriptions-item><el-descriptions-item label="申请人">{{ current.applicant_name }}</el-descriptions-item>
-          <el-descriptions-item label="数据源">{{ current.cluster_name }}</el-descriptions-item><el-descriptions-item label="数据库">{{ current.database }}</el-descriptions-item>
+          <el-descriptions-item label="数据源">{{ current.cluster_name }}</el-descriptions-item><el-descriptions-item label="环境">{{ current.environment || '未标环境' }}</el-descriptions-item>
+          <el-descriptions-item label="数据库">{{ current.database }}</el-descriptions-item>
           <el-descriptions-item label="数据库类型">{{ dbTypeLabel(current.db_type) }}</el-descriptions-item>
           <el-descriptions-item label="执行通道">{{ current.execution_mode === 'agent' ? `Agent：${current.execution_agent_name || '-'}` : 'DBMS Server' }}</el-descriptions-item>
           <el-descriptions-item v-if="isAdmin" label="回滚文件">{{ current.rollback_backup_path || (current.db_type === 'mongodb' ? 'MongoDB 暂不生成备份' : '未生成（无数据变更或尚未执行）') }}</el-descriptions-item>
@@ -126,7 +127,7 @@ const canExecute = (row) => ["pending", "review_rejected"].includes(row.status)
   || row.can_retry_execute;
 const executionLabel = (value) => ({ pending: "待执行", backing_up: "生成回滚中", backup_ready: "回滚已生成", backup_skipped: "不备份", executing: "执行中", success: "执行成功", failed: "执行失败", backup_failed: "回滚生成失败", rollback_executing: "回滚中", rolled_back: "已回滚", rollback_failed: "回滚失败" }[value] || value || "待执行");
 const executionType = (value) => ({ pending: "info", backing_up: "primary", backup_ready: "warning", backup_skipped: "info", executing: "primary", success: "success", failed: "danger", backup_failed: "danger", rollback_executing: "primary", rolled_back: "success", rollback_failed: "danger" }[value] || "info");
-const backupLabel = (row) => row.has_rollback ? `已备份 ${row.backup_rows || 0} 行` : row.status === "backup_skipped" ? "暂不备份" : ["backing_up"].includes(row.status) ? "生成中" : "未生成";
+const backupLabel = (row) => row.has_rollback ? `已备份 ${row.backup_rows || 0} 行` : row.backup_status === "skipped" || row.status === "backup_skipped" ? "非 DML 不备份" : ["backing_up"].includes(row.status) ? "生成中" : "未生成";
 const backupType = (row) => row.has_rollback ? "success" : row.status === "backup_failed" ? "danger" : "info";
 const canSelectRollback = (row) => row.has_rollback && ["success", "rollback_failed"].includes(row.status);
 let reviewPollTimer = null, detailPollTimer = null;
@@ -167,6 +168,9 @@ onBeforeUnmount(() => { clearTimeout(reviewPollTimer); stopDetailPolling(); });
 
 <style scoped>
 .header { display: flex; justify-content: space-between; align-items: center; }
+.source-with-environment { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.source-with-environment > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.source-with-environment .el-tag { flex: none; }
 .filter-form { margin-bottom: 2px; }
 .el-pagination { margin-top: 16px; justify-content: flex-end; }
 pre { padding: 12px; overflow: auto; background: #0f172a; color: #e2e8f0; border-radius: 6px; white-space: pre-wrap; }

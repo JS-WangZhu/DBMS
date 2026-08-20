@@ -388,7 +388,7 @@ async function loadInstancesForRoutes() {
     return;
   }
   try {
-    const { data } = await listInstances(dbType.value);
+    const { data } = await listInstances(dbType.value, { action: "view_instance" });
     instances.value = data.data || [];
   } catch {
     instances.value = [];
@@ -402,6 +402,7 @@ async function loadClusters() {
     const { data } = await listClusters(dbType.value, {
       business_line: filters.business_line,
       environment: filters.environment,
+      action: "view_instance",
     });
     rows.value = data.data || [];
     if ((pager.page - 1) * pager.page_size >= displayRows.value.length) {

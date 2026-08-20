@@ -1,6 +1,6 @@
 from flask import Blueprint, request
 
-from app.api.routes.common import active_user_required
+from app.api.routes.common import admin_required, list_allowed_cluster_ids, require_cluster_permission, require_menu_permission
 from app.models.db_asset import DatabaseInstance
 from app.services.audit import log_audit
 from app.services.instance_service import create_instance, list_instances_paginated
@@ -12,7 +12,7 @@ bp = Blueprint("postgresql", __name__, url_prefix="/postgresql")
 
 
 @bp.get("/instances")
-@active_user_required
+@require_menu_permission("postgresql_instances")
 def postgresql_list_instances():
     items, total, page, page_size = list_instances_paginated(
         db_type="postgresql",
@@ -23,12 +23,13 @@ def postgresql_list_instances():
         namespace=request.args.get("namespace"),
         business_line=request.args.get("business_line"),
         environment=request.args.get("environment"),
+        allowed_cluster_ids=list_allowed_cluster_ids("view_instance"),
     )
     return ok_response(data={"items": [item.to_dict() for item in items], "total": total, "page": page, "page_size": page_size})
 
 
 @bp.post("/instances")
-@active_user_required
+@admin_required
 def postgresql_create_instance():
     payload = request.get_json(silent=True) or {}
     instance, err = create_instance(payload, db_type="postgresql")
@@ -39,10 +40,12 @@ def postgresql_create_instance():
 
 
 @bp.get("/instances/<int:instance_id>/status")
-@active_user_required
+@require_menu_permission("postgresql_instances")
 def postgresql_status(instance_id):
     instance = DatabaseInstance.query.filter_by(id=instance_id, db_type="postgresql").first()
     if not instance:
         return error_response("postgresql instance not found", code=404)
+    if not require_cluster_permission(instance.cluster_id, "view_instance"):
+        return error_response("cluster permission denied", code=403)
     snapshot = latest_snapshot_for_instance(instance_id=instance.id, db_type=instance.db_type, metric_type="status")
     return ok_response(data=snapshot.payload_json if snapshot else {"instance_id": instance.id})

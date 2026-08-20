@@ -1,7 +1,7 @@
 ﻿import client from "../client";
 
-export function listInstances(dbType) {
-  return client.get("/instances", { params: { db_type: dbType } });
+export function listInstances(dbType, filters = {}) {
+  return client.get("/instances", { params: { db_type: dbType, ...filters } });
 }
 
 export function createInstance(payload) {

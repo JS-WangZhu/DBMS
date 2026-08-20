@@ -86,14 +86,19 @@ def review_release(instance, database, statements, db_type="mysql", progress_cal
 
     reviews = []
     for index, sql in enumerate(statements, start=1):
+        sql_context = [
+            {"line": line, "sql": statement, "review_target": line == index}
+            for line, statement in enumerate(statements[:index], start=1)
+        ]
         prompt = f"""
-你是数据库上线审核员。请结合元数据审核下面第 {index} 条 {engine_name} 变更语句，独立给出是否通过。
+你是数据库上线审核员。请结合元数据和本工单此前的 SQL，审核下面第 {index} 条 {engine_name} 变更语句。
+“SQL 上下文”包含第 1 条到当前第 {index} 条：前面的语句仅用于理解表结构变化、数据依赖和执行顺序；只审批 review_target=true 的当前语句，不要重复审批前面的语句。
 禁止无过滤条件的批量修改或删除、明显语法错误、危险全库或全表操作；有锁表、全表扫描、不可回滚风险时应不通过。
 只返回 JSON，不要 Markdown：
 {{"summary":"本条结论","items":[{{"line":{index},"passed":true,"risk_level":"low|medium|high","reason":"原因","suggestion":"修改建议"}}]}}
 items 必须只包含当前这一条，line 必须为 {index}。
 元数据：{json.dumps(compact_metadata, ensure_ascii=False, default=str)}
-语句：{json.dumps([{"line": index, "sql": sql}], ensure_ascii=False)}
+SQL 上下文：{json.dumps(sql_context, ensure_ascii=False)}
 """
         response = requests.post(
             api_url,
@@ -410,6 +415,28 @@ def _analyze_dml(statement, database):
     return parsed
 
 
+def _is_dml_statement(statement):
+    cleaned = str(statement or "").strip()
+    while True:
+        updated = re.sub(
+            r"^(?:\s*(?:--[^\n]*(?:\n|$)|#[^\n]*(?:\n|$)|/\*.*?\*/))",
+            "",
+            cleaned,
+            count=1,
+            flags=re.S,
+        )
+        if updated == cleaned:
+            break
+        cleaned = updated.strip()
+    keyword_match = re.match(r"^\s*([A-Za-z]+)", cleaned)
+    keyword = keyword_match.group(1).lower() if keyword_match else ""
+    if keyword in {"insert", "update", "delete", "replace", "merge", "load"}:
+        return True
+    return keyword == "with" and bool(
+        re.search(r"\b(insert|update|delete|replace|merge)\b", cleaned, flags=re.I)
+    )
+
+
 def _rollback_for_dml(connection, cursor, parsed, max_rows):
     quoted_table = parsed["quoted_table"]
     primary_keys = _primary_key_columns(cursor, quoted_table)
@@ -554,32 +581,32 @@ def execute_mysql_with_partial_rollback(instance, database, statements, release_
     try:
         with connection.cursor() as cursor:
             for line, statement in enumerate(statements, start=1):
-                phase = "backing_up"
-                _update_release_statement_status(release_id, line, statement, phase)
+                requires_backup = _is_dml_statement(statement)
+                phase = "backing_up" if requires_backup else "backup_skipped"
+                _update_release_statement_status(
+                    release_id, line, statement, phase,
+                    backup_status="backing_up" if requires_backup else "skipped",
+                    backup_rows=0,
+                )
                 try:
-                    parsed = _analyze_dml(statement, database)
-                    if not parsed:
-                        raise ValueError("暂不支持该语句生成可靠回滚 SQL，已阻止执行")
-                    if parsed["kind"] == "add_column":
-                        rollback_sql = [
-                            f"ALTER TABLE {parsed['quoted_table']} DROP COLUMN {_quote_identifier(parsed['column'])};"
-                        ]
-                        backup_rows = 0
-                        backed_up_rows = []
-                    else:
+                    backup_rows = 0
+                    if requires_backup:
+                        parsed = _analyze_dml(statement, database)
+                        if not parsed:
+                            raise ValueError("暂不支持该 DML 语句生成可靠回滚 SQL，已阻止执行")
                         rollback_sql, backup_rows, backed_up_rows = _rollback_for_dml(
                             connection, cursor, parsed, max_rows
                         )
-                    _persist_release_rollback_backup(
-                        release_id, line, "mysql", database, parsed, backed_up_rows, rollback_sql
-                    )
-                    rollback_groups.append([f"-- rollback for statement #{line}", *rollback_sql])
-                    _write_rollback_file(output_path, release_id, database, rollback_groups)
-                    phase = "backup_ready"
-                    _update_release_statement_status(
-                        release_id, line, statement, phase,
-                        backup_rows=backup_rows,
-                    )
+                        _persist_release_rollback_backup(
+                            release_id, line, "mysql", database, parsed, backed_up_rows, rollback_sql
+                        )
+                        rollback_groups.append([f"-- rollback for statement #{line}", *rollback_sql])
+                        _write_rollback_file(output_path, release_id, database, rollback_groups)
+                        phase = "backup_ready"
+                        _update_release_statement_status(
+                            release_id, line, statement, phase,
+                            backup_status="ready", backup_rows=backup_rows,
+                        )
                     phase = "executing"
                     _update_release_statement_status(release_id, line, statement, phase)
                     cursor.execute(statement)
@@ -592,6 +619,7 @@ def execute_mysql_with_partial_rollback(instance, database, statements, release_
                         "status": "success",
                         "affected_rows": affected,
                         "backup_rows": backup_rows,
+                        "backup_status": "ready" if requires_backup else "skipped",
                     }
                     statement_results.append(result_item)
                     _update_release_statement_status(release_id, line, statement, "success", **{
@@ -793,20 +821,21 @@ def execute_postgresql_with_partial_rollback(instance, database, statements, rel
     try:
         with connection.cursor(cursor_factory=RealDictCursor) as cursor:
             for line, statement in enumerate(statements, start=1):
-                phase = "backing_up"
-                _update_release_statement_status(release_id, line, statement, phase)
+                requires_backup = _is_dml_statement(statement)
+                phase = "backing_up" if requires_backup else "backup_skipped"
+                _update_release_statement_status(
+                    release_id, line, statement, phase,
+                    backup_status="backing_up" if requires_backup else "skipped",
+                    backup_rows=0,
+                )
                 try:
-                    parsed = _analyze_postgresql_dml(statement)
-                    if not parsed:
-                        raise ValueError("暂不支持该语句生成可靠 PostgreSQL 回滚 SQL，已阻止执行")
                     backup_rows = 0
-                    if parsed["kind"] == "add_column":
-                        rollback = [
-                            f"ALTER TABLE {parsed['quoted_table']} DROP COLUMN {_pg_quote(parsed['column'])};"
-                        ]
-                    else:
+                    if requires_backup:
+                        parsed = _analyze_postgresql_dml(statement)
+                        if not parsed:
+                            raise ValueError("暂不支持该 DML 语句生成可靠 PostgreSQL 回滚 SQL，已阻止执行")
                         keys = _pg_primary_keys(cursor, parsed["schema"], parsed["table"])
-                    if parsed["kind"] in {"update", "delete"}:
+                    if requires_backup and parsed["kind"] in {"update", "delete"}:
                         if parsed["kind"] == "update":
                             assigned = {_pg_unquote(item.split("=", 1)[0].split(".")[-1]).lower() for item in _split_top_level(parsed["set"]) if "=" in item}
                             if assigned.intersection(item.lower() for item in keys):
@@ -841,7 +870,7 @@ def execute_postgresql_with_partial_rollback(instance, database, statements, rel
                                 rollback = [f"DELETE FROM {parsed['quoted_table']} WHERE {parsed['where']};"]
                             rollback.extend(_pg_restore_rows(cursor, parsed["quoted_table"], [], rows))
                         backup_rows = len(rows)
-                    elif parsed["kind"] == "insert":
+                    elif requires_backup and parsed["kind"] == "insert":
                         columns = parsed["columns"] or _pg_table_columns(
                             cursor, parsed["schema"], parsed["table"]
                         )
@@ -868,17 +897,17 @@ def execute_postgresql_with_partial_rollback(instance, database, statements, rel
                         rollback.extend(_pg_restore_rows(cursor, parsed["quoted_table"], keys, previous))
                         backup_rows = len(parsed["values"])
                         rows = previous
-                    if parsed["kind"] == "add_column":
-                        rows = []
-                    _persist_release_rollback_backup(
-                        release_id, line, "postgresql", database, parsed, rows, rollback
-                    )
-                    groups.append([f"-- rollback for statement #{line}", *rollback])
-                    _write_postgresql_rollback(output_path, release_id, database, groups)
-                    phase = "backup_ready"
-                    _update_release_statement_status(
-                        release_id, line, statement, phase, backup_rows=backup_rows
-                    )
+                    if requires_backup:
+                        _persist_release_rollback_backup(
+                            release_id, line, "postgresql", database, parsed, rows, rollback
+                        )
+                        groups.append([f"-- rollback for statement #{line}", *rollback])
+                        _write_postgresql_rollback(output_path, release_id, database, groups)
+                        phase = "backup_ready"
+                        _update_release_statement_status(
+                            release_id, line, statement, phase,
+                            backup_status="ready", backup_rows=backup_rows,
+                        )
                     phase = "executing"
                     _update_release_statement_status(release_id, line, statement, phase)
                     cursor.execute(statement)
@@ -891,6 +920,7 @@ def execute_postgresql_with_partial_rollback(instance, database, statements, rel
                         "status": "success",
                         "affected_rows": affected,
                         "backup_rows": backup_rows,
+                        "backup_status": "ready" if requires_backup else "skipped",
                     }
                     results.append(result_item)
                     _update_release_statement_status(release_id, line, statement, "success", **{

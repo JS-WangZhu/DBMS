@@ -19,6 +19,7 @@ class UserClusterPermission(db.Model, TimestampMixin):
     can_query = db.Column(db.Boolean, nullable=False, default=False)
     can_change = db.Column(db.Boolean, nullable=False, default=False)
     can_execute = db.Column(db.Boolean, nullable=False, default=False)
+    can_view_instance = db.Column(db.Boolean, nullable=False, default=False)
 
 
 class ApiKey(db.Model, TimestampMixin):
@@ -82,6 +83,7 @@ class RoleGroupClusterPermission(db.Model, TimestampMixin):
     can_query = db.Column(db.Boolean, nullable=False, default=False)
     can_change = db.Column(db.Boolean, nullable=False, default=False)
     can_execute = db.Column(db.Boolean, nullable=False, default=False)
+    can_view_instance = db.Column(db.Boolean, nullable=False, default=False)
 
 
 class UserRoleGroup(db.Model, TimestampMixin):
@@ -123,6 +125,7 @@ class DataSourceGroupClusterPermission(db.Model, TimestampMixin):
     can_query = db.Column(db.Boolean, nullable=False, default=False)
     can_change = db.Column(db.Boolean, nullable=False, default=False)
     can_execute = db.Column(db.Boolean, nullable=False, default=False)
+    can_view_instance = db.Column(db.Boolean, nullable=False, default=False)
 
 
 class UserDataSourceGroup(db.Model, TimestampMixin):

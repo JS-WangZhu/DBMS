@@ -82,7 +82,8 @@
         </el-table-column>
         <el-table-column label="操作" width="90" fixed="right">
           <template #default="scope">
-            <el-button link type="danger" :loading="killingId === scope.row.id" @click="confirmKill(scope.row)">Kill</el-button>
+            <el-button v-if="canKill" link type="danger" :loading="killingId === scope.row.id" @click="confirmKill(scope.row)">Kill</el-button>
+            <span v-else class="readonly-text">只读</span>
           </template>
         </el-table-column>
       </el-table>
@@ -120,6 +121,7 @@ const stopping = ref(false);
 const fetching = ref(false);
 const killingId = ref(null);
 const tableRevision = ref(0);
+const canKill = ref(false);
 let pollTimer = null;
 let countdownTimer = null;
 let refreshQueued = false;
@@ -209,6 +211,7 @@ function clearProbeState() {
   hiddenKilledIds.value = new Set();
   refreshQueued = false;
   collectedAt.value = null;
+  canKill.value = false;
 }
 
 function updateCountdown() {
@@ -228,6 +231,7 @@ async function startProbe() {
     const data = response.data?.data || {};
     probeToken.value = data.token || "";
     expiresAt.value = data.expires_at || null;
+    canKill.value = Boolean(data.can_kill);
     updateCountdown();
     countdownTimer = window.setInterval(updateCountdown, 1000);
     pollTimer = window.setInterval(fetchSessions, 3000);
@@ -329,7 +333,10 @@ function closeOnPageHide() {
 onMounted(async () => {
   window.addEventListener("pagehide", closeOnPageHide);
   try {
-    const [clusterResponse, instanceResponse] = await Promise.all([listClusters("mysql"), listInstances("mysql")]);
+    const [clusterResponse, instanceResponse] = await Promise.all([
+      listClusters("mysql", { action: "query" }),
+      listInstances("mysql", { action: "query" }),
+    ]);
     clusters.value = clusterResponse.data?.data || [];
     instances.value = instanceResponse.data?.data || [];
     syncInstanceSelection();
@@ -358,6 +365,7 @@ onBeforeUnmount(() => {
 .table-header { font-weight: 600; }
 .summary { color: #909399; font-size: 13px; font-weight: 400; }
 .sql-text { color: #303133; font-family: Consolas, "SFMono-Regular", monospace; white-space: nowrap; }
+.readonly-text { color: #909399; font-size: 12px; }
 @media (max-width: 900px) {
   .header-row, .table-header { align-items: flex-start; flex-direction: column; }
   .filters > .el-select, .filters .instance-select { width: 100%; }

@@ -5,6 +5,7 @@ from app.api.routes.common import (
     admin_required,
     get_current_user,
     get_effective_menu_keys,
+    list_allowed_cluster_ids,
     require_cluster_permission,
     require_menu_permission,
 )
@@ -41,9 +42,19 @@ INSTANCE_MENU_BY_DB_TYPE = {
 def list_instances():
     db_type = request.args.get("db_type")
     enabled = request.args.get("enabled")
+    action = (request.args.get("action") or "").strip().lower()
 
     parsed_enabled = None if enabled is None else (enabled.lower() == "true")
     items = list_instances_by_type(db_type=db_type, enabled=parsed_enabled)
+    user = get_current_user()
+    scoped_actions = {"query", "change", "execute", "view_instance"}
+    if user.role != "admin" and action in scoped_actions:
+        allowed_cluster_ids = set(list_allowed_cluster_ids(action) or [])
+        items = [
+            item
+            for item in items
+            if (item.get("cluster_id") if isinstance(item, dict) else item.cluster_id) in allowed_cluster_ids
+        ]
     return ok_response(data=[item if isinstance(item, dict) else item.to_dict() for item in items])
 
 
@@ -130,7 +141,7 @@ def delete_instance(instance_id):
 
 
 @bp.post("/<int:instance_id>/resolve")
-@active_user_required
+@admin_required
 def resolve_instance(instance_id):
     instance = DatabaseInstance.query.get_or_404(instance_id)
     changed, old_ip, new_ip = resolve_and_update_instance(instance)

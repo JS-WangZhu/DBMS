@@ -1,6 +1,6 @@
 from flask import Blueprint, request
 
-from app.api.routes.common import active_user_required, get_current_user, require_menu_permission
+from app.api.routes.common import active_user_required, admin_required, get_current_user, list_allowed_cluster_ids, require_cluster_permission, require_menu_permission
 from app.models.db_asset import DatabaseInstance
 from app.services.monitor_snapshot_service import latest_snapshot_for_instance
 from app.services.audit import log_audit
@@ -9,6 +9,7 @@ from app.services.mongodb_session_probe import (
     SessionProbeError,
     close_probe_session,
     fetch_operations,
+    get_probe_instance_id,
     kill_operation,
     start_probe_session,
 )
@@ -29,8 +30,22 @@ def _session_probe_error(exc):
     return error_response(message, code=400)
 
 
+def _require_probe_cluster_permission(token, action):
+    user = get_current_user()
+    try:
+        instance_id = get_probe_instance_id(token=token, user_id=user.id)
+    except SessionProbeError as exc:
+        return None, _session_probe_error(exc)
+    instance = DatabaseInstance.query.filter_by(id=instance_id, db_type="mongodb").first()
+    if not instance:
+        return None, error_response("mongodb instance not found", code=404)
+    if not require_cluster_permission(instance.cluster_id, action):
+        return None, error_response("cluster permission denied", code=403)
+    return instance, None
+
+
 @bp.get("/instances")
-@active_user_required
+@require_menu_permission("mongodb_instances")
 def mongodb_list_instances():
     page = request.args.get("page", 1)
     page_size = request.args.get('page_size', 10)
@@ -48,6 +63,7 @@ def mongodb_list_instances():
         namespace=namespace,
         business_line=business_line,
         environment=environment,
+        allowed_cluster_ids=list_allowed_cluster_ids("view_instance"),
     )
     return ok_response(
         data={
@@ -60,7 +76,7 @@ def mongodb_list_instances():
 
 
 @bp.post("/instances")
-@active_user_required
+@admin_required
 def mongodb_create_instance():
     payload = request.get_json(silent=True) or {}
     instance, err = create_instance(payload, db_type="mongodb")
@@ -72,11 +88,13 @@ def mongodb_create_instance():
 
 
 @bp.get("/instances/<int:instance_id>/replica-status")
-@active_user_required
+@require_menu_permission("mongodb_instances")
 def mongodb_replica_status(instance_id):
     instance = DatabaseInstance.query.filter_by(id=instance_id, db_type="mongodb").first()
     if not instance:
         return error_response("mongodb instance not found", code=404)
+    if not require_cluster_permission(instance.cluster_id, "view_instance"):
+        return error_response("cluster permission denied", code=403)
 
     snapshot = latest_snapshot_for_instance(instance_id=instance.id, db_type=instance.db_type, metric_type="status")
     payload = snapshot.payload_json if snapshot else {}
@@ -99,6 +117,8 @@ def start_mongodb_session_probe():
     instance = DatabaseInstance.query.filter_by(id=instance_id, db_type="mongodb", enabled=True).first()
     if not instance:
         return error_response("mongodb instance not found", code=404)
+    if not require_cluster_permission(instance.cluster_id, "query"):
+        return error_response("cluster permission denied", code=403)
     user = get_current_user()
     password = decrypt_secret(instance.password_encrypted) if instance.password_encrypted else ""
     try:
@@ -106,12 +126,16 @@ def start_mongodb_session_probe():
     except SessionProbeError as exc:
         return _session_probe_error(exc)
     log_audit(user_id=user.id, action="mongodb.session_probe.start", target_type="instance", target_id=str(instance.id), detail={"expires_at": data.get("expires_at")})
+    data["can_kill"] = require_cluster_permission(instance.cluster_id, "change")
     return ok_response(data=data, code=201)
 
 
 @bp.get("/session-probes/<string:token>/operations")
 @require_menu_permission("mongodb_session_probe")
 def get_mongodb_operations(token):
+    _, permission_error = _require_probe_cluster_permission(token, "query")
+    if permission_error:
+        return permission_error
     try:
         data = fetch_operations(token=token, user_id=get_current_user().id)
     except SessionProbeError as exc:
@@ -122,6 +146,9 @@ def get_mongodb_operations(token):
 @bp.post("/session-probes/<string:token>/kill")
 @require_menu_permission("mongodb_session_probe")
 def kill_mongodb_operation(token):
+    _, permission_error = _require_probe_cluster_permission(token, "change")
+    if permission_error:
+        return permission_error
     payload = request.get_json(silent=True) or {}
     operation_id = payload.get("operation_id")
     if operation_id is None or not str(operation_id).strip():

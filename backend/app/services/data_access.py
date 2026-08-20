@@ -37,12 +37,13 @@ ACTIVE_EXECUTIONS_LOCK = threading.Lock()
 # ---------------- 数据查询允许操作配置缓存 ----------------
 # TTL 内复用数据库读取的白名单，避免每次查询都走 DB；配置更新后通过
 # invalidate_query_ops_cache() 立即失效。数据表未导入或查询异常时，fallback 到
-# 硬编码的 MySQL_FALLBACK / MONGO_READONLY_COMMANDS / REDIS_FALLBACK 保证服务可用。
+# 硬编码 fallback 保证配置表不可用时服务仍可执行默认只读操作。
 _QUERY_OPS_CACHE = {"data": None, "ts": 0.0}
 _QUERY_OPS_CACHE_TTL = 60.0
 _QUERY_OPS_LOCK = threading.Lock()
 
 _MYSQL_QUERY_FALLBACK = {"select"}
+_POSTGRESQL_QUERY_FALLBACK = {"select", "with", "explain", "show", "values"}
 _REDIS_QUERY_FALLBACK = {
     "get", "mget", "hget", "hgetall", "hexists",
     "exists", "scard", "smembers", "lrange", "zrange", "zrangebyscore",
@@ -55,6 +56,7 @@ def _load_query_ops_from_db():
     if isinstance(cached, dict):
         return {
             "mysql": set(cached.get("mysql") or []),
+            "postgresql": set(cached.get("postgresql") or []),
             "mongodb": set(cached.get("mongodb") or []),
             "redis": set(cached.get("redis") or []),
         }
@@ -64,7 +66,7 @@ def _load_query_ops_from_db():
         rows = DataQueryOperationConfig.query.filter_by(enabled=True).all()
     except Exception:
         return None
-    groups = {"mysql": set(), "mongodb": set(), "redis": set()}
+    groups = {"mysql": set(), "postgresql": set(), "mongodb": set(), "redis": set()}
     for row in rows:
         if not row.op_key:
             continue
@@ -85,10 +87,12 @@ def _get_query_ops(db_type: str):
                 _QUERY_OPS_CACHE["data"] = refreshed
                 _QUERY_OPS_CACHE["ts"] = now
                 data = refreshed
-    if not data or not data.get(db_type):
-        # fallback
+    if data is None:
+        # 仅配置表/缓存不可用时 fallback；已成功加载但某组为空表示管理员已全部禁用。
         if db_type == "mysql":
             return set(_MYSQL_QUERY_FALLBACK)
+        if db_type == "postgresql":
+            return set(_POSTGRESQL_QUERY_FALLBACK)
         if db_type == "mongodb":
             return set(MONGO_READONLY_COMMANDS)
         if db_type == "redis":
@@ -292,12 +296,14 @@ def validate_postgresql_query(sql: str):
     statements = _split_sql_statements(sql or "")
     if not statements:
         return False, "sql is required"
+    allowed = _get_query_ops("postgresql")
     for statement in statements:
         cleaned = re.sub(r"^(?:\s*(?:--[^\n]*(?:\n|$)|/\*.*?\*/))", "", statement, flags=re.S).strip()
         keyword_match = re.match(r"^([A-Za-z]+)", cleaned)
         keyword = keyword_match.group(1).lower() if keyword_match else ""
-        if keyword not in {"select", "with", "explain", "show", "values"}:
-            return False, "PostgreSQL 查询仅允许 SELECT/WITH/EXPLAIN/SHOW/VALUES"
+        if keyword not in allowed:
+            allowed_display = ", ".join(sorted(item.upper() for item in allowed)) or "无"
+            return False, f"PostgreSQL 查询仅允许已启用操作: {allowed_display}"
         if keyword == "with" and re.search(r"\b(insert|update|delete|merge)\b", cleaned, flags=re.I):
             return False, "PostgreSQL 查询不允许 WITH DML"
     return True, None
@@ -653,13 +659,15 @@ def execute_postgresql(
     timeout = max(1, int(timeout_seconds or 600))
     kwargs["options"] = f"-c statement_timeout={timeout * 1000}"
     connection = psycopg2.connect(**kwargs)
-    connection.autocommit = not for_change
+    connection.autocommit = False
     if execution_id:
         set_execution_cancel_callback(execution_id, connection.cancel)
     statements = _split_sql_statements(sql or "")
     final_rows, final_columns, final_column_types, affected_rows = [], [], [], 0
     try:
         with connection.cursor(cursor_factory=RealDictCursor) as cursor:
+            if not for_change:
+                cursor.execute("SET TRANSACTION READ ONLY")
             for statement in statements:
                 cursor.execute(statement)
                 if cursor.description:
@@ -679,8 +687,7 @@ def execute_postgresql(
         if for_change:
             connection.commit()
     except Exception:
-        if for_change:
-            connection.rollback()
+        connection.rollback()
         raise
     finally:
         connection.close()

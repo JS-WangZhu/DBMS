@@ -83,6 +83,11 @@ def _get_probe_session(token: str, user_id: int) -> ProbeSession:
     return session
 
 
+def get_probe_instance_id(token: str, user_id: int) -> int:
+    """Resolve a user-owned probe to its instance without exposing probe data."""
+    return int(_get_probe_session(token, user_id).instance_id)
+
+
 def start_probe_session(instance, password: str, user_id: int) -> dict:
     if str(getattr(instance, "access_mode", "server") or "server").lower() != "server":
         raise SessionProbeError("会话探测需要平台服务端可直接访问 MySQL，当前实例使用 Agent 接入模式")

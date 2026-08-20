@@ -30,12 +30,14 @@ def _normalize_permissions(raw):
         can_query = item.get("can_query") is True
         can_change = item.get("can_change") is True
         can_execute = item.get("can_execute") is True
-        if can_query or can_change or can_execute:
+        can_view_instance = item.get("can_view_instance") is True
+        if can_query or can_change or can_execute or can_view_instance:
             result.append({
                 "cluster_id": cluster_id,
                 "can_query": can_query,
                 "can_change": can_change,
                 "can_execute": can_execute,
+                "can_view_instance": can_view_instance,
             })
     return result
 
@@ -48,6 +50,7 @@ def _group_dict(group):
             "can_query": bool(row.can_query),
             "can_change": bool(row.can_change),
             "can_execute": bool(row.can_execute),
+            "can_view_instance": bool(row.can_view_instance),
         }
         for row in DataSourceGroupClusterPermission.query.filter_by(group_id=group.id).all()
     ]
@@ -77,12 +80,13 @@ def get_user_data_source_permissions(user_id):
             "can_query": bool(row.can_query),
             "can_change": bool(row.can_change),
             "can_execute": bool(row.can_execute),
+            "can_view_instance": bool(row.can_view_instance),
         }
         for row in UserClusterPermission.query.filter_by(user_id=user.id).all()
     ]
     group_ids = [row.group_id for row in UserDataSourceGroup.query.filter_by(user_id=user.id).all()]
     effective = get_effective_cluster_permissions(user.id) if user.role != "admin" else {
-        row.id: {"can_query": True, "can_change": True, "can_execute": True}
+        row.id: {"can_query": True, "can_change": True, "can_execute": True, "can_view_instance": True}
         for row in DatabaseCluster.query.all()
     }
     return ok_response(data={

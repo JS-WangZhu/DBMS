@@ -2,7 +2,13 @@ import secrets
 
 from flask import Blueprint, request
 
-from app.api.routes.common import active_user_required, admin_required, get_current_user
+from app.api.routes.common import (
+    active_user_required,
+    admin_required,
+    get_current_user,
+    get_effective_cluster_permissions,
+    get_effective_menu_keys,
+)
 from app.extensions import db
 from app.models.db_asset import DatabaseCluster
 from app.models.user import User
@@ -112,6 +118,13 @@ def _parse_page_params():
     return page, page_size
 
 
+def _effective_cluster_permission_list(user_id: int):
+    return [
+        {"cluster_id": cluster_id, **permissions}
+        for cluster_id, permissions in get_effective_cluster_permissions(user_id).items()
+    ]
+
+
 @bp.get("/<int:user_id>")
 @admin_required
 def get_permissions(user_id: int):
@@ -120,40 +133,22 @@ def get_permissions(user_id: int):
         menu_keys = [item["key"] for item in MENU_CATALOG]
     else:
         menu_keys = [item.menu_key for item in UserMenuPermission.query.filter_by(user_id=user.id).all()]
-    cluster_rows = UserClusterPermission.query.filter_by(user_id=user.id).all()
-    cluster_permissions = [
-        {
-            "cluster_id": item.cluster_id,
-            "can_query": bool(item.can_query),
-            "can_change": bool(item.can_change),
-            "can_execute": bool(item.can_execute),
-        }
-        for item in cluster_rows
-    ]
+    effective_menu_keys = (
+        [item["key"] for item in MENU_CATALOG]
+        if user.role == "admin"
+        else sorted(get_effective_menu_keys(user.id))
+    )
+    inherited_menu_keys = sorted(set(effective_menu_keys).difference(menu_keys))
+    cluster_permissions = _effective_cluster_permission_list(user.id)
     api_keys = [item.to_dict() for item in ApiKey.query.filter_by(user_id=user.id).all()]
     role_group_rows = UserRoleGroup.query.filter_by(user_id=user.id).all()
     role_group_ids = [row.role_group_id for row in role_group_rows]
-    if role_group_ids:
-        group_menu_keys = [
-            item.menu_key
-            for item in RoleGroupMenuPermission.query.filter(RoleGroupMenuPermission.role_group_id.in_(role_group_ids)).all()
-        ]
-        menu_keys = sorted(set(menu_keys).union(group_menu_keys))
-        merged = {item["cluster_id"]: item for item in cluster_permissions}
-        group_cluster_rows = RoleGroupClusterPermission.query.filter(RoleGroupClusterPermission.role_group_id.in_(role_group_ids)).all()
-        for item in group_cluster_rows:
-            row = merged.setdefault(
-                item.cluster_id,
-                {"cluster_id": item.cluster_id, "can_query": False, "can_change": False, "can_execute": False},
-            )
-            row["can_query"] = row["can_query"] or bool(item.can_query)
-            row["can_change"] = row["can_change"] or bool(item.can_change)
-            row["can_execute"] = row["can_execute"] or bool(item.can_execute)
-        cluster_permissions = list(merged.values())
     return ok_response(
         data={
             "user": user.to_dict(),
             "menu_keys": menu_keys,
+            "effective_menu_keys": effective_menu_keys,
+            "inherited_menu_keys": inherited_menu_keys,
             "menu_catalog": MENU_CATALOG,
             "cluster_permissions": cluster_permissions,
             "api_keys": api_keys,
@@ -168,41 +163,18 @@ def get_my_permissions():
     user = get_current_user()
     if user.role == "admin":
         menu_keys = [item["key"] for item in MENU_CATALOG]
+        direct_menu_keys = menu_keys
     else:
-        menu_keys = [item.menu_key for item in UserMenuPermission.query.filter_by(user_id=user.id).all()]
-    cluster_rows = UserClusterPermission.query.filter_by(user_id=user.id).all()
-    cluster_permissions = [
-        {
-            "cluster_id": item.cluster_id,
-            "can_query": bool(item.can_query),
-            "can_change": bool(item.can_change),
-            "can_execute": bool(item.can_execute),
-        }
-        for item in cluster_rows
-    ]
+        direct_menu_keys = [item.menu_key for item in UserMenuPermission.query.filter_by(user_id=user.id).all()]
+        menu_keys = sorted(get_effective_menu_keys(user.id))
+    cluster_permissions = _effective_cluster_permission_list(user.id)
     role_group_rows = UserRoleGroup.query.filter_by(user_id=user.id).all()
     role_group_ids = [row.role_group_id for row in role_group_rows]
-    if role_group_ids:
-        group_menu_keys = [
-            item.menu_key
-            for item in RoleGroupMenuPermission.query.filter(RoleGroupMenuPermission.role_group_id.in_(role_group_ids)).all()
-        ]
-        menu_keys = sorted(set(menu_keys).union(group_menu_keys))
-        merged = {item["cluster_id"]: item for item in cluster_permissions}
-        group_cluster_rows = RoleGroupClusterPermission.query.filter(RoleGroupClusterPermission.role_group_id.in_(role_group_ids)).all()
-        for item in group_cluster_rows:
-            row = merged.setdefault(
-                item.cluster_id,
-                {"cluster_id": item.cluster_id, "can_query": False, "can_change": False, "can_execute": False},
-            )
-            row["can_query"] = row["can_query"] or bool(item.can_query)
-            row["can_change"] = row["can_change"] or bool(item.can_change)
-            row["can_execute"] = row["can_execute"] or bool(item.can_execute)
-        cluster_permissions = list(merged.values())
     return ok_response(
         data={
             "user": user.to_dict(),
             "menu_keys": menu_keys,
+            "direct_menu_keys": direct_menu_keys,
             "menu_catalog": MENU_CATALOG,
             "cluster_permissions": cluster_permissions,
             "api_keys": [],
@@ -242,6 +214,7 @@ def update_permissions(user_id: int):
                     can_query=bool(item.get("can_query")),
                     can_change=bool(item.get("can_change")),
                     can_execute=bool(item.get("can_execute")),
+                    can_view_instance=bool(item.get("can_view_instance")),
                 )
             )
 
@@ -294,6 +267,7 @@ def list_role_groups():
                 "can_query": bool(item.can_query),
                 "can_change": bool(item.can_change),
                 "can_execute": bool(item.can_execute),
+                "can_view_instance": bool(item.can_view_instance),
             }
             for item in RoleGroupClusterPermission.query.filter_by(role_group_id=row.id).all()
         ]
@@ -342,6 +316,7 @@ def create_role_group():
                 can_query=bool(item.get("can_query")),
                 can_change=bool(item.get("can_change")),
                 can_execute=bool(item.get("can_execute")),
+                can_view_instance=bool(item.get("can_view_instance")),
             )
         )
     db.session.commit()
@@ -386,6 +361,7 @@ def update_role_group(group_id: int):
                     can_query=bool(item.get("can_query")),
                     can_change=bool(item.get("can_change")),
                     can_execute=bool(item.get("can_execute")),
+                    can_view_instance=bool(item.get("can_view_instance")),
                 )
             )
     db.session.commit()

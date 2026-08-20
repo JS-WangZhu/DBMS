@@ -82,6 +82,7 @@ def _serialize_release(row, user=None, executable_cluster_ids=None, include_roll
             "status": state.get("status") or "pending",
             "affected_rows": state.get("affected_rows"),
             "backup_rows": state.get("backup_rows", backup.row_count if backup else 0),
+            "backup_status": state.get("backup_status") or ("ready" if backup else None),
             "error": state.get("error"),
             "rollback_error": state.get("rollback_error"),
             "rollback_affected_rows": state.get("rollback_affected_rows"),

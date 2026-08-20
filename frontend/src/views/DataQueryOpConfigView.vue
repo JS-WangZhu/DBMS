@@ -3,7 +3,7 @@
     <div class="page-header">
       <div class="page-header-left">
         <div class="page-title">数据查询操作配置</div>
-        <div class="page-subtitle">维护 MySQL / MongoDB / Redis 的数据查询白名单关键字，仅启用的操作允许在数据查询页执行</div>
+        <div class="page-subtitle">维护 MySQL / PostgreSQL / MongoDB / Redis 的数据查询白名单关键字，仅启用的操作允许在数据查询页执行</div>
       </div>
       <div class="page-header-actions">
         <el-button :icon="Refresh" @click="loadData">刷新</el-button>
@@ -142,11 +142,12 @@ const isAdmin = computed(() => {
 
 const groupMeta = [
   { key: "mysql", label: "MySQL", desc: "允许执行的 SQL 起始关键字（例如 SELECT、SHOW、DESC、EXPLAIN）" },
+  { key: "postgresql", label: "PostgreSQL", desc: "允许执行的 SQL 起始关键字（默认 SELECT、WITH、EXPLAIN、SHOW、VALUES）" },
   { key: "mongodb", label: "MongoDB", desc: "允许的 op 与 run_command 子命令（例如 find、aggregate、ping）" },
   { key: "redis", label: "Redis", desc: "允许的 Redis 只读命令（例如 GET、HGET、LRANGE）" },
 ];
 
-const groups = reactive({ mysql: [], mongodb: [], redis: [] });
+const groups = reactive({ mysql: [], postgresql: [], mongodb: [], redis: [] });
 
 const dialogVisible = ref(false);
 const saving = ref(false);
@@ -175,6 +176,7 @@ async function loadData() {
     const { data } = await listDataQueryOps();
     const payload = data?.data?.groups || {};
     groups.mysql = payload.mysql || [];
+    groups.postgresql = payload.postgresql || [];
     groups.mongodb = payload.mongodb || [];
     groups.redis = payload.redis || [];
   } catch (error) {
@@ -265,10 +267,10 @@ async function onDelete(row) {
 }
 
 function dbTypeLabel(type) {
-  return { mysql: "MySQL", mongodb: "MongoDB", redis: "Redis" }[type] || type;
+  return { mysql: "MySQL", postgresql: "PostgreSQL", mongodb: "MongoDB", redis: "Redis" }[type] || type;
 }
 function dbTypeTagType(type) {
-  return { mysql: "primary", mongodb: "success", redis: "danger" }[type] || "info";
+  return { mysql: "primary", postgresql: "warning", mongodb: "success", redis: "danger" }[type] || "info";
 }
 
 onMounted(loadData);
@@ -347,6 +349,11 @@ useTabActivationRefresh(loadData);
   color: #1565c0;
   background: #e3f2fd;
   border: 1px solid #bbdefb;
+}
+.group-badge--postgresql {
+  color: #9a3412;
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
 }
 .group-badge--mongodb {
   color: #2e7d32;

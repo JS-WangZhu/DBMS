@@ -4,7 +4,7 @@ import math
 
 from flask import Blueprint, current_app, g, request
 
-from app.api.routes.common import active_user_required, get_effective_menu_keys
+from app.api.routes.common import active_user_required, admin_required, get_effective_menu_keys, list_allowed_cluster_ids, require_cluster_permission
 from app.extensions import db
 from app.models.db_asset import DatabaseInstance
 from app.services.monitor_snapshot_service import (
@@ -15,13 +15,31 @@ from app.services.monitor_snapshot_service import (
     snapshot_history_for_instance,
 )
 from app.services.collectors import collect_instance_metrics
-from app.services.instance_service import list_instances as list_instances_by_type
 from app.services.redis_cache import enqueue_snapshot_flush, set_latest_snapshot
 from app.utils.crypto import decrypt_secret
 from app.utils.response import error_response, ok_response
 
 bp = Blueprint("monitoring", __name__, url_prefix="/monitoring")
 FAIL_THRESHOLD_SECONDS = 120
+INSTANCE_MENU_BY_DB_TYPE = {
+    "mysql": "mysql_instances",
+    "mongodb": "mongodb_instances",
+    "redis": "redis_instances",
+    "postgresql": "postgresql_instances",
+    "doris": "doris_instances",
+}
+
+
+def _can_view_instance(instance):
+    user = g.current_user
+    if user.role == "admin":
+        return True
+    menu_key = INSTANCE_MENU_BY_DB_TYPE.get(instance.db_type)
+    return bool(
+        menu_key
+        and menu_key in get_effective_menu_keys(user.id)
+        and require_cluster_permission(instance.cluster_id, "view_instance")
+    )
 
 
 def _snapshot_failed(payload: dict) -> bool:
@@ -36,7 +54,7 @@ def _snapshot_failed(payload: dict) -> bool:
 
 
 @bp.post("/collect/<int:instance_id>")
-@active_user_required
+@admin_required
 def collect_now(instance_id):
     instance = DatabaseInstance.query.get_or_404(instance_id)
 
@@ -76,6 +94,8 @@ def collect_now(instance_id):
 @active_user_required
 def latest_snapshot(instance_id):
     instance = DatabaseInstance.query.get_or_404(instance_id)
+    if not _can_view_instance(instance):
+        return error_response("permission denied", code=403)
     snapshot = latest_snapshot_for_instance(instance_id=instance.id, db_type=instance.db_type, metric_type="status")
     if not snapshot:
         return error_response("snapshot not found", code=404)
@@ -86,6 +106,8 @@ def latest_snapshot(instance_id):
 @active_user_required
 def get_instance_performance(instance_id):
     instance = DatabaseInstance.query.get_or_404(instance_id)
+    if not require_cluster_permission(instance.cluster_id, "view_instance"):
+        return error_response("cluster permission denied", code=403)
     if instance.db_type not in {"mysql", "mongodb"}:
         return error_response("performance detail supports mysql and mongodb only", code=400)
     permission_key = f"{instance.db_type}_instance_detail"
@@ -162,6 +184,8 @@ def get_instance_performance(instance_id):
 def get_instance_health(instance_id):
     """获取实例最新健康状态（缓存优先，数据库兜底）"""
     instance = DatabaseInstance.query.get_or_404(instance_id)
+    if not _can_view_instance(instance):
+        return error_response("permission denied", code=403)
 
     latest_snapshot = latest_snapshot_for_instance(instance_id=instance.id, db_type=instance.db_type, metric_type="status")
 
@@ -227,6 +251,9 @@ def get_instances_health():
     db_type = str(payload.get("db_type") or "").strip().lower()
     if db_type not in {"mysql", "mongodb", "redis", "postgresql", "doris"}:
         return error_response("invalid db_type", code=400)
+    user = g.current_user
+    if user.role != "admin" and INSTANCE_MENU_BY_DB_TYPE[db_type] not in get_effective_menu_keys(user.id):
+        return error_response("permission denied", code=403)
 
     raw_ids = payload.get("instance_ids")
     if not isinstance(raw_ids, list):
@@ -242,11 +269,16 @@ def get_instances_health():
         return ok_response(data={})
 
     requested_ids = set(instance_ids)
-    rows = [
-        item
-        for item in list_instances_by_type(db_type=db_type)
-        if int(item["id"] if isinstance(item, dict) else item.id) in requested_ids
-    ]
+    allowed_cluster_ids = list_allowed_cluster_ids("view_instance")
+    rows_query = DatabaseInstance.query.filter(
+        DatabaseInstance.db_type == db_type,
+        DatabaseInstance.id.in_(requested_ids),
+    )
+    if allowed_cluster_ids is not None:
+        if not allowed_cluster_ids:
+            return ok_response(data={})
+        rows_query = rows_query.filter(DatabaseInstance.cluster_id.in_(allowed_cluster_ids))
+    rows = rows_query.all()
     if not rows:
         return ok_response(data={})
 

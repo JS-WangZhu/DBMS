@@ -1,6 +1,6 @@
 from flask import Blueprint, request
 
-from app.api.routes.common import active_user_required
+from app.api.routes.common import admin_required, list_allowed_cluster_ids, require_cluster_permission, require_menu_permission
 from app.models.db_asset import DatabaseInstance
 from app.services.monitor_snapshot_service import latest_snapshot_for_instance
 from app.services.audit import log_audit
@@ -11,7 +11,7 @@ bp = Blueprint("redis", __name__, url_prefix="/redis")
 
 
 @bp.get("/instances")
-@active_user_required
+@require_menu_permission("redis_instances")
 def redis_list_instances():
     page = request.args.get("page", 1)
     page_size = request.args.get('page_size', 10)
@@ -29,6 +29,7 @@ def redis_list_instances():
         namespace=namespace,
         business_line=business_line,
         environment=environment,
+        allowed_cluster_ids=list_allowed_cluster_ids("view_instance"),
     )
     return ok_response(
         data={
@@ -41,7 +42,7 @@ def redis_list_instances():
 
 
 @bp.post("/instances")
-@active_user_required
+@admin_required
 def redis_create_instance():
     payload = request.get_json(silent=True) or {}
     instance, err = create_instance(payload, db_type="redis")
@@ -53,11 +54,13 @@ def redis_create_instance():
 
 
 @bp.get("/instances/<int:instance_id>/cluster-health")
-@active_user_required
+@require_menu_permission("redis_instances")
 def redis_cluster_health(instance_id):
     instance = DatabaseInstance.query.filter_by(id=instance_id, db_type="redis").first()
     if not instance:
         return error_response("redis instance not found", code=404)
+    if not require_cluster_permission(instance.cluster_id, "view_instance"):
+        return error_response("cluster permission denied", code=403)
 
     snapshot = latest_snapshot_for_instance(instance_id=instance.id, db_type=instance.db_type, metric_type="status")
     payload = snapshot.payload_json if snapshot else {}

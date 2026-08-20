@@ -150,6 +150,12 @@ def test_review_release_calls_ai_and_reports_progress_per_statement(app, monkeyp
         )
 
     assert len(calls) == 2
+    assert '"line": 1' in calls[0]
+    assert '"review_target": true' in calls[0]
+    assert "UPDATE orders SET status='paid' WHERE id=1" in calls[1]
+    assert "DELETE FROM orders WHERE id=2" in calls[1]
+    assert calls[1].count('"review_target": false') == 1
+    assert calls[1].count('"review_target": true') == 1
     assert progress == [(1, 2), (2, 2)]
     assert [item["status"] for item in reviews] == ["completed", "completed"]
     assert summary == "AI 初审完成：2/2 条通过"
@@ -179,6 +185,59 @@ def test_data_source_group_and_direct_permissions_include_execute(app, client):
     assert effective[cluster_id]["can_change"] is True
     assert effective[cluster_id]["can_query"] is False
     assert effective[cluster_id]["can_execute"] is True
+
+
+def test_data_source_group_template_update_grants_associated_users_immediately(app, client):
+    user_id, cluster_id, _ = _assets(app)
+    admin_headers = _login(client, "admin", "admin123")
+    created = client.post(
+        "/api/v1/data-source-permissions/groups",
+        headers=admin_headers,
+        json={
+            "name": "billing-template",
+            "permissions": [{"cluster_id": cluster_id, "can_query": True}],
+        },
+    )
+    assert created.status_code == 201
+    group_id = created.get_json()["data"]["id"]
+    associated = client.put(
+        f"/api/v1/data-source-permissions/users/{user_id}",
+        headers=admin_headers,
+        json={"group_ids": [group_id], "direct_permissions": []},
+    )
+    assert associated.status_code == 200
+
+    updated = client.patch(
+        f"/api/v1/data-source-permissions/groups/{group_id}",
+        headers=admin_headers,
+        json={
+            "permissions": [{
+                "cluster_id": cluster_id,
+                "can_query": False,
+                "can_change": True,
+                "can_execute": True,
+            }],
+        },
+    )
+    assert updated.status_code == 200
+
+    g.pop("current_user", None)
+    user_headers = _login(client, "release-user", "password123")
+    mine = client.get("/api/v1/users/permissions/me", headers=user_headers)
+    assert mine.status_code == 200
+    effective = {
+        row["cluster_id"]: row
+        for row in mine.get_json()["data"]["cluster_permissions"]
+    }
+    assert effective[cluster_id] == {
+        "cluster_id": cluster_id,
+        "can_query": False,
+        "can_change": True,
+        "can_execute": True,
+    }
+
+    with app.app_context():
+        assert UserClusterPermission.query.filter_by(user_id=user_id).count() == 0
 
 
 def test_submit_is_immediate_and_async_rejection_requires_execution_confirmation(app, client, monkeypatch):
@@ -430,6 +489,10 @@ def test_sql_release_history_supports_filters_and_title_search(app, client):
         title_keyword="订单",
     ) == [target_id]
 
+    history = client.get("/api/v1/sql-releases", headers=headers, query_string={"db_type": "mysql"})
+    environments = {item["id"]: item["environment"] for item in history.get_json()["data"]["items"]}
+    assert environments[target_id] == "test"
+
     invalid_range = client.get(
         "/api/v1/sql-releases", headers=headers,
         query_string={"start_time": "2026-08-03", "end_time": "2026-08-02"},
@@ -590,7 +653,8 @@ class _FakeImmediateMysqlCursor(_FakeRollbackCursor):
         if normalized.startswith("SELECT *"):
             self.mode = "select"
             return
-        assert list(self.backup_dir.glob("*_rollback.sql")), "SQL executed before its rollback content was written"
+        if not normalized.startswith("ALTER"):
+            assert list(self.backup_dir.glob("*_rollback.sql")), "DML executed before its rollback content was written"
         match = re.match(
             r"^\s*ALTER\s+TABLE\s+\S+\s+ADD\s+(?:COLUMN\s+)?(?:`([^`]+)`|([A-Za-z_][A-Za-z0-9_$]*))",
             sql,
@@ -615,7 +679,7 @@ class _FakeImmediateMysqlConnection(_FakeRollbackConnection):
         self._cursor = _FakeImmediateMysqlCursor(self, backup_dir)
 
 
-def test_mysql_rollback_uses_immediate_columns_after_add_column(app, monkeypatch, tmp_path):
+def test_mysql_ddl_skips_backup_and_later_dml_is_backed_up(app, monkeypatch, tmp_path):
     import pymysql
 
     connection = _FakeImmediateMysqlConnection(tmp_path)
@@ -638,11 +702,13 @@ def test_mysql_rollback_uses_immediate_columns_after_add_column(app, monkeypatch
     rollback_sql = open(rollback_path, encoding="utf-8").read()
     assert connection.committed is True
     assert [item["line"] for item in result["statements"]] == [1, 2, 3]
+    assert [item["backup_status"] for item in result["statements"]] == ["skipped", "skipped", "ready"]
     assert connection._cursor.columns == ["id", "name", "tta", "ttb"]
     assert "-- rollback for statement #3" in rollback_sql
     assert "DELETE FROM `app`.`test` WHERE (`id` <=> 10);" in rollback_sql
-    assert "ALTER TABLE `app`.`test` DROP COLUMN `ttb`;" in rollback_sql
-    assert "ALTER TABLE `app`.`test` DROP COLUMN `tta`;" in rollback_sql
+    assert "-- rollback for statement #1" not in rollback_sql
+    assert "-- rollback for statement #2" not in rollback_sql
+    assert "DROP COLUMN" not in rollback_sql
 
 
 def test_unsafe_dml_shapes_are_rejected_before_execution():
@@ -757,7 +823,8 @@ class _FakePostgresqlCursor:
         elif normalized.startswith("SELECT *"):
             self.mode = "select"
         else:
-            assert list(self.backup_dir.glob("*_postgresql_rollback.sql"))
+            if not normalized.startswith("ALTER"):
+                assert list(self.backup_dir.glob("*_postgresql_rollback.sql"))
             self.mode = "execute"
 
     def fetchall(self):
@@ -876,7 +943,7 @@ def test_postgresql_without_primary_key_uses_backed_up_row_values(app, monkeypat
     assert "ON CONFLICT" not in rollback_sql
 
 
-def test_postgresql_rollback_supports_implicit_insert_columns_after_add_column(app, monkeypatch, tmp_path):
+def test_postgresql_ddl_skips_backup_and_dml_uses_current_columns(app, monkeypatch, tmp_path):
     import psycopg2
 
     parsed = _analyze_postgresql_dml("INSERT INTO public.test VALUES (10,'a','b','c')")
@@ -904,10 +971,13 @@ def test_postgresql_rollback_supports_implicit_insert_columns_after_add_column(a
     assert connection.committed is True
     assert result["statement_count"] == 5
     assert [item["line"] for item in result["statements"]] == [1, 2, 3, 4, 5]
+    assert [item["backup_status"] for item in result["statements"][:2]] == ["skipped", "skipped"]
+    assert all(item["backup_status"] == "ready" for item in result["statements"][2:])
     assert "-- rollback for statement #5" in rollback_sql
     assert 'DELETE FROM "public"."test" WHERE ("id" IS NOT DISTINCT FROM 10);' in rollback_sql
-    assert 'ALTER TABLE "public"."test" DROP COLUMN "ttb";' in rollback_sql
-    assert 'ALTER TABLE "public"."test" DROP COLUMN "tta";' in rollback_sql
+    assert "-- rollback for statement #1" not in rollback_sql
+    assert "-- rollback for statement #2" not in rollback_sql
+    assert "DROP COLUMN" not in rollback_sql
 
 
 def test_failed_postgresql_release_cannot_repeat_successful_statements(app, client, monkeypatch):
