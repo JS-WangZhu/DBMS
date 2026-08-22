@@ -8,6 +8,7 @@ from app.models.backup_tool_config import BackupToolConfig
 from app.models.backup_key import BackupKey
 from app.models.data_query_op import DataQueryOperationConfig
 from app.models.db_asset import DatabaseCluster, DatabaseInstance
+from app.models.diagnosis import ParameterCollectionConfig, ParameterCollectionSnapshot
 from app.models.ha_config import HAConfig
 from app.models.inspection import InspectionAlert, InspectionConfig
 from app.models.instance_status_config import InstanceStatusConfig
@@ -61,6 +62,8 @@ __all__ = [
     "DataQueryOperationConfig",
     "DatabaseCluster",
     "DatabaseInstance",
+    "ParameterCollectionConfig",
+    "ParameterCollectionSnapshot",
     "HAConfig",
     "InspectionConfig",
     "InspectionAlert",

@@ -67,6 +67,7 @@ const iconMap = {
   redis_instances: RedisIcon, redis_clusters: Coin, redis_connections: Promotion,
   postgresql_instances: PostgreSQLIcon, postgresql_clusters: Coin,
   doris_instances: DorisIcon, doris_clusters: Histogram,
+  diagnosis_parameter_check: SetUp, diagnosis_slow_query: TrendCharts,
   inspection_manage: CircleCheck, inspection_param_config: Setting,
   data_query: Search, data_change: EditPen, data_history: Clock,
   task_schedule: Operation, task_results: Tickets, aliyun_dns_tool: Position,

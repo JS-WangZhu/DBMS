@@ -1046,6 +1046,28 @@ def probe_database_instance():
     return ok_response(data=result)
 
 
+@bp.route("/instances/parameters", methods=["POST"])
+@_require_api_key
+def collect_database_instance_parameters():
+    from app.services.parameter_collector import collect_database_parameters
+
+    payload = request.get_json(silent=True) or {}
+    instance = payload.get("instance")
+    if not isinstance(instance, dict):
+        return error_response("instance is required", code=400)
+    if not instance.get("db_type") or not (instance.get("resolved_ip") or instance.get("host_input")):
+        return error_response("instance db_type and host are required", code=400)
+    try:
+        result = collect_database_parameters(
+            instance=instance,
+            password=payload.get("password") or "",
+            timeout_seconds=payload.get("timeout_seconds") or 15,
+        )
+        return ok_response(data=result)
+    except Exception as exc:
+        return error_response(f"collect database parameters failed: {exc}", code=502)
+
+
 @bp.route("/sql-releases/execute", methods=["POST"])
 @_require_api_key
 def execute_sql_release():

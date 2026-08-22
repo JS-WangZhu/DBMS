@@ -15,7 +15,7 @@
       >
         <el-menu-item v-if="hasMenu('dashboard')" index="/dashboard">
           <el-icon><Odometer /></el-icon>
-          <span>总览</span>
+          <span>运行总览</span>
         </el-menu-item>
 
         <el-sub-menu v-if="hasAnyMenu(['database_apply','database_recycle','application_history'])" index="resource-management">
@@ -141,6 +141,20 @@
               <span>集群管理</span>
             </el-menu-item>
           </el-sub-menu>
+        </el-sub-menu>
+        <el-sub-menu v-if="hasAnyMenu(['diagnosis_parameter_check','diagnosis_slow_query'])" index="diagnosis-tuning">
+          <template #title>
+            <el-icon><DataAnalysis /></el-icon>
+            <span>诊断调优</span>
+          </template>
+          <el-menu-item v-if="hasMenu('diagnosis_parameter_check')" index="/diagnosis/parameter-check">
+            <el-icon><SetUp /></el-icon>
+            <span>参数检查</span>
+          </el-menu-item>
+          <el-menu-item v-if="hasMenu('diagnosis_slow_query')" index="/diagnosis/slow-query">
+            <el-icon><TrendCharts /></el-icon>
+            <span>慢查治理</span>
+          </el-menu-item>
         </el-sub-menu>
         <el-sub-menu v-if="hasAnyMenu(['inspection_manage','inspection_param_config'])" index="inspection-manage">
           <template #title>
@@ -536,7 +550,7 @@ const username = computed(() => {
   return String(user.display_name || "").trim() || user.username || "unknown";
 });
 
-const currentPageTitle = computed(() => route.meta?.title || "总览");
+const currentPageTitle = computed(() => route.meta?.title || "运行总览");
 
 const currentRole = computed(() => {
   const user = currentUser.value || {};
@@ -596,6 +610,8 @@ const routePermissionMap = {
   "/databases/postgresql/clusters": "postgresql_clusters",
   "/databases/doris/instances": "doris_instances",
   "/databases/doris/clusters": "doris_clusters",
+  "/diagnosis/parameter-check": "diagnosis_parameter_check",
+  "/diagnosis/slow-query": "diagnosis_slow_query",
   "/service/inspection": "inspection_manage",
   "/data-access/query": "data_query",
   "/data-access/change": "data_change",

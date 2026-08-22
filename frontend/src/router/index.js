@@ -19,6 +19,8 @@ import DataChangeView from "../views/DataChangeView.vue";
 import DataAccessHistoryView from "../views/DataAccessHistoryView.vue";
 import DataQueryOpConfigView from "../views/DataQueryOpConfigView.vue";
 import DomainConfigManageView from "../views/DomainConfigManageView.vue";
+import DiagnosisParameterCheckView from "../views/DiagnosisParameterCheckView.vue";
+import DiagnosisSlowQueryView from "../views/DiagnosisSlowQueryView.vue";
 import HAConfigView from "../views/HAConfigView.vue";
 import DataQueryView from "../views/DataQueryView.vue";
 import DataCopyConfigView from "../views/DataCopyConfigView.vue";
@@ -71,7 +73,7 @@ const routes = [
     component: MainLayout,
     children: [
       { path: "", redirect: "/dashboard" },
-      { path: "/dashboard", component: DashboardView, meta: { title: "总览" } },
+      { path: "/dashboard", component: DashboardView, meta: { title: "运行总览" } },
 
       { path: "/resources/database-apply", component: DatabaseApplyView, meta: { title: "数据库申请" } },
       { path: "/resources/application-overview", component: DatabaseApplicationOverviewView, meta: { title: "申请预览" } },
@@ -105,6 +107,8 @@ const routes = [
       { path: "/databases/doris/clusters", component: ClusterManageView, meta: { title: "Doris 集群管理", dbType: "doris", dbLabel: "Doris" } },
       { path: "/databases/doris/instances", component: InstanceManageView, meta: { title: "Doris 实例管理", dbType: "doris", dbLabel: "Doris" } },
       { path: "/service/inspection", component: InspectionManageView, meta: { title: "巡检状态" } },
+      { path: "/diagnosis/parameter-check", component: DiagnosisParameterCheckView, meta: { title: "参数检查" } },
+      { path: "/diagnosis/slow-query", component: DiagnosisSlowQueryView, meta: { title: "慢查治理" } },
 
       { path: "/backups/mysql-policies", component: BackupMysqlPolicyView, meta: { title: "MySQL策略" } },
       { path: "/backups/postgresql-policies", component: BackupPostgresqlPolicyView, meta: { title: "PostgreSQL策略" } },

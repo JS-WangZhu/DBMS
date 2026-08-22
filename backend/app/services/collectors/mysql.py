@@ -77,6 +77,7 @@ def collect_mysql_status(instance, password):
             questions_total = _safe_int(_fetch_status_like(cursor, "Questions"))
             com_commit_total = _safe_int(_fetch_status_like(cursor, "Com_commit"))
             com_rollback_total = _safe_int(_fetch_status_like(cursor, "Com_rollback"))
+            aborted_connects_total = _safe_int(_fetch_status_like(cursor, "Aborted_connects"))
             lock_waits = _safe_int(_fetch_status_like(cursor, "Innodb_row_lock_current_waits"))
 
             read_only_flag = _to_bool_flag(_fetch_variable_like(cursor, "read_only"))
@@ -219,6 +220,7 @@ def collect_mysql_status(instance, password):
             "questions_total": questions_total,
             "com_commit_total": com_commit_total,
             "com_rollback_total": com_rollback_total,
+            "aborted_connects_total": aborted_connects_total,
             "qps": qps,
             "tps": tps,
             "lock_waits": lock_waits,

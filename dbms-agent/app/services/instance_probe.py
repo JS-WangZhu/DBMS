@@ -277,6 +277,7 @@ def _mysql(instance, password):
             questions_total = _safe_int(status_value("Questions"))
             com_commit_total = _safe_int(status_value("Com_commit"))
             com_rollback_total = _safe_int(status_value("Com_rollback"))
+            aborted_connects_total = _safe_int(status_value("Aborted_connects"))
             lock_waits = _safe_int(status_value("Innodb_row_lock_current_waits"))
             qps = round(questions_total / uptime, 3) if uptime and questions_total is not None else None
             tps = None
@@ -302,6 +303,7 @@ def _mysql(instance, password):
                 "connections_usage_pct": connection_usage_pct,
                 "com_commit_total": com_commit_total,
                 "com_rollback_total": com_rollback_total,
+                "aborted_connects_total": aborted_connects_total,
                 "qps": qps,
                 "tps": tps,
                 "lock_waits": lock_waits,
@@ -425,6 +427,7 @@ def _redis(instance, password):
         "cluster_info": cluster_info,
         "uptime": _safe_int(info.get("uptime_in_seconds")),
         "connected_clients": _safe_int(info.get("connected_clients")),
+        "blocked_clients": _safe_int(info.get("blocked_clients")),
         "used_memory": used_memory,
         "used_memory_human": info.get("used_memory_human"),
         "maxmemory": maxmemory,
@@ -684,6 +687,18 @@ def _postgresql(instance, password):
                 "FROM pg_stat_database WHERE datname = current_database()"
             )
             stats = cursor.fetchone() or (None, None, None, None)
+            sessions_fatal_total = None
+            try:
+                cursor.execute(
+                    "SELECT sessions_fatal FROM pg_stat_database "
+                    "WHERE datname = current_database()"
+                )
+                fatal_stats = cursor.fetchone()
+                sessions_fatal_total = _safe_int(fatal_stats[0]) if fatal_stats else None
+            except Exception:
+                # sessions_fatal was added in PostgreSQL 14. Older servers keep
+                # the remaining inspection metrics available.
+                sessions_fatal_total = None
             return {
                 "ok": True,
                 "ping_ok": True,
@@ -714,6 +729,7 @@ def _postgresql(instance, password):
                 "connections_usage_pct": round(connections * 100 / max_connections, 2) if max_connections and connections is not None else None,
                 "xact_commit": _safe_int(stats[0]),
                 "xact_rollback": _safe_int(stats[1]),
+                "sessions_fatal_total": sessions_fatal_total,
                 "deadlocks": _safe_int(stats[2]),
                 "database_size_bytes": _safe_int(stats[3]),
             }

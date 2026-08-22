@@ -127,6 +127,9 @@ def delete_instance(instance_id):
     instance = DatabaseInstance.query.get_or_404(instance_id)
     detail = {"name": instance.name, "db_type": instance.db_type, "host_input": instance.host_input, "port": instance.port}
     try:
+        from app.models.diagnosis import ParameterCollectionSnapshot
+
+        ParameterCollectionSnapshot.query.filter_by(instance_id=instance.id).delete(synchronize_session=False)
         snapshot_model = snapshot_model_for_instance(instance)
         snapshot_model.query.filter_by(instance_id=instance.id).delete(synchronize_session=False)
         db.session.delete(instance)

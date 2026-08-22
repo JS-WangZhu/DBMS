@@ -67,6 +67,7 @@ def collect_postgresql_status(instance, password):
             lock_waiting_connections = _safe_int(activity[2])
 
             xact_commit = xact_rollback = deadlocks = database_size_bytes = None
+            sessions_fatal_total = None
             try:
                 cursor.execute(
                     "SELECT xact_commit, xact_rollback, deadlocks, pg_database_size(datname) "
@@ -80,6 +81,19 @@ def collect_postgresql_status(instance, password):
                     database_size_bytes = _safe_int(stats[3])
             except Exception as exc:
                 warnings.append(f"database_stats:{exc}")
+
+            # PostgreSQL 14+ exposes fatal session terminations. Authentication
+            # handshake failures themselves are only available from server logs,
+            # so this is the closest portable SQL-level connection failure metric.
+            try:
+                cursor.execute(
+                    "SELECT sessions_fatal FROM pg_stat_database "
+                    "WHERE datname = current_database()"
+                )
+                fatal_stats = cursor.fetchone()
+                sessions_fatal_total = _safe_int(fatal_stats[0]) if fatal_stats else None
+            except Exception as exc:
+                warnings.append(f"sessions_fatal:{exc}")
 
             replication_lag_seconds = None
             replication_lag_bytes = None
@@ -163,6 +177,7 @@ def collect_postgresql_status(instance, password):
             "max_connections": max_connections, "connection_usage_pct": connection_usage_pct,
             "connections_usage_pct": connection_usage_pct,
             "xact_commit": xact_commit, "xact_rollback": xact_rollback,
+            "sessions_fatal_total": sessions_fatal_total,
             "deadlocks": deadlocks, "database_size_bytes": database_size_bytes,
             "warnings": warnings, **host_metrics,
         }

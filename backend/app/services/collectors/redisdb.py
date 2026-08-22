@@ -88,6 +88,7 @@ def collect_redis_status(instance, password):
         used_memory = _safe_int(info.get("used_memory"))
         maxmemory = _safe_int(info.get("maxmemory"))
         connected_clients = _safe_int(info.get("connected_clients"))
+        blocked_clients = _safe_int(info.get("blocked_clients"))
         total_keys, keyspace_db_count = _key_count_total(info)
         master_host = info.get("master_host")
         master_port = info.get("master_port")
@@ -114,6 +115,7 @@ def collect_redis_status(instance, password):
             "master_link_status": info.get("master_link_status"),
             "connected_slaves": info.get("connected_slaves"),
             "connected_clients": connected_clients,
+            "blocked_clients": blocked_clients,
             "maxclients": maxclients,
             "connection_usage_pct": _connection_usage_pct(connected_clients, maxclients),
             "connections_usage_pct": _connection_usage_pct(connected_clients, maxclients),

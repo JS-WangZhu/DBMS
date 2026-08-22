@@ -3,7 +3,7 @@ function menu(permission, path, label, group, pinyin, aliases = []) {
 }
 
 export const QUICK_JUMP_MENUS = [
-  menu("dashboard", "/dashboard", "总览", "首页", "zong lan"),
+  menu("dashboard", "/dashboard", "运行总览", "首页", "yun xing zong lan"),
   menu("database_apply", "/resources/database-apply", "数据库申请", "资源管理", "shu ju ku shen qing"),
   menu("database_recycle", "/resources/database-recycle", "数据库回收", "资源管理", "shu ju ku hui shou"),
   menu("application_history", "/resources/application-history", "申请流水", "资源管理", "shen qing liu shui"),
@@ -24,6 +24,8 @@ export const QUICK_JUMP_MENUS = [
   menu("postgresql_clusters", "/databases/postgresql/clusters", "PostgreSQL 集群管理", "服务管理 / PostgreSQL", "postgresql ji qun guan li", ["pgsql", "pg"]),
   menu("doris_instances", "/databases/doris/instances", "Doris 实例管理", "服务管理 / Doris", "doris shi li guan li"),
   menu("doris_clusters", "/databases/doris/clusters", "Doris 集群管理", "服务管理 / Doris", "doris ji qun guan li"),
+  menu("diagnosis_parameter_check", "/diagnosis/parameter-check", "参数检查", "诊断调优", "can shu jian cha", ["参数采集", "parameter"]),
+  menu("diagnosis_slow_query", "/diagnosis/slow-query", "慢查治理", "诊断调优", "man cha zhi li", ["慢查询", "clickhouse", "slow sql"]),
   menu("inspection_manage", "/service/inspection", "巡检状态", "巡检管理", "xun jian zhuang tai"),
   menu("inspection_param_config", "/config/inspection", "巡检参数", "巡检管理", "xun jian can shu"),
   menu("data_query", "/data-access/query", "数据查询", "数据访问", "shu ju cha xun"),

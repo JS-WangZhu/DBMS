@@ -8,6 +8,7 @@ from flask import current_app
 from app.extensions import db
 from app.models.backup import BackupPolicy
 from app.models.db_asset import DatabaseCluster, DatabaseInstance
+from app.models.diagnosis import ParameterCollectionConfig
 from app.models.physical_discovery import PhysicalDiscoveryConfig
 from app.models.inspection import InspectionConfig
 from app.models.monitor_snapshot import SNAPSHOT_MODEL_BY_DB_TYPE
@@ -129,6 +130,45 @@ def register_jobs(scheduler, app):
     sync_inspection_job(scheduler=scheduler, app=app)
     sync_scheduled_task_jobs(scheduler=scheduler, app=app)
     sync_physical_discovery_job(scheduler=scheduler, app=app)
+    sync_parameter_collection_job(scheduler=scheduler, app=app)
+
+
+def sync_parameter_collection_job(scheduler, app):
+    app = _resolve_app(app) or app
+    job_id = "diagnosis_parameter_collection"
+    if scheduler.get_job(job_id):
+        scheduler.remove_job(job_id)
+    with app.app_context():
+        from app.services.diagnosis import get_or_create_parameter_collection_config
+
+        config = ParameterCollectionConfig.query.first() or get_or_create_parameter_collection_config()
+        if not config.enabled:
+            return
+        try:
+            trigger = _trigger_from_expr(config.cron_expr or "0 0 * * *")
+        except Exception:
+            current_app.logger.exception("invalid parameter collection cron: %s", config.cron_expr)
+            return
+        scheduler.add_job(
+            id=job_id,
+            func=job_collect_database_parameters,
+            trigger=trigger,
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+            kwargs={"app": app},
+        )
+
+
+def job_collect_database_parameters(app):
+    from app.services.diagnosis import run_parameter_collection
+
+    app = _resolve_app(app) or app
+    if app is None:
+        current_app.logger.error("parameter collection job missing app context")
+        return {"ok": False, "message": "app context missing"}
+    with app.app_context():
+        return run_parameter_collection()
 
 
 def sync_physical_discovery_job(scheduler, app):

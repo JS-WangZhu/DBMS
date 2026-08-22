@@ -9,7 +9,7 @@ function flattenLeaves(nodes) {
 
 test("permission tree keeps every catalog item assignable", () => {
   const catalog = [
-    { key: "dashboard", label: "总览" },
+    { key: "dashboard", label: "运行总览" },
     { key: "redis_connections", label: "Redis 连接管理" },
     { key: "postgresql_instances", label: "PostgreSQL 实例管理" },
     { key: "backup_overview", label: "备份总览" },
@@ -23,7 +23,7 @@ test("permission tree keeps every catalog item assignable", () => {
 });
 
 test("permission tree applies disabled state to groups and leaves", () => {
-  const tree = buildMenuPermissionTree([{ key: "dashboard", label: "总览" }], { disabled: true });
+  const tree = buildMenuPermissionTree([{ key: "dashboard", label: "运行总览" }], { disabled: true });
   assert.equal(tree.nodes[0].disabled, true);
   assert.equal(tree.nodes[0].children[0].disabled, true);
 });
@@ -31,7 +31,7 @@ test("permission tree applies disabled state to groups and leaves", () => {
 test("permission tree disables inherited leaves without disabling direct permissions", () => {
   const tree = buildMenuPermissionTree(
     [
-      { key: "dashboard", label: "总览" },
+      { key: "dashboard", label: "运行总览" },
       { key: "mysql_instances", label: "MySQL 实例管理" },
     ],
     { disabledKeys: ["mysql_instances"] },

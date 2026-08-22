@@ -29,7 +29,7 @@ bp = Blueprint("user_permissions", __name__, url_prefix="/users/permissions")
 MENU_CATALOG = [
     {"key": "aliyun_dns_tool", "label": "阿里云域名工具"},
     {"key": "domain_config", "label": "域名配置管理"},
-    {"key": "dashboard", "label": "总览"},
+    {"key": "dashboard", "label": "运行总览"},
     {"key": "database_apply", "label": "数据库申请"},
     {"key": "database_recycle", "label": "数据库回收"},
     {"key": "application_history", "label": "申请流水"},
@@ -50,6 +50,8 @@ MENU_CATALOG = [
     {"key": "postgresql_clusters", "label": "PostgreSQL \u96c6\u7fa4\u7ba1\u7406"},
     {"key": "doris_instances", "label": "Doris 实例管理"},
     {"key": "doris_clusters", "label": "Doris 集群管理"},
+    {"key": "diagnosis_parameter_check", "label": "参数检查"},
+    {"key": "diagnosis_slow_query", "label": "慢查治理"},
     {"key": "inspection_manage", "label": "巡检状态"},
     {"key": "data_query", "label": "数据查询"},
     {"key": "data_change", "label": "数据变更"},

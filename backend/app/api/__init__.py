@@ -14,6 +14,7 @@ from app.api.routes.data_access import bp as data_access_bp
 from app.api.routes.data_source_permissions import bp as data_source_permissions_bp
 from app.api.routes.data_source_permission_applications import bp as data_source_permission_applications_bp
 from app.api.routes.data_query_ops import bp as data_query_ops_bp
+from app.api.routes.diagnosis import bp as diagnosis_bp
 from app.api.routes.health import bp as health_bp
 from app.api.routes.ha_configs import bp as ha_configs_bp
 from app.api.routes.instances import bp as instances_bp
@@ -68,6 +69,7 @@ def register_blueprints(app):
     api_v1.register_blueprint(data_source_permissions_bp)
     api_v1.register_blueprint(data_source_permission_applications_bp)
     api_v1.register_blueprint(data_query_ops_bp)
+    api_v1.register_blueprint(diagnosis_bp)
     api_v1.register_blueprint(s3_storage_bp)
     api_v1.register_blueprint(sso_config_bp)
     api_v1.register_blueprint(sql_releases_bp)

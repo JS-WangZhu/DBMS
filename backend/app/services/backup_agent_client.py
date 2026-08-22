@@ -117,6 +117,48 @@ def probe_instance_on_agent(instance, password):
     except Exception as exc:
         return {"ok": False, "error": f"agent probe failed: {exc}"}
 
+
+def collect_parameters_on_agent(instance, password, timeout_seconds=15):
+    """Collect runtime parameters through the Agent bound to an instance."""
+    agent_id = getattr(instance, "probe_agent_id", None)
+    if not agent_id:
+        raise BackupAgentError("probe agent is not configured")
+    runtime_settings_supplied = hasattr(instance, "probe_agent_url")
+    url = getattr(instance, "probe_agent_url", None)
+    api_key = getattr(instance, "probe_agent_api_key", None)
+    if not url:
+        if runtime_settings_supplied:
+            raise BackupAgentError("probe agent is unavailable or disabled")
+        url = get_agent_url(agent_id)
+    if api_key is None:
+        api_key = get_agent_api_key(agent_id)
+    timeout = max(3, min(int(timeout_seconds or 15), 120))
+    response = requests.post(
+        f"{url.rstrip('/')}/api/agent/instances/parameters",
+        json={
+            "instance": {
+                "id": getattr(instance, "id", None),
+                "db_type": getattr(instance, "db_type", None),
+                "host_input": getattr(instance, "host_input", None),
+                "resolved_ip": getattr(instance, "resolved_ip", None),
+                "port": getattr(instance, "port", None),
+                "username": getattr(instance, "username", None),
+                "extra_json": getattr(instance, "extra_json", None),
+            },
+            "password": password or "",
+            "timeout_seconds": timeout,
+        },
+        headers={"X-Agent-API-Key": api_key or ""},
+        timeout=(5, timeout + 2),
+    )
+    body = response.json() if response.content else {}
+    if response.status_code >= 400:
+        raise BackupAgentError(body.get("message") or f"agent returned status {response.status_code}")
+    data = body.get("data") if isinstance(body, dict) else None
+    if not isinstance(data, list):
+        raise BackupAgentError("invalid parameter response from agent")
+    return data
+
 def fetch_postgresql_metadata_on_agent(instance, password, agent_id, database=None):
     url = get_agent_url(agent_id)
     api_key = get_agent_api_key(agent_id)

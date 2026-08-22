@@ -1,5 +1,5 @@
 const MENU_PERMISSION_STRUCTURE = [
-  { key: "dashboard_group", label: "总览", children: ["dashboard"] },
+  { key: "dashboard_group", label: "运行总览", children: ["dashboard"] },
   { key: "resource_management", label: "资源管理", children: ["database_apply", "database_recycle", "application_history"] },
   { key: "service_manage", label: "服务管理", children: [
     { key: "mysql", label: "MySQL", children: ["mysql_instances", "mysql_instance_detail", "mysql_clusters", "mysql_connections", "mysql_session_probe"] },
@@ -8,6 +8,7 @@ const MENU_PERMISSION_STRUCTURE = [
     { key: "postgresql", label: "PostgreSQL", children: ["postgresql_instances", "postgresql_clusters"] },
     { key: "doris", label: "Doris", children: ["doris_instances", "doris_clusters"] },
   ] },
+  { key: "diagnosis_tuning", label: "诊断调优", children: ["diagnosis_parameter_check", "diagnosis_slow_query"] },
   { key: "inspection", label: "巡检管理", children: ["inspection_manage", "inspection_param_config"] },
   { key: "data_access", label: "数据访问", children: ["data_query", "data_change", "data_history", "data_permission_apply"] },
   { key: "data_release", label: "数据发布", children: ["sql_release_apply", "sql_release_history"] },

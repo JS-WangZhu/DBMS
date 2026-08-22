@@ -142,6 +142,12 @@
                 <el-input-number v-model="form.thresholds.mysql_connection_usage_pct" :min="1" :max="100" controls-position="right" style="width: 180px" />
               </el-form-item>
             </el-col>
+            <el-col :xs="24" :sm="12">
+              <el-form-item label="握手失败次数">
+                <el-input-number v-model="form.thresholds.mysql_aborted_connects_10m" :min="0" controls-position="right" style="width: 180px" />
+                <el-tag size="small" type="info" effect="plain" class="hint-tag">近 10 分钟增量大于阈值告警</el-tag>
+              </el-form-item>
+            </el-col>
           </el-row>
         </div>
 
@@ -180,6 +186,12 @@
                 <el-input-number v-model="form.thresholds.redis_connection_usage_pct" :min="1" :max="100" controls-position="right" style="width: 180px" />
               </el-form-item>
             </el-col>
+            <el-col :xs="24" :sm="12">
+              <el-form-item label="阻塞客户端数量">
+                <el-input-number v-model="form.thresholds.redis_blocked_clients_10m" :min="0" controls-position="right" style="width: 180px" />
+                <el-tag size="small" type="info" effect="plain" class="hint-tag">近 10 分钟峰值大于阈值告警</el-tag>
+              </el-form-item>
+            </el-col>
           </el-row>
         </div>
 
@@ -197,6 +209,12 @@
             <el-col :xs="24" :sm="12">
               <el-form-item :label="'\u8fde\u63a5\u4f7f\u7528\u7387\uff08%\uff09'">
                 <el-input-number v-model="form.thresholds.postgresql_connection_usage_pct" :min="1" :max="100" controls-position="right" style="width: 180px" />
+              </el-form-item>
+            </el-col>
+            <el-col :xs="24" :sm="12">
+              <el-form-item label="异常连接终止次数">
+                <el-input-number v-model="form.thresholds.postgresql_sessions_fatal_10m" :min="0" controls-position="right" style="width: 180px" />
+                <el-tag size="small" type="info" effect="plain" class="hint-tag">PG 14+，近 10 分钟增量大于阈值告警</el-tag>
               </el-form-item>
             </el-col>
           </el-row>
@@ -258,13 +276,16 @@ const form = reactive({
   thresholds: {
     mysql_replication_lag_seconds: 60,
     mysql_connection_usage_pct: 90,
+    mysql_aborted_connects_10m: 1,
     mongodb_repl_lag_seconds: 60,
     mongodb_cache_used_pct: 90,
     redis_memory_usage_pct: 90,
     redis_connection_usage_pct: 90,
+    redis_blocked_clients_10m: 1,
     host_cpu_usage_pct: 90,
     postgresql_replication_lag_seconds: 60,
     postgresql_connection_usage_pct: 90,
+    postgresql_sessions_fatal_10m: 1,
     host_memory_usage_pct: 90,
     host_data_disk_usage_pct: 90,
     host_disk_io_latency_ms: 20,

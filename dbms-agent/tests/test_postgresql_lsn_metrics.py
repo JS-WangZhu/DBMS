@@ -23,6 +23,8 @@ class FakeCursor:
             return (10, 2, 0)
         if "WITH receiver AS" in self.query:
             return self.replication_row
+        if "SELECT sessions_fatal" in self.query:
+            return (3,)
         if "FROM pg_stat_database" in self.query:
             return (100, 2, 0, 1024)
         raise AssertionError(self.query)
@@ -62,6 +64,7 @@ def test_postgresql_agent_reports_lsn_and_byte_backlog(monkeypatch):
     assert payload["replay_lag_bytes"] == 2048
     assert payload["replication_lag_seconds"] == 12.346
     assert payload["wal_receiver_status"] == "streaming"
+    assert payload["sessions_fatal_total"] == 3
 
 
 def test_postgresql_agent_idle_replica_has_zero_lag(monkeypatch):

@@ -27,12 +27,15 @@ from app.utils.crypto import decrypt_secret
 DEFAULT_THRESHOLDS = {
     "mysql_replication_lag_seconds": 60,
     "mysql_connection_usage_pct": 90,
+    "mysql_aborted_connects_10m": 1,
     "mongodb_repl_lag_seconds": 60,
     "mongodb_cache_used_pct": 90,
     "redis_memory_usage_pct": 90,
     "redis_connection_usage_pct": 90,
+    "redis_blocked_clients_10m": 1,
     "postgresql_replication_lag_seconds": 60,
     "postgresql_connection_usage_pct": 90,
+    "postgresql_sessions_fatal_10m": 1,
     "host_cpu_usage_pct": 90,
     "host_memory_usage_pct": 90,
     "host_data_disk_usage_pct": 90,
@@ -263,6 +266,64 @@ def _collect_agent(agent: BackupAgent, timeout_seconds: int):
 
 
 CPU_AVERAGE_WINDOW_MINUTES = 10
+CONNECTION_ANOMALY_WINDOW_MINUTES = 10
+
+
+def _metric_window_values(instance: DatabaseInstance, metric_key: str, current_value, minutes: int):
+    """Return the baseline plus inspection samples inside a rolling window."""
+    samples = []
+    try:
+        model = snapshot_model_for_instance(instance)
+        if model is not None:
+            since = datetime.now() - timedelta(minutes=minutes)
+            baseline = (
+                model.query
+                .filter(
+                    model.instance_id == instance.id,
+                    model.metric_type == "inspection",
+                    model.collected_at <= since,
+                )
+                .order_by(model.collected_at.desc())
+                .first()
+            )
+            rows = (
+                model.query
+                .filter(
+                    model.instance_id == instance.id,
+                    model.metric_type == "inspection",
+                    model.collected_at > since,
+                )
+                .order_by(model.collected_at.asc())
+                .all()
+            )
+            for row in ([baseline] if baseline else []) + rows:
+                snapshot_payload = row.payload_json if isinstance(row.payload_json, dict) else {}
+                value = _safe_float(snapshot_payload.get(metric_key))
+                if value is not None:
+                    samples.append(value)
+    except Exception:
+        samples = []
+
+    current = _safe_float(current_value)
+    if current is not None:
+        samples.append(current)
+    return samples
+
+
+def _metric_counter_increase_window(instance: DatabaseInstance, metric_key: str, current_value, minutes: int):
+    values = _metric_window_values(instance, metric_key, current_value, minutes)
+    if len(values) < 2:
+        return None
+    increase = values[-1] - values[0]
+    # A negative delta means the database restarted or statistics were reset.
+    if increase < 0:
+        increase = values[-1]
+    return int(max(0, increase))
+
+
+def _metric_max_window(instance: DatabaseInstance, metric_key: str, current_value, minutes: int):
+    values = _metric_window_values(instance, metric_key, current_value, minutes)
+    return int(max(values)) if values else None
 
 
 def _metric_average_window(instance: DatabaseInstance, metric_key: str, current_value, minutes: int = CPU_AVERAGE_WINDOW_MINUTES):
@@ -362,6 +423,20 @@ def _extract_issues(instance: DatabaseInstance, payload: dict, thresholds: dict)
             usage = round(threads_connected * 100 / max_conn, 2)
             if usage >= thresholds["mysql_connection_usage_pct"]:
                 issues.append(_build_issue("mysql_connection_high", "MySQL连接数高", f"连接使用率 {usage}%"))
+        aborted_increase = _metric_counter_increase_window(
+            instance,
+            "aborted_connects_total",
+            payload.get("aborted_connects_total"),
+            CONNECTION_ANOMALY_WINDOW_MINUTES,
+        )
+        if aborted_increase is not None:
+            payload["aborted_connects_increase_10m"] = aborted_increase
+        if aborted_increase is not None and aborted_increase > thresholds["mysql_aborted_connects_10m"]:
+            issues.append(_build_issue(
+                "mysql_aborted_connects",
+                "MySQL新连接握手失败",
+                f"近10分钟 Aborted_connects 增加 {aborted_increase} 次",
+            ))
 
     if instance.db_type == "mongodb":
         lag = _safe_int(payload.get("repl_lag_seconds"))
@@ -396,6 +471,20 @@ def _extract_issues(instance: DatabaseInstance, payload: dict, thresholds: dict)
             issues.append(_build_issue("redis_memory_high", "Redis内存使用率高", f"内存使用率 {memory_pct}%"))
         if connection_pct is not None and connection_pct >= thresholds["redis_connection_usage_pct"]:
             issues.append(_build_issue("redis_connection_high", "Redis连接数使用率高", f"连接数使用率 {connection_pct}%"))
+        blocked_peak = _metric_max_window(
+            instance,
+            "blocked_clients",
+            payload.get("blocked_clients"),
+            CONNECTION_ANOMALY_WINDOW_MINUTES,
+        )
+        if blocked_peak is not None:
+            payload["blocked_clients_max_10m"] = blocked_peak
+        if blocked_peak is not None and blocked_peak > thresholds["redis_blocked_clients_10m"]:
+            issues.append(_build_issue(
+                "redis_blocked_clients",
+                "Redis阻塞客户端过多",
+                f"近10分钟 blocked_clients 峰值 {blocked_peak}",
+            ))
         if payload.get("role") == "slave" and str(payload.get("master_link_status") or "").lower() == "down":
             issues.append(_build_issue("redis_replication_link", "Redis主从链路异常", "master_link_status=down", "critical"))
 
@@ -405,6 +494,20 @@ def _extract_issues(instance: DatabaseInstance, payload: dict, thresholds: dict)
         lag_bytes = _safe_int(payload.get("replication_lag_bytes"))
         if connection_pct is not None and connection_pct >= thresholds["postgresql_connection_usage_pct"]:
             issues.append(_build_issue("postgresql_connection_high", "PostgreSQL\u8fde\u63a5\u6570\u9ad8", f"\u8fde\u63a5\u4f7f\u7528\u7387 {connection_pct}%"))
+        fatal_increase = _metric_counter_increase_window(
+            instance,
+            "sessions_fatal_total",
+            payload.get("sessions_fatal_total"),
+            CONNECTION_ANOMALY_WINDOW_MINUTES,
+        )
+        if fatal_increase is not None:
+            payload["sessions_fatal_increase_10m"] = fatal_increase
+        if fatal_increase is not None and fatal_increase > thresholds["postgresql_sessions_fatal_10m"]:
+            issues.append(_build_issue(
+                "postgresql_sessions_fatal",
+                "PostgreSQL异常连接终止",
+                f"近10分钟 sessions_fatal 增加 {fatal_increase} 次",
+            ))
         if payload.get("replication_role") == "standby":
             receiver_status = str(payload.get("wal_receiver_status") or "").strip().lower()
             if "wal_receiver_status" in payload and receiver_status != "streaming":

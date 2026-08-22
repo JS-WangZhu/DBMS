@@ -125,7 +125,7 @@ def test_mcp_resource_builders_return_safe_complete_views(app):
         assert "file_path" not in encoded_backup
 
         inspection = build_mcp_inspection_status(allowed_cluster_ids=[cluster.id])
-        assert inspection["summary"]["inspection_item_total"] == 22
+        assert inspection["summary"]["inspection_item_total"] == 25
         assert inspection["summary"]["open_alert_total"] == 1
         assert inspection["assets"][0]["inspection_status"] == "abnormal"
         threshold = next(row for row in inspection["inspection_items"] if row["issue_key"] == "mysql_connection_high")

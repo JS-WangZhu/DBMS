@@ -41,6 +41,7 @@ class FakeMysqlCursor:
                 "Questions": "500",
                 "Com_commit": "40",
                 "Com_rollback": "10",
+                "Aborted_connects": "4",
                 "Innodb_row_lock_current_waits": "2",
             }
             key = next((key for key in values if key in self.sql), None)
@@ -107,6 +108,7 @@ def test_mysql_agent_collects_operational_and_replication_metrics(monkeypatch):
     assert payload["qps"] == 5.0
     assert payload["tps"] == 0.5
     assert payload["lock_waits"] == 2
+    assert payload["aborted_connects_total"] == 4
     assert payload["replication_role"] == "slave"
     assert payload["replica_io_running"] is True
     assert payload["replica_sql_running"] is True
@@ -150,6 +152,7 @@ class FakeRedisClient:
             "cluster_enabled": "0",
             "uptime_in_seconds": "3600",
             "connected_clients": "25",
+            "blocked_clients": "2",
             "maxclients": "100",
             "used_memory": "200",
             "used_memory_human": "200B",
@@ -183,6 +186,7 @@ def test_redis_agent_collects_operational_metrics_without_host_metrics(monkeypat
     assert payload["replication_source"] == "redis-primary:6379"
     assert payload["replication_lag_seconds"] == 7
     assert payload["connected_clients"] == 25
+    assert payload["blocked_clients"] == 2
     assert payload["maxclients"] == 100
     assert payload["connection_usage_pct"] == 25.0
     assert payload["memory_usage_pct"] == 20.0
