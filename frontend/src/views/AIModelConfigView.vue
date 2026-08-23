@@ -22,8 +22,14 @@
             <el-switch v-model="row.enabled" @change="toggleEnabled(row)" />
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="180">
+        <el-table-column label="Thinking" width="105">
           <template #default="{ row }">
+            <el-switch v-model="row.thinking_enabled" @change="toggleThinking(row)" />
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="240">
+          <template #default="{ row }">
+            <el-button link type="success" :loading="testingId === row.id" @click="testConfig(row)">检测</el-button>
             <el-button link type="primary" @click="openEditDialog(row)">编辑</el-button>
             <el-button link type="danger" @click="removeConfig(row)">删除</el-button>
           </template>
@@ -48,6 +54,10 @@
         <el-form-item label="设为默认">
           <el-checkbox v-model="form.is_default" />
         </el-form-item>
+        <el-form-item label="启用 Thinking">
+          <el-switch v-model="form.thinking_enabled" />
+          <span class="form-tip">仅对支持 enable_thinking 的 OpenAI 兼容模型生效</span>
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
@@ -60,7 +70,7 @@
 <script setup>
 import { onMounted, ref } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
-import { listAIConfigs, createAIConfig, updateAIConfig, deleteAIConfig } from "../api/modules/ai";
+import { listAIConfigs, createAIConfig, updateAIConfig, deleteAIConfig, testAIConfig } from "../api/modules/ai";
 import { useTabActivationRefresh } from "../composables/useTabActivationRefresh";
 
 const rows = ref([]);
@@ -68,6 +78,7 @@ const loading = ref(false);
 const dialogVisible = ref(false);
 const isEditing = ref(false);
 const saving = ref(false);
+const testingId = ref(null);
 
 const form = ref({
   id: null,
@@ -76,6 +87,7 @@ const form = ref({
   api_key: "",
   model_name: "",
   is_default: false,
+  thinking_enabled: false,
 });
 
 async function loadConfigs() {
@@ -92,7 +104,7 @@ async function loadConfigs() {
 
 function openCreateDialog() {
   isEditing.value = false;
-  form.value = { id: null, name: "", api_url: "", api_key: "", model_name: "", is_default: false };
+  form.value = { id: null, name: "", api_url: "", api_key: "", model_name: "", is_default: false, thinking_enabled: false };
   dialogVisible.value = true;
 }
 
@@ -134,6 +146,28 @@ async function toggleEnabled(row) {
   }
 }
 
+async function toggleThinking(row) {
+  try {
+    await updateAIConfig(row.id, { thinking_enabled: row.thinking_enabled });
+    ElMessage.success(row.thinking_enabled ? "Thinking 已启用" : "Thinking 已关闭");
+  } catch (error) {
+    row.thinking_enabled = !row.thinking_enabled;
+    ElMessage.error(error.response?.data?.message || "操作失败");
+  }
+}
+
+async function testConfig(row) {
+  testingId.value = row.id;
+  try {
+    const { data } = await testAIConfig(row.id);
+    ElMessage.success(data.message || `检测成功：${data.data?.reply || "模型可用"}`);
+  } catch (error) {
+    ElMessage.error(error.response?.data?.message || "模型检测失败");
+  } finally {
+    testingId.value = null;
+  }
+}
+
 async function removeConfig(row) {
   try {
     await ElMessageBox.confirm(`确定删除配置 "${row.name}" 吗?`, "提示", { type: "warning" });
@@ -152,4 +186,5 @@ useTabActivationRefresh(loadConfigs);
 <style scoped>
 .page { padding: 20px; }
 .header-row { display: flex; justify-content: space-between; align-items: center; }
+.form-tip { margin-left: 10px; color: #909399; font-size: 12px; }
 </style>

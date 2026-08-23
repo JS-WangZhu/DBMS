@@ -39,6 +39,7 @@ def ensure_backup_extra_columns():
         "inspection_alerts",
         "sso_configs",
         "sql_releases",
+        "ai_model_configs",
     ]:
         try:
             table_columns[table] = {col["name"] for col in inspector.get_columns(table)}
@@ -73,6 +74,8 @@ def ensure_backup_extra_columns():
         statements.append("ALTER TABLE sso_configs ADD COLUMN avatar_field VARCHAR(128) NOT NULL DEFAULT ''")
     if table_columns["sql_releases"] and "db_type" not in table_columns["sql_releases"]:
         statements.append("ALTER TABLE sql_releases ADD COLUMN db_type VARCHAR(32) NOT NULL DEFAULT 'mysql'")
+    if table_columns["ai_model_configs"] and "thinking_enabled" not in table_columns["ai_model_configs"]:
+        statements.append("ALTER TABLE ai_model_configs ADD COLUMN thinking_enabled BOOLEAN NOT NULL DEFAULT FALSE")
     for permission_table in (
         "user_cluster_permissions",
         "role_group_cluster_permissions",

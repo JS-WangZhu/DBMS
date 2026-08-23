@@ -121,7 +121,7 @@ def test_review_release_calls_ai_and_reports_progress_per_statement(app, monkeyp
     calls = []
     progress = []
 
-    def fake_post(_url, headers, json, timeout):
+    def fake_post(_url, headers, json, timeout, stream):
         calls.append(json["messages"][1]["content"])
         line = len(calls)
         content = (
@@ -130,7 +130,10 @@ def test_review_release_calls_ai_and_reports_progress_per_statement(app, monkeyp
         )
         return SimpleNamespace(
             raise_for_status=lambda: None,
-            json=lambda: {"choices": [{"message": {"content": content}}]},
+            iter_lines=lambda: [
+                ("data: " + __import__("json").dumps({"choices": [{"delta": {"content": content}}]})).encode(),
+                b"data: [DONE]",
+            ],
         )
 
     monkeypatch.setattr(release_service, "get_mysql_metadata", lambda *_args: {"tables": []})
@@ -156,7 +159,7 @@ def test_review_release_calls_ai_and_reports_progress_per_statement(app, monkeyp
     assert "DELETE FROM orders WHERE id=2" in calls[1]
     assert calls[1].count('"review_target": false') == 1
     assert calls[1].count('"review_target": true') == 1
-    assert progress == [(1, 2), (2, 2)]
+    assert progress == [(1, 2), (1, 2), (2, 2), (2, 2)]
     assert [item["status"] for item in reviews] == ["completed", "completed"]
     assert summary == "AI 初审完成：2/2 条通过"
 

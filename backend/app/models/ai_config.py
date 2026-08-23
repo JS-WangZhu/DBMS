@@ -11,6 +11,7 @@ class AIModelConfig(db.Model, TimestampMixin):
     model_name = db.Column(db.String(128), nullable=False)
     is_default = db.Column(db.Boolean, default=False)
     enabled = db.Column(db.Boolean, default=True)
+    thinking_enabled = db.Column(db.Boolean, default=False, nullable=False)
 
     def to_dict(self):
         return {
@@ -21,6 +22,7 @@ class AIModelConfig(db.Model, TimestampMixin):
             "model_name": self.model_name,
             "is_default": self.is_default,
             "enabled": self.enabled,
+            "thinking_enabled": self.thinking_enabled,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }

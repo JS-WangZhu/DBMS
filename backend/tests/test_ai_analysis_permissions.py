@@ -77,3 +77,31 @@ def test_query_user_ai_analysis_still_requires_cluster_query_permission(app, cli
 
     assert response.status_code == 403
     assert response.get_json()["message"] == "no permission for this cluster"
+
+
+def test_model_config_test_endpoint_uses_saved_thinking_setting(app, client, monkeypatch):
+    with app.app_context():
+        config = AIModelConfig(
+            name="thinking-model", api_url="https://ai.example/v1", api_key="test-key",
+            model_name="reasoning-model", is_default=True, enabled=True, thinking_enabled=True,
+        )
+        db.session.add(config)
+        db.session.commit()
+        config_id = config.id
+
+    import app.api.routes.ai_routes as routes
+    captured = {}
+
+    def fake_test(config):
+        captured["thinking_enabled"] = config.thinking_enabled
+        return {"model": config.model_name, "reply": "OK"}
+
+    monkeypatch.setattr(routes, "test_ai_model_config", fake_test)
+    response = client.post(
+        f"/api/v1/ai/configs/{config_id}/test",
+        headers=_login(client, "admin", "admin123"),
+    )
+
+    assert response.status_code == 200
+    assert captured == {"thinking_enabled": True}
+    assert response.get_json()["data"]["reply"] == "OK"

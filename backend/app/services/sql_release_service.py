@@ -6,7 +6,7 @@ from pathlib import Path
 from flask import current_app
 
 from app.models.ai_config import AIModelConfig
-from app.services.ai_service import get_mysql_metadata
+from app.services.ai_service import _chat_payload, _completion_url, get_mysql_metadata
 from app.utils.crypto import decrypt_secret, encrypt_secret
 
 
@@ -79,9 +79,7 @@ def review_release(instance, database, statements, db_type="mysql", progress_cal
     else:
         raise ValueError("不支持的数据库类型")
     engine_name = {"mysql": "MySQL", "mongodb": "MongoDB", "postgresql": "PostgreSQL"}[normalized_type]
-    api_url = (config.api_url or "").strip()
-    if api_url.endswith("/v1") or api_url.endswith("/v1/"):
-        api_url = api_url.rstrip("/") + "/chat/completions"
+    api_url = _completion_url(config)
     import requests
 
     reviews = []
@@ -103,18 +101,43 @@ SQL 上下文：{json.dumps(sql_context, ensure_ascii=False)}
         response = requests.post(
             api_url,
             headers={"Authorization": f"Bearer {config.api_key}", "Content-Type": "application/json"},
-            json={
-                "model": config.model_name,
-                "messages": [
+            json=_chat_payload(config, [
                     {"role": "system", "content": f"你是严谨的 {engine_name} DBA，只输出合法 JSON。"},
                     {"role": "user", "content": prompt},
-                ],
-                "temperature": 0,
-            },
+                ], stream=True, temperature=0),
             timeout=90,
+            stream=True,
         )
         response.raise_for_status()
-        content = response.json().get("choices", [{}])[0].get("message", {}).get("content", "")
+        content_parts, thinking_parts = [], []
+        for raw_line in response.iter_lines():
+            if not raw_line:
+                continue
+            line = raw_line.decode("utf-8")
+            if not line.startswith("data: "):
+                continue
+            data = line[6:]
+            if data == "[DONE]":
+                break
+            try:
+                delta = (json.loads(data).get("choices") or [{}])[0].get("delta") or {}
+            except (TypeError, ValueError, json.JSONDecodeError):
+                continue
+            text = delta.get("content") or ""
+            thinking = delta.get("reasoning_content") or delta.get("reasoning") or ""
+            if text:
+                content_parts.append(text)
+            if thinking:
+                thinking_parts.append(thinking)
+            if progress_callback and (text or thinking):
+                progress_callback({
+                    "line": index, "status": "reviewing",
+                    "stream_content": "".join(content_parts),
+                    "thinking_content": "".join(thinking_parts),
+                }, len(statements))
+        content = "".join(content_parts)
+        if not content:
+            raise ValueError(f"AI 初审未返回第 {index} 条语句的内容")
         parsed = _extract_json(content)
         raw_items = parsed.get("items") if isinstance(parsed, dict) else None
         if not isinstance(raw_items, list) or len(raw_items) != 1 or not isinstance(raw_items[0], dict):

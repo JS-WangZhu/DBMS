@@ -132,6 +132,10 @@
             <div class="review-statement-main">
               <div><strong>第 {{ item.line }} 条</strong><el-tag size="small" :type="reviewItemType(item)">{{ reviewItemLabel(item) }}</el-tag></div>
               <code>{{ item.sql }}</code>
+              <div v-if="item.status === 'reviewing' && (item.thinking_content || item.stream_content)" class="review-live-output">
+                <details v-if="item.thinking_content" open><summary>Thinking</summary><pre>{{ item.thinking_content }}</pre></details>
+                <pre v-if="item.stream_content">{{ item.stream_content }}</pre>
+              </div>
               <p>{{ item.reason }}</p>
               <p v-if="item.suggestion" class="review-suggestion">建议：{{ item.suggestion }}</p>
             </div>
@@ -660,6 +664,10 @@ watch(
 .is-reviewing .review-state-mark { color: #1677ff; background: #e7f2ff; }
 .review-statement-main>div { display: flex; align-items: center; gap: 8px; }
 .review-statement-main code { display: block; margin: 7px 0; color: #27364b; white-space: pre-wrap; word-break: break-all; }
+.review-live-output { margin: 8px 0; border-left: 3px solid #8fc1ff; background: #f8fbff; color: #3b4b61; }
+.review-live-output details { padding: 7px 9px 0; }
+.review-live-output summary { cursor: pointer; color: #6d28d9; font-size: 12px; }
+.review-live-output pre { max-height: 150px; margin: 0; padding: 7px 9px; overflow: auto; white-space: pre-wrap; word-break: break-word; font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; }
 .review-statement-main p { margin: 0; color: #7b879a; font-size: 12px; }
 .review-suggestion { margin-top: 5px!important; color: #b56a00!important; }
 .review-background-tip { float: left; line-height: 32px; color: #8a95a7; font-size: 12px; }

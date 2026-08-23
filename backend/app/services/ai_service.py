@@ -4,6 +4,47 @@ from typing import List, Optional
 from app.models.db_asset import DatabaseInstance
 from app.utils.crypto import decrypt_secret
 
+
+def _completion_url(config):
+    api_url = (config.api_url or "").strip()
+    if api_url.endswith("/v1") or api_url.endswith("/v1/"):
+        return api_url.rstrip("/") + "/chat/completions"
+    return api_url
+
+
+def _chat_payload(config, messages, *, stream=False, temperature=0.7, **extra):
+    payload = {
+        "model": config.model_name,
+        "messages": messages,
+        "temperature": temperature,
+        "stream": stream,
+        **extra,
+    }
+    # OpenAI-compatible reasoning models (such as Qwen) use this field.  Send
+    # both values so the switch can also explicitly turn a model's default
+    # reasoning mode off.
+    payload["enable_thinking"] = bool(getattr(config, "thinking_enabled", False))
+    return payload
+
+
+def test_ai_model_config(config):
+    response = requests.post(
+        _completion_url(config),
+        headers={"Authorization": f"Bearer {config.api_key}", "Content-Type": "application/json"},
+        json=_chat_payload(
+            config,
+            [{"role": "user", "content": "请仅回复 OK，用于确认模型连接。"}],
+            temperature=0,
+            max_tokens=16,
+        ),
+        timeout=20,
+    )
+    response.raise_for_status()
+    body = response.json()
+    choice = (body.get("choices") or [{}])[0]
+    message = choice.get("message") or {}
+    return {"model": config.model_name, "reply": message.get("content") or "OK"}
+
 def get_mysql_metadata(instance: DatabaseInstance, database: str):
     import pymysql
     password = decrypt_secret(instance.password_encrypted) if instance.password_encrypted else None
@@ -120,13 +161,9 @@ def get_postgresql_metadata(instance: DatabaseInstance, database: str):
     }
 
 def analyze_sql_with_ai(config, db_type: str, metadata: dict, sql_list: List[str]):
-    api_url = (config.api_url or "").strip()
+    api_url = _completion_url(config)
     api_key = config.api_key
     model_name = config.model_name
-    
-    # 自动补齐 OpenAI 兼容路径
-    if api_url.endswith("/v1") or api_url.endswith("/v1/"):
-        api_url = api_url.rstrip("/") + "/chat/completions"
     
     # 安全性检查：如果记录的是 https 但被意外变成了 http，这里可以做个记录或尝试修正
     # 但由于 requests 会跟随重定向，如果服务器强制跳转到 http，显示的就是 http
@@ -158,14 +195,10 @@ def analyze_sql_with_ai(config, db_type: str, metadata: dict, sql_list: List[str
         "Content-Type": "application/json"
     }
     
-    payload = {
-        "model": model_name,
-        "messages": [
+    payload = _chat_payload(config, [
             {"role": "system", "content": "你是一个专业的数据库 DBA，精通 SQL 审计和风险评估。"},
             {"role": "user", "content": prompt}
-        ],
-        "temperature": 0.7
-    }
+        ], temperature=0.7)
     
     try:
         # 显式打印请求信息以便调试
@@ -195,12 +228,9 @@ def analyze_sql_with_ai(config, db_type: str, metadata: dict, sql_list: List[str
         return f"AI 分析请求失败 (URL: {api_url}): {str(e)}"
 
 def analyze_sql_with_ai_stream(config, db_type: str, metadata: dict, sql_list: List[str]):
-    api_url = (config.api_url or "").strip()
+    api_url = _completion_url(config)
     api_key = config.api_key
     model_name = config.model_name
-    
-    if api_url.endswith("/v1") or api_url.endswith("/v1/"):
-        api_url = api_url.rstrip("/") + "/chat/completions"
     
     metadata_str = json.dumps(metadata, indent=2, ensure_ascii=False)
     sqls_str = "\n".join(sql_list)
@@ -229,15 +259,10 @@ def analyze_sql_with_ai_stream(config, db_type: str, metadata: dict, sql_list: L
         "Content-Type": "application/json"
     }
     
-    payload = {
-        "model": model_name,
-        "messages": [
+    payload = _chat_payload(config, [
             {"role": "system", "content": "你是一个专业的数据库 DBA，精通 SQL 审计和风险评估。"},
             {"role": "user", "content": prompt}
-        ],
-        "temperature": 0.7,
-        "stream": True
-    }
+        ], stream=True, temperature=0.7)
     
     try:
         response = requests.post(api_url, headers=headers, json=payload, timeout=120, stream=True)

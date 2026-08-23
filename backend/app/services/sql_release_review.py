@@ -23,7 +23,7 @@ def run_sql_release_review(app, release_id: int):
             for item in current:
                 item = dict(item)
                 if item.get("line") == line:
-                    item = {**item, **review, "status": "completed"}
+                    item = {**item, **review}
                 elif item.get("line") == line + 1 and item.get("status") == "pending":
                     item["status"] = "reviewing"
                     item["reason"] = "AI 正在分析该语句"

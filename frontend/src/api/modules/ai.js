@@ -16,6 +16,10 @@ export function deleteAIConfig(id) {
   return client.delete(`/ai/configs/${id}`);
 }
 
+export function testAIConfig(id) {
+  return client.post(`/ai/configs/${id}/test`, null, { timeout: 30000 });
+}
+
 export function performAIAnalysis(data) {
   return client.post("/ai/analyze", data, {
     timeout: 120000, // AI 分析可能比较慢，设置 2 分钟超时

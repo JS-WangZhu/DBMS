@@ -2,7 +2,7 @@ from flask import Blueprint, request, Response, stream_with_context
 from app.api.routes.common import active_user_required, require_menu_permission, require_cluster_permission, api_key_required
 from app.models.ai_config import AIModelConfig
 from app.models.db_asset import DatabaseCluster
-from app.services.ai_service import get_mysql_metadata, get_mongodb_metadata, get_postgresql_metadata, analyze_sql_with_ai, analyze_sql_with_ai_stream
+from app.services.ai_service import get_mysql_metadata, get_mongodb_metadata, get_postgresql_metadata, analyze_sql_with_ai, analyze_sql_with_ai_stream, test_ai_model_config
 from app.services.data_access import pick_instance
 from app.utils.response import ok_response, error_response
 from app.extensions import db
@@ -43,7 +43,8 @@ def create_ai_config():
         api_key=api_key,
         model_name=model_name,
         is_default=payload.get("is_default", False),
-        enabled=payload.get("enabled", True)
+        enabled=payload.get("enabled", True),
+        thinking_enabled=bool(payload.get("thinking_enabled", False)),
     )
     
     if config.is_default:
@@ -69,9 +70,20 @@ def update_ai_config(config_id):
         if config.is_default:
             AIModelConfig.query.filter(AIModelConfig.id != config_id).update({AIModelConfig.is_default: False})
     if "enabled" in payload: config.enabled = payload["enabled"]
+    if "thinking_enabled" in payload: config.thinking_enabled = bool(payload["thinking_enabled"])
     
     db.session.commit()
     return ok_response(data=config.to_dict())
+
+@bp.post("/configs/<int:config_id>/test")
+@require_menu_permission("ai_model_config")
+def test_ai_config(config_id):
+    config = AIModelConfig.query.get_or_404(config_id)
+    try:
+        result = test_ai_model_config(config)
+        return ok_response(data=result, message="模型连接正常")
+    except Exception as exc:
+        return error_response(f"模型检测失败：{exc}", code=502)
 
 @bp.delete("/configs/<int:config_id>")
 @require_menu_permission("ai_model_config")
