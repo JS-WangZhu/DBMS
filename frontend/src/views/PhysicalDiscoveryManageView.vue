@@ -69,6 +69,16 @@
     </el-dialog>
 
     <el-drawer v-model="detailVisible" title="探测明细" size="55%">
+      <el-alert v-if="activeRun" :closable="false" class="run-progress" type="info">
+        <template #title>
+          运行 {{ activeRun.id }} · {{ activeRun.status }} · 已完成
+          {{ activeRun.success_count + activeRun.failed_count }}/{{ activeRun.total_count }}
+        </template>
+        <el-progress
+          :percentage="runProgressPercentage"
+          :status="activeRun.status === 'failed' ? 'exception' : (activeRun.status === 'success' ? 'success' : undefined)"
+        />
+      </el-alert>
       <el-table :data="details">
         <el-table-column prop="instance_name" label="实例" />
         <el-table-column prop="input_ip" label="输入 IP" />
@@ -81,24 +91,33 @@
 </template>
 
 <script setup>
-import { onMounted, reactive, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import {
-  createVcenter, deleteVcenter, getPhysicalDiscoveryConfig, listDiscoveryDetails,
+  createVcenter, deleteVcenter, getDiscoveryRun, getPhysicalDiscoveryConfig, listDiscoveryDetails,
   listDiscoveryRuns, listVcenters, runVcenterDiscovery, testVcenter,
   updatePhysicalDiscoveryConfig, updateVcenter,
 } from "../api/modules/physical_discovery";
 import { discoveryStatusType } from "../utils/physicalDiscovery";
-import { formatBeijingTime } from "../utils/time";
+import { formatUtcTimeAsBeijing } from "../utils/time";
 import { useTabActivationRefresh } from "../composables/useTabActivationRefresh";
 
 const config = reactive({ enabled: false, poll_interval_minutes: 30, connect_timeout_seconds: 10, batch_size: 500 });
 const vcenters = ref([]); const loading = ref(false); const dialogVisible = ref(false);
 const detailVisible = ref(false); const details = ref([]); const page = ref(1);
+const activeRun = ref(null); const activeRunId = ref(null);
 const runs = reactive({ items: [], total: 0 });
 const form = reactive({ id: null, name: "", address: "", port: 443, cidrsText: "", username: "", password: "", verify_ssl: true, enabled: true });
+let runPollingTimer = null; let runPollingBusy = false;
 
-function displayTime(value) { return formatBeijingTime(value) || "-"; }
+const runProgressPercentage = computed(() => {
+  const total = Number(activeRun.value?.total_count || 0);
+  if (!total) return activeRun.value?.status === "running" ? 0 : 100;
+  const completed = Number(activeRun.value?.success_count || 0) + Number(activeRun.value?.failed_count || 0);
+  return Math.min(100, Math.round((completed * 100) / total));
+});
+
+function displayTime(value) { return formatUtcTimeAsBeijing(value) || "-"; }
 
 async function loadAll() {
   loading.value = true;
@@ -106,9 +125,41 @@ async function loadAll() {
     Object.assign(config, (await getPhysicalDiscoveryConfig()).data.data);
     vcenters.value = (await listVcenters()).data.data || [];
     await loadRuns();
+    const running = runs.items.find(item => item.status === "running");
+    if (running && (!runPollingTimer || activeRunId.value !== running.id)) await startRunPolling(running.id);
   } finally { loading.value = false; }
 }
 async function loadRuns() { const data = (await listDiscoveryRuns({ page: page.value, page_size: 20 })).data.data; runs.items = data.items; runs.total = data.total; }
+function stopRunPolling() { if (runPollingTimer) window.clearInterval(runPollingTimer); runPollingTimer = null; }
+async function refreshActiveRun() {
+  const runId = activeRunId.value;
+  if (!runId || runPollingBusy) return;
+  runPollingBusy = true;
+  try {
+    const [runResponse, detailResponse] = await Promise.all([getDiscoveryRun(runId), listDiscoveryDetails(runId)]);
+    if (activeRunId.value !== runId) return;
+    activeRun.value = runResponse.data.data || null;
+    details.value = detailResponse.data.data || [];
+    const index = runs.items.findIndex(item => item.id === runId);
+    if (index >= 0 && activeRun.value) runs.items[index] = activeRun.value;
+    if (activeRun.value?.status !== "running") {
+      stopRunPolling();
+      await loadRuns();
+    }
+  } catch (error) {
+    stopRunPolling();
+    ElMessage.error(error.response?.data?.message || "刷新探测进度失败");
+  } finally { runPollingBusy = false; }
+}
+async function startRunPolling(runId, openDrawer = false) {
+  stopRunPolling();
+  activeRunId.value = runId;
+  if (openDrawer) detailVisible.value = true;
+  await refreshActiveRun();
+  if (activeRun.value?.status === "running" && activeRunId.value === runId) {
+    runPollingTimer = window.setInterval(refreshActiveRun, 1500);
+  }
+}
 async function saveConfig() { Object.assign(config, (await updatePhysicalDiscoveryConfig(config)).data.data); ElMessage.success("配置已保存"); }
 function resetForm() { Object.assign(form, { id: null, name: "", address: "", port: 443, cidrsText: "", username: "", password: "", verify_ssl: true, enabled: true }); }
 function openCreate() { resetForm(); dialogVisible.value = true; }
@@ -117,13 +168,22 @@ function payload() { const data = { ...form, cidrs: form.cidrsText.split(/[\n,]+
 async function saveVcenter() { if (form.id) await updateVcenter(form.id, payload()); else await createVcenter(payload()); dialogVisible.value = false; await loadAll(); }
 async function toggle(row) { await updateVcenter(row.id, { enabled: !row.enabled }); await loadAll(); }
 async function testConnection(row) { await testVcenter(row.id); await loadAll(); ElMessage.success("连接测试已完成"); }
-async function runNow(row) { await runVcenterDiscovery(row.id); ElMessage.success("探测任务已执行"); await loadRuns(); }
+async function runNow(row) {
+  const response = await runVcenterDiscovery(row.id);
+  const runId = response.data.data?.run_id;
+  ElMessage.success("探测任务已提交，结果将实时更新");
+  details.value = [];
+  await loadRuns();
+  if (runId) await startRunPolling(runId, true);
+}
 async function remove(row) { await ElMessageBox.confirm(`确认删除 ${row.name}？`, "提示"); await deleteVcenter(row.id); await loadAll(); }
-async function showDetails(row) { details.value = (await listDiscoveryDetails(row.id)).data.data || []; detailVisible.value = true; }
+async function showDetails(row) { activeRun.value = row; await startRunPolling(row.id, true); }
 onMounted(loadAll);
+onBeforeUnmount(stopRunPolling);
 useTabActivationRefresh(loadAll);
 </script>
 
 <style scoped>
 .page { padding: 18px; } .section { margin-top: 16px; } .header { display:flex; justify-content:space-between; align-items:center; }
+.run-progress { margin-bottom: 12px; }
 </style>

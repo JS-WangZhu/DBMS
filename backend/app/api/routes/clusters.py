@@ -13,6 +13,7 @@ from app.models.audit_log import AuditLog
 from app.models.db_asset import DatabaseCluster, DatabaseInstance
 from app.models.ha_config import HAConfig
 from app.models.monitor_snapshot import snapshot_model_for_instance
+from app.models.notify_target import BackupNotifyTarget
 from app.models.user import User
 from app.services.monitor_snapshot_service import latest_snapshot_for_instance
 from app.services.redis_cache import set_latest_snapshot
@@ -186,6 +187,28 @@ def _normalize_data_access_route(value):
         "query": normalize_part("query"),
         "change": normalize_part("change"),
     }
+
+
+def _normalize_notify_target_ids(value):
+    target_ids = []
+    for item in value or []:
+        try:
+            target_id = int(item)
+        except (TypeError, ValueError):
+            continue
+        if target_id > 0:
+            target_ids.append(target_id)
+    return sorted(set(target_ids))
+
+
+def _validate_notify_target_ids(target_ids):
+    if not target_ids:
+        return None
+    existing_ids = {
+        row.id for row in BackupNotifyTarget.query.filter(BackupNotifyTarget.id.in_(target_ids)).all()
+    }
+    missing_ids = sorted(set(target_ids) - existing_ids)
+    return f"notification targets not found: {missing_ids}" if missing_ids else None
 
 
 def _parse_page_args():
@@ -402,6 +425,7 @@ def create_cluster():
     description = payload.get("description")
     ha_domain = (payload.get("ha_domain") or "").strip() or None
     data_access_route = _normalize_data_access_route(payload.get("data_access_route_json"))
+    notify_target_ids = _normalize_notify_target_ids(payload.get("notify_target_ids"))
 
     if not name or not db_type:
         return error_response("name and db_type are required", code=400)
@@ -411,6 +435,9 @@ def create_cluster():
         ha_mode = _normalize_ha_mode(payload.get("ha_mode"), db_type)
     except ValueError as exc:
         return error_response(str(exc), code=400)
+    notify_error = _validate_notify_target_ids(notify_target_ids)
+    if notify_error:
+        return error_response(notify_error, code=400)
 
     effective_business_line = business_line or namespace or ""
     cluster = DatabaseCluster(
@@ -423,6 +450,7 @@ def create_cluster():
         ha_domain=ha_domain,
         ha_mode=ha_mode,
         data_access_route_json=data_access_route,
+        notify_target_ids=notify_target_ids,
     )
     db.session.add(cluster)
     db.session.commit()
@@ -459,6 +487,12 @@ def update_cluster(cluster_id):
             return error_response(str(exc), code=400)
     if "data_access_route_json" in payload:
         cluster.data_access_route_json = _normalize_data_access_route(payload.get("data_access_route_json"))
+    if "notify_target_ids" in payload:
+        notify_target_ids = _normalize_notify_target_ids(payload.get("notify_target_ids"))
+        notify_error = _validate_notify_target_ids(notify_target_ids)
+        if notify_error:
+            return error_response(notify_error, code=400)
+        cluster.notify_target_ids = notify_target_ids
 
     db.session.commit()
     log_audit(user_id=None, action="cluster.update", target_type="cluster", target_id=str(cluster.id), detail=payload)

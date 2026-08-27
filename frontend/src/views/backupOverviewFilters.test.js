@@ -4,19 +4,27 @@ import test from "node:test";
 import { buildClusterLabel, filterClusterOptions } from "./backupOverviewFilters.js";
 
 const items = [
-  { cluster_id: 1, cluster_name: "测试集群", db_type: "mysql", business_line: "测试业务", backup_status: "normal" },
-  { cluster_id: 2, cluster_name: "Mongo集群", db_type: "mongodb", business_line: "开发业务", backup_status: "abnormal" },
-  { cluster_id: 3, cluster_name: "Redis集群", db_type: "redis", business_line: "测试业务", backup_status: "abnormal" },
+  { cluster_id: 1, cluster_name: "测试集群", db_type: "mysql", business_line: "测试业务", environment: "prod", backup_status: "normal" },
+  { cluster_id: 2, cluster_name: "Mongo集群", db_type: "mongodb", business_line: "开发业务", environment: "test", backup_status: "abnormal" },
+  { cluster_id: 3, cluster_name: "Redis集群", db_type: "redis", business_line: "测试业务", environment: "prod", backup_status: "abnormal" },
 ];
 
 test("集群选项受业务、数据库类型和备份结果单向联动", () => {
   assert.deepEqual(
     filterClusterOptions(items, {
       business: "测试业务",
+      environment: "prod",
       dbType: "redis",
       result: "abnormal",
     }).map((item) => item.cluster_id),
     [3]
+  );
+});
+
+test("环境筛选只保留指定环境的集群", () => {
+  assert.deepEqual(
+    filterClusterOptions(items, { environment: "prod" }).map((item) => item.cluster_id),
+    [1, 3]
   );
 });
 

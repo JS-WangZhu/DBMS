@@ -17,6 +17,11 @@ export function buildClusterLabel(item, dbTypeSelected) {
 
 export function filterClusterOptions(items, filters = {}) {
   return (items || []).filter((item) => {
+    const matchesEnvironment =
+      !filters.environment ||
+      (filters.environment === "__unset__"
+        ? !item.environment
+        : item.environment === filters.environment);
     const matchesBusiness =
       !filters.business ||
       (filters.business === "__unset__"
@@ -24,6 +29,6 @@ export function filterClusterOptions(items, filters = {}) {
         : item.business_line === filters.business);
     const matchesDbType = !filters.dbType || item.db_type === filters.dbType;
     const matchesResult = !filters.result || item.backup_status === filters.result;
-    return matchesBusiness && matchesDbType && matchesResult;
+    return matchesEnvironment && matchesBusiness && matchesDbType && matchesResult;
   });
 }

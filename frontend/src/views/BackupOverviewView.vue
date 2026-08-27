@@ -4,29 +4,29 @@
       <el-col :xs="12" :sm="6">
         <el-card shadow="never" class="summary-card">
           <div class="summary-label">总集群数量</div>
-          <div class="summary-value">{{ summary.total_clusters }}</div>
+          <div class="summary-value">{{ visibleSummary.total_clusters }}</div>
         </el-card>
       </el-col>
       <el-col :xs="12" :sm="6">
         <el-card shadow="never" class="summary-card normal-card">
           <div class="summary-label">备份集正常</div>
-          <div class="summary-value">{{ summary.normal_backup_sets }}</div>
+          <div class="summary-value">{{ visibleSummary.normal_backup_sets }}</div>
         </el-card>
       </el-col>
       <el-col :xs="12" :sm="6">
         <el-card shadow="never" class="summary-card abnormal-card">
           <div class="summary-label">备份集异常</div>
-          <div class="summary-value">{{ summary.abnormal_backup_sets }}</div>
+          <div class="summary-value">{{ visibleSummary.abnormal_backup_sets }}</div>
         </el-card>
       </el-col>
       <el-col :xs="12" :sm="6">
         <el-card shadow="never" class="summary-card">
           <div class="summary-label">总体正常比例</div>
           <div class="ratio-row">
-            <div class="summary-value">{{ formatRatio(summary.normal_ratio) }}</div>
+            <div class="summary-value">{{ formatRatio(visibleSummary.normal_ratio) }}</div>
             <el-progress
               class="ratio-progress"
-              :percentage="summary.normal_ratio"
+              :percentage="visibleSummary.normal_ratio"
               :show-text="false"
               :stroke-width="8"
               color="#67c23a"
@@ -58,6 +58,14 @@
         </el-select>
         <el-select v-model="dbTypeFilter" clearable placeholder="筛选数据库类型" class="db-type-filter">
           <el-option v-for="item in dbTypeOptions" :key="item" :label="dbTypeLabel(item)" :value="item" />
+        </el-select>
+        <el-select v-model="environmentFilter" filterable clearable placeholder="全部环境" class="environment-filter">
+          <el-option
+            v-for="item in environmentOptions"
+            :key="item"
+            :label="item === '__unset__' ? '未设置' : item"
+            :value="item"
+          />
         </el-select>
         <el-select
           v-model="clusterFilter"
@@ -161,6 +169,7 @@ import {
 
 const loading = ref(false);
 const clusterFilter = ref(null);
+const environmentFilter = ref("prod");
 const businessFilter = ref("");
 const dbTypeFilter = ref("");
 const resultFilter = ref("");
@@ -176,10 +185,14 @@ const summary = reactive({
 
 const clusterOptions = computed(() =>
   filterClusterOptions(summary.items, {
+    environment: environmentFilter.value,
     business: businessFilter.value,
     dbType: dbTypeFilter.value,
     result: resultFilter.value,
   })
+);
+const environmentOptions = computed(() =>
+  [...new Set((summary.items || []).map((item) => item.environment || "__unset__"))].sort()
 );
 const businessOptions = computed(() =>
   [...new Set((summary.items || []).map((item) => item.business_line || "__unset__"))].sort()
@@ -189,21 +202,34 @@ const dbTypeOptions = computed(() =>
 );
 const filteredItems = computed(() =>
   (summary.items || []).filter((item) => {
+    const matchesEnvironment =
+      !environmentFilter.value ||
+      (environmentFilter.value === "__unset__" ? !item.environment : item.environment === environmentFilter.value);
     const matchesCluster = !clusterFilter.value || item.cluster_id === clusterFilter.value;
     const matchesBusiness =
       !businessFilter.value ||
       (businessFilter.value === "__unset__" ? !item.business_line : item.business_line === businessFilter.value);
     const matchesDbType = !dbTypeFilter.value || item.db_type === dbTypeFilter.value;
     const matchesResult = !resultFilter.value || item.backup_status === resultFilter.value;
-    return matchesCluster && matchesBusiness && matchesDbType && matchesResult;
+    return matchesEnvironment && matchesCluster && matchesBusiness && matchesDbType && matchesResult;
   })
 );
+const visibleSummary = computed(() => {
+  const total = filteredItems.value.length;
+  const normal = filteredItems.value.filter((item) => item.backup_status === "normal").length;
+  return {
+    total_clusters: total,
+    normal_backup_sets: normal,
+    abnormal_backup_sets: total - normal,
+    normal_ratio: total ? Math.round((normal * 10000) / total) / 100 : 0,
+  };
+});
 const paginatedItems = computed(() => {
   const start = (currentPage.value - 1) * pageSize.value;
   return filteredItems.value.slice(start, start + pageSize.value);
 });
 
-watch([clusterFilter, businessFilter, dbTypeFilter, resultFilter, pageSize], () => {
+watch([clusterFilter, environmentFilter, businessFilter, dbTypeFilter, resultFilter, pageSize], () => {
   currentPage.value = 1;
 });
 
@@ -371,6 +397,7 @@ useTabActivationRefresh(loadOverview);
   width: 180px;
 }
 
+.environment-filter,
 .business-filter,
 .db-type-filter {
   width: 190px;
@@ -436,6 +463,7 @@ useTabActivationRefresh(loadOverview);
   }
 
   .cluster-filter,
+  .environment-filter,
   .business-filter,
   .db-type-filter,
   .result-filter {

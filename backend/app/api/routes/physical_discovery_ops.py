@@ -1,11 +1,11 @@
 from datetime import datetime
 
-from flask import Blueprint, request
+from flask import Blueprint, current_app, request
 
 from app.api.routes.common import active_user_required, require_menu_permission
 from app.extensions import db
 from app.models.physical_discovery import PhysicalDiscoveryDetail, PhysicalDiscoveryRun, VCenterConfig
-from app.services.physical_discovery import run_discovery
+from app.services.physical_discovery import start_discovery_async
 from app.services.physical_discovery_config import normalize_cidrs, validate_non_overlapping_cidrs
 from app.services.vcenter_readonly import ReadOnlyVCenterClient
 from app.utils.crypto import decrypt_secret, encrypt_secret
@@ -81,10 +81,16 @@ def test_vcenter(vcenter_id):
 @require_menu_permission("physical_discovery_manage")
 def run_vcenter(vcenter_id):
     try:
-        run = run_discovery(vcenter_id=vcenter_id, trigger_type="manual")
+        run_id = start_discovery_async(
+            app=current_app._get_current_object(),
+            vcenter_id=vcenter_id,
+            trigger_type="manual",
+        )
     except RuntimeError as exc:
         return error_response(str(exc), code=409)
-    return ok_response(data={"run_id": run.id if run else None}, code=202)
+    except ValueError as exc:
+        return error_response(str(exc), code=404)
+    return ok_response(data={"run_id": run_id}, code=202)
 
 
 def _run_dict(row):
@@ -111,6 +117,15 @@ def list_runs():
     total = query.count()
     rows = query.order_by(PhysicalDiscoveryRun.id.desc()).offset((page - 1) * page_size).limit(page_size).all()
     return ok_response(data={"items": [_run_dict(row) for row in rows], "total": total, "page": page, "page_size": page_size})
+
+
+@bp.get("/runs/<int:run_id>")
+@active_user_required
+def get_run(run_id):
+    row = db.session.get(PhysicalDiscoveryRun, run_id)
+    if row is None:
+        return error_response("physical discovery run not found", code=404)
+    return ok_response(data=_run_dict(row))
 
 
 @bp.get("/runs/<int:run_id>/details")

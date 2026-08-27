@@ -434,7 +434,7 @@ def _extract_issues(instance: DatabaseInstance, payload: dict, thresholds: dict)
         if aborted_increase is not None and aborted_increase > thresholds["mysql_aborted_connects_10m"]:
             issues.append(_build_issue(
                 "mysql_aborted_connects",
-                "MySQL新连接握手失败",
+                "MySQL Aborted_connects 连接被拒",
                 f"近10分钟 Aborted_connects 增加 {aborted_increase} 次",
             ))
 
@@ -527,7 +527,14 @@ def _extract_issues(instance: DatabaseInstance, payload: dict, thresholds: dict)
 def _send_event_notification(event_type: str, cfg: InspectionConfig, instance: DatabaseInstance, cluster: DatabaseCluster, issue_or_alert):
     if not cfg.notify_enabled:
         return {"ok": False, "message": "notify disabled"}
-    target_ids = cfg.get_notify_target_ids()
+    target_ids = []
+    for item in (cluster.notify_target_ids if cluster else None) or []:
+        try:
+            target_ids.append(int(item))
+        except (TypeError, ValueError):
+            continue
+    if not target_ids:
+        target_ids = cfg.get_notify_target_ids()
     if not target_ids:
         return {"ok": False, "message": "no targets"}
     cluster_name = f"{cluster.name}" if cluster else "-"

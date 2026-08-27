@@ -1116,10 +1116,9 @@ function buildExtraJsonPayload() {
 }
 
 function clusterOptionLabel(item) {
-  const line = item.business_line || item.namespace || "";
-  const env = item.environment || "";
-  const parts = [line, env, item.name].filter(Boolean);
-  return parts.length ? parts.join("/") : item.name;
+  const name = item.name || `集群-${item.id}`;
+  const description = String(item.description || "").trim();
+  return description ? `${name}（${description}）` : name;
 }
 
 function resolveClusterName(clusterId) {

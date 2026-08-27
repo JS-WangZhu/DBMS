@@ -1,4 +1,7 @@
-from app.models.physical_discovery import VCenterConfig
+from datetime import datetime
+
+from app.extensions import db
+from app.models.physical_discovery import PhysicalDiscoveryRun, VCenterConfig
 
 
 def _headers(client):
@@ -36,3 +39,48 @@ def test_runs_endpoint_returns_paginated_shape(client):
 
     assert response.status_code == 200
     assert response.get_json()["data"] == {"items": [], "total": 0, "page": 1, "page_size": 20}
+
+
+def test_manual_run_returns_background_run_id_immediately(client, monkeypatch):
+    from app.api.routes import physical_discovery_ops
+
+    headers = _headers(client)
+    created = _create(client, headers)
+    calls = []
+    monkeypatch.setattr(
+        physical_discovery_ops,
+        "start_discovery_async",
+        lambda **kwargs: calls.append(kwargs["vcenter_id"]) or 42,
+    )
+
+    response = client.post(
+        f"/api/v1/physical-discovery/vcenters/{created['id']}/run",
+        headers=headers,
+    )
+
+    assert response.status_code == 202
+    assert response.get_json()["data"] == {"run_id": 42}
+    assert calls == [created["id"]]
+
+
+def test_single_run_endpoint_exposes_live_counts(client):
+    headers = _headers(client)
+    with client.application.app_context():
+        row = PhysicalDiscoveryRun(
+            vcenter_name="vc-live",
+            trigger_type="manual",
+            status="running",
+            started_at=datetime.utcnow(),
+            total_count=5,
+            success_count=2,
+            failed_count=1,
+        )
+        db.session.add(row)
+        db.session.commit()
+        run_id = row.id
+
+    response = client.get(f"/api/v1/physical-discovery/runs/{run_id}", headers=headers)
+
+    assert response.status_code == 200
+    assert response.get_json()["data"]["status"] == "running"
+    assert response.get_json()["data"]["success_count"] == 2

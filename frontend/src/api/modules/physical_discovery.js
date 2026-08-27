@@ -9,4 +9,5 @@ export const deleteVcenter = (id) => client.delete(`/physical-discovery/vcenters
 export const testVcenter = (id) => client.post(`/physical-discovery/vcenters/${id}/test`);
 export const runVcenterDiscovery = (id) => client.post(`/physical-discovery/vcenters/${id}/run`);
 export const listDiscoveryRuns = (params) => client.get("/physical-discovery/runs", { params });
+export const getDiscoveryRun = (id) => client.get(`/physical-discovery/runs/${id}`);
 export const listDiscoveryDetails = (id) => client.get(`/physical-discovery/runs/${id}/details`);

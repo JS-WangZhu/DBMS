@@ -143,7 +143,7 @@
               </el-form-item>
             </el-col>
             <el-col :xs="24" :sm="12">
-              <el-form-item label="握手失败次数">
+              <el-form-item label="Aborted_connects 连接被拒">
                 <el-input-number v-model="form.thresholds.mysql_aborted_connects_10m" :min="0" controls-position="right" style="width: 180px" />
                 <el-tag size="small" type="info" effect="plain" class="hint-tag">近 10 分钟增量大于阈值告警</el-tag>
               </el-form-item>

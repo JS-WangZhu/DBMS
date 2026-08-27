@@ -1,4 +1,5 @@
-from sqlalchemy import event
+import threading
+import time
 
 from app.extensions import db
 from app.models.db_asset import DatabaseInstance
@@ -78,18 +79,19 @@ def test_run_batches_once_updates_auto_and_preserves_manual_or_failed(app):
         assert PhysicalDiscoveryDetail.query.filter_by(instance_id=outside_cidr.id).count() == 0
 
 
-def test_run_commits_instance_updates_in_configured_batches(app):
+def test_run_persists_matched_instances_as_vcenter_facts_arrive(app):
     from app.services.physical_discovery import run_discovery
 
     class FakeClient:
         def __init__(self, **kwargs):
             pass
 
-        def query_vm_host_facts(self):
-            return [
-                {"vm_ips": [f"10.20.1.{index}"], "vsan_enabled": False, "management_ip": f"192.0.2.{index}"}
-                for index in range(1, 4)
-            ]
+        def iter_vm_host_facts(self):
+            yield {"vm_ips": ["10.20.1.1"], "vsan_enabled": False, "management_ip": "192.0.2.1"}
+            assert PhysicalDiscoveryDetail.query.filter_by(instance_name="auto-1").count() == 1
+            yield {"vm_ips": ["10.20.1.2"], "vsan_enabled": False, "management_ip": "192.0.2.2"}
+            assert PhysicalDiscoveryDetail.query.filter_by(instance_name="auto-2").count() == 1
+            yield {"vm_ips": ["10.20.1.3"], "vsan_enabled": False, "management_ip": "192.0.2.3"}
 
         def close(self):
             pass
@@ -111,16 +113,63 @@ def test_run_commits_instance_updates_in_configured_batches(app):
         db.session.add_all([config, vc, *instances])
         db.session.commit()
 
-        commits = []
-        session = db.session()
+        run = run_discovery(vcenter_id=vc.id, trigger_type="manual", client_factory=FakeClient)
 
-        def record_commit(current):
-            commits.append(True)
+        assert run.status == "success"
+        assert run.success_count == 3
+        assert PhysicalDiscoveryDetail.query.filter_by(run_id=run.id).count() == 3
 
-        event.listen(session, "after_commit", record_commit)
-        try:
-            run_discovery(vcenter_id=vc.id, trigger_type="manual", client_factory=FakeClient)
-        finally:
-            event.remove(session, "after_commit", record_commit)
 
-        assert len(commits) == 4
+def test_async_start_returns_running_record_before_worker_finishes(app):
+    from app.services.physical_discovery import start_discovery_async
+
+    started = threading.Event()
+    release = threading.Event()
+
+    class BlockingClient:
+        def __init__(self, **kwargs):
+            assert kwargs["timeout"] == 7
+
+        def iter_vm_host_facts(self):
+            started.set()
+            release.wait(timeout=2)
+            yield {"vm_ips": ["10.20.1.8"], "vsan_enabled": False, "management_ip": "192.0.2.8"}
+
+        def close(self):
+            pass
+
+    with app.app_context():
+        config = PhysicalDiscoveryConfig(connect_timeout_seconds=7, batch_size=500)
+        vc = VCenterConfig(
+            name="vc-async", address="vc-async.example.com", port=443,
+            cidrs_json=["10.20.0.0/16"], username="readonly",
+            password_encrypted=encrypt_secret("secret"), enabled=True,
+        )
+        instance = DatabaseInstance(
+            name="async-target", db_type="mysql", host_input="10.20.1.8", port=3306,
+            extra_json={"physical_discovery_mode": "auto"},
+        )
+        db.session.add_all([config, vc, instance])
+        db.session.commit()
+
+        run_id = start_discovery_async(app, vc.id, client_factory=BlockingClient)
+        assert started.wait(timeout=1)
+        db.session.expire_all()
+        running = db.session.get(PhysicalDiscoveryRun, run_id)
+        assert running.status == "running"
+        assert running.finished_at is None
+        assert PhysicalDiscoveryDetail.query.filter_by(run_id=run_id).count() == 0
+
+        release.set()
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline:
+            db.session.expire_all()
+            if db.session.get(PhysicalDiscoveryRun, run_id).status == "success":
+                break
+            time.sleep(0.02)
+
+        db.session.expire_all()
+        completed = db.session.get(PhysicalDiscoveryRun, run_id)
+        assert completed.status == "success"
+        assert completed.success_count == 1
+        assert PhysicalDiscoveryDetail.query.filter_by(run_id=run_id).count() == 1

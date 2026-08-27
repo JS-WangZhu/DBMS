@@ -1445,6 +1445,17 @@ async function logout() {
   transition: height 220ms linear, padding-top 220ms linear, padding-bottom 220ms linear;
 }
 
+:deep(.sidebar .el-collapse-transition-enter-active),
+:deep(.sidebar .el-collapse-transition-leave-active) {
+  transition: max-height 220ms linear, padding-top 220ms linear, padding-bottom 220ms linear;
+}
+
+/* Keep the expanded state measurable so Element Plus does not jump from a pixel max-height to auto. */
+:deep(.sidebar .el-sub-menu.is-opened > .el-menu) {
+  max-height: 10000px;
+  overflow: hidden;
+}
+
 :deep(.sidebar .el-menu-item),
 :deep(.sidebar .el-sub-menu__title) {
   height: 36px;
@@ -1526,6 +1537,7 @@ async function logout() {
 
 :deep(.sidebar .el-sub-menu__icon-arrow) {
   color: #667085;
+  transition: transform 220ms linear;
 }
 
 .topbar {

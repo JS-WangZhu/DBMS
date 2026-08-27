@@ -5,11 +5,13 @@ import ssl
 def resolve_physical_address(fact):
     if bool(fact.get("vsan_enabled")):
         return "vSAN"
-    value = str(fact.get("management_ip") or "").strip()
-    try:
-        return str(ipaddress.ip_address(value))
-    except ValueError as exc:
-        raise ValueError("ESXi Management VMkernel IP is unavailable") from exc
+    for raw_value in (fact.get("management_ip"), fact.get("host_name")):
+        value = str(raw_value or "").strip()
+        try:
+            return str(ipaddress.ip_address(value))
+        except ValueError:
+            continue
+    raise ValueError("ESXi Management VMkernel IP is unavailable")
 
 
 def _vm_ips(vm):
@@ -33,12 +35,32 @@ def _management_ip(host):
         if str(getattr(config, "nicType", "")).lower() == "management":
             selected.update(getattr(config, "selectedVnic", None) or [])
     network = getattr(getattr(host, "config", None), "network", None)
-    for vnic in getattr(network, "vnic", None) or []:
-        if getattr(vnic, "key", None) not in selected and getattr(vnic, "device", None) not in selected:
+    vnics = list(getattr(network, "vnic", None) or [])
+    for vnic in vnics:
+        key = str(getattr(vnic, "key", "") or "")
+        device = str(getattr(vnic, "device", "") or "")
+        selected_match = key in selected or device in selected or any(
+            str(item).endswith(f"-{device}") or str(item).endswith(f"-{key}") for item in selected
+        )
+        if not selected_match:
             continue
         value = getattr(getattr(getattr(vnic, "spec", None), "ip", None), "ipAddress", None)
         if value:
             return str(value)
+    # Some ESXi versions omit management netConfig associations from the
+    # retrieved property set. vmk0 is the conventional management VMkernel;
+    # use it only as a deterministic fallback instead of guessing among NICs.
+    for vnic in vnics:
+        if str(getattr(vnic, "device", "") or "").lower() != "vmk0":
+            continue
+        value = getattr(getattr(getattr(vnic, "spec", None), "ip", None), "ipAddress", None)
+        if value:
+            return str(value)
+    host_name = str(getattr(host, "name", "") or "").strip()
+    try:
+        return str(ipaddress.ip_address(host_name))
+    except ValueError:
+        pass
     return None
 
 
@@ -76,21 +98,17 @@ def _default_query(session):
     content = session.RetrieveContent()
     view = content.viewManager.CreateContainerView(content.rootFolder, [vim.VirtualMachine], True)
     try:
-        facts = []
         for vm in list(view.view):
             host = getattr(getattr(vm, "runtime", None), "host", None)
             if host is None:
                 continue
-            facts.append(
-                {
-                    "vm_name": str(getattr(vm, "name", "")),
-                    "vm_ips": _vm_ips(vm),
-                    "host_name": str(getattr(host, "name", "")),
-                    "management_ip": _management_ip(host),
-                    "vsan_enabled": _vsan_enabled(host),
-                }
-            )
-        return facts
+            yield {
+                "vm_name": str(getattr(vm, "name", "")),
+                "vm_ips": _vm_ips(vm),
+                "host_name": str(getattr(host, "name", "")),
+                "management_ip": _management_ip(host),
+                "vsan_enabled": _vsan_enabled(host),
+            }
     finally:
         view.Destroy()
 
@@ -120,7 +138,10 @@ class ReadOnlyVCenterClient:
         )
 
     def query_vm_host_facts(self):
-        return list(self._query_executor(self._session))
+        return list(self.iter_vm_host_facts())
+
+    def iter_vm_host_facts(self):
+        yield from self._query_executor(self._session)
 
     def close(self):
         if self._session is not None:

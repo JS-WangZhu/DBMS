@@ -21,7 +21,7 @@ INSPECTION_ITEM_DEFINITIONS = (
     ("mysql_replica_thread", "mysql", "MySQL 复制线程状态", None, None),
     ("mysql_replication_lag", "mysql", "MySQL 复制延迟", "mysql_replication_lag_seconds", "seconds"),
     ("mysql_connection_high", "mysql", "MySQL 连接使用率", "mysql_connection_usage_pct", "percent"),
-    ("mysql_aborted_connects", "mysql", "MySQL 新连接握手失败", "mysql_aborted_connects_10m", "count_per_10m"),
+    ("mysql_aborted_connects", "mysql", "MySQL Aborted_connects 连接被拒", "mysql_aborted_connects_10m", "count_per_10m"),
     ("mongodb_replication_lag", "mongodb", "MongoDB 复制延迟", "mongodb_repl_lag_seconds", "seconds"),
     ("mongodb_cache_high", "mongodb", "MongoDB 缓存使用率", "mongodb_cache_used_pct", "percent"),
     ("redis_cluster_state", "redis", "Redis 集群状态", None, None),

@@ -10,7 +10,7 @@ const source = fs.readFileSync(
 
 
 test("physical discovery displays all visible timestamps in Beijing time", () => {
-  assert.match(source, /import \{ formatBeijingTime \} from "\.\.\/utils\/time"/);
+  assert.match(source, /import \{ formatUtcTimeAsBeijing \} from "\.\.\/utils\/time"/);
   assert.match(source, /displayTime\(s\.row\.last_tested_at\)/);
   assert.match(source, /displayTime\(s\.row\.started_at\)/);
   assert.match(source, /label="结束时间"/);

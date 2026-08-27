@@ -788,4 +788,15 @@ CREATE TABLE `vcenter_configs`  (
   UNIQUE INDEX `name`(`name` ASC) USING BTREE
 ) ENGINE = InnoDB CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = Dynamic;
 
+-- ----------------------------
+-- Foreign key update for data_source_group_cluster_permissions
+-- ----------------------------
+ALTER TABLE `data_source_group_cluster_permissions`
+  DROP FOREIGN KEY `data_source_group_cluster_permissions_ibfk_2`;
+
+ALTER TABLE `data_source_group_cluster_permissions`
+  ADD CONSTRAINT `data_source_group_cluster_permissions_ibfk_2`
+  FOREIGN KEY (`cluster_id`) REFERENCES `db_clusters` (`id`)
+  ON DELETE CASCADE;
+
 SET FOREIGN_KEY_CHECKS = 1;

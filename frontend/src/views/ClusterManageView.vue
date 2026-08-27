@@ -54,6 +54,9 @@
         </template>
       </el-table-column>
       <el-table-column prop="description" label="描述" min-width="240" show-overflow-tooltip />
+      <el-table-column label="消息通知地址" min-width="200" show-overflow-tooltip>
+        <template #default="scope">{{ notifyTargetSummary(scope.row.notify_target_ids) }}</template>
+      </el-table-column>
       <el-table-column prop="created_at" label="创建时间" min-width="180">
         <template #default="scope">
           {{ formatBeijingTime(scope.row.created_at) }}
@@ -87,6 +90,16 @@
         <el-form-item label="环境"><el-input v-model.trim="form.environment" placeholder="可选，如：prod/test" /></el-form-item>
         <el-form-item label="集群名称"><el-input v-model.trim="form.name" /></el-form-item>
         <el-form-item label="高可用域名"><el-input v-model.trim="form.ha_domain" placeholder="可填域名或IP" /></el-form-item>
+        <el-form-item label="消息通知地址">
+          <el-select v-model="form.notify_target_ids" multiple filterable clearable collapse-tags collapse-tags-tooltip style="width: 100%" placeholder="缺省为空">
+            <el-option
+              v-for="item in enabledNotifyTargets"
+              :key="item.id"
+              :label="`${item.name}（${item.channel === 'wecom' ? '企业微信' : '邮件'}）`"
+              :value="item.id"
+            />
+          </el-select>
+        </el-form-item>
         <el-form-item v-if="dbType === 'mysql'" :label="'HA管理模式'">
           <el-select v-model="form.ha_mode" style="width: 100%">
             <el-option v-for="item in haModeOptions" :key="item.value" :label="item.label" :value="item.value" />
@@ -151,6 +164,7 @@ import { useTabActivationRefresh } from "../composables/useTabActivationRefresh"
   import { useRoute } from "vue-router";
 
   import { createCluster, deleteCluster, listClusters, updateCluster } from "../api/modules/clusters";
+  import { listNotifyTargets } from "../api/modules/backups";
   import { listInstances } from "../api/modules/instances";
   import { formatBeijingTime } from "../utils/time";
 
@@ -173,6 +187,7 @@ const saving = ref(false);
 const dialogVisible = ref(false);
 const rows = ref([]);
 const instances = ref([]);
+const notifyTargets = ref([]);
 const editingClusterId = ref(null);
 const pager = reactive({
   page: 1,
@@ -195,8 +210,18 @@ const form = reactive({
     query: { mode: "auto", instance_id: null },
     change: { mode: "auto", instance_id: null },
   },
+  notify_target_ids: [],
   description: "",
 });
+
+const enabledNotifyTargets = computed(() => notifyTargets.value.filter((item) => item.enabled));
+
+function notifyTargetSummary(value) {
+  const ids = Array.isArray(value) ? value.map(Number) : [];
+  if (!ids.length) return "-";
+  const names = ids.map((id) => notifyTargets.value.find((item) => Number(item.id) === id)?.name || `#${id}`);
+  return names.join("、");
+}
 
 const routeModeOptions = [
   { label: "自动", value: "auto" },
@@ -362,6 +387,7 @@ function resetForm() {
   form.ha_domain = "";
   form.ha_mode = "none";
   form.data_access_route_json = normalizeRouteConfig(null);
+  form.notify_target_ids = [];
   form.description = "";
 }
 
@@ -378,6 +404,7 @@ function openEditDialog(row) {
   form.ha_domain = row.ha_domain || "";
   form.ha_mode = normalizeHaMode(row.ha_mode);
   form.data_access_route_json = normalizeRouteConfig(row.data_access_route_json);
+  form.notify_target_ids = Array.isArray(row.notify_target_ids) ? [...row.notify_target_ids] : [];
   form.description = row.description || "";
   dialogVisible.value = true;
 }
@@ -398,7 +425,11 @@ async function loadInstancesForRoutes() {
 async function loadClusters() {
   loading.value = true;
   try {
-    await loadInstancesForRoutes();
+    const [, notifyResponse] = await Promise.all([
+      loadInstancesForRoutes(),
+      listNotifyTargets({ enabled: true }).catch(() => null),
+    ]);
+    notifyTargets.value = notifyResponse?.data?.data || [];
     const { data } = await listClusters(dbType.value, {
       business_line: filters.business_line,
       environment: filters.environment,
@@ -432,6 +463,7 @@ async function onSubmit() {
     ha_domain: (form.ha_domain || "").trim(),
     ha_mode: dbType.value === "mysql" ? normalizeHaMode(form.ha_mode) : "none",
     data_access_route_json: normalizeRouteConfig(form.data_access_route_json),
+    notify_target_ids: [...form.notify_target_ids],
     description: (form.description || "").trim(),
   };
 
@@ -466,6 +498,7 @@ async function onSubmit() {
         ha_domain: payload.ha_domain,
         ha_mode: payload.ha_mode,
         data_access_route_json: payload.data_access_route_json,
+        notify_target_ids: payload.notify_target_ids,
         db_type: dbType.value,
         description: payload.description,
       });

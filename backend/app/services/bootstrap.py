@@ -105,6 +105,8 @@ def ensure_backup_extra_columns():
         statements.append("ALTER TABLE db_clusters ADD COLUMN ha_mode VARCHAR(16) NOT NULL DEFAULT 'none'")
     if table_columns["db_clusters"] and "data_access_route_json" not in table_columns["db_clusters"]:
         statements.append("ALTER TABLE db_clusters ADD COLUMN data_access_route_json JSON NULL")
+    if table_columns["db_clusters"] and "notify_target_ids" not in table_columns["db_clusters"]:
+        statements.append("ALTER TABLE db_clusters ADD COLUMN notify_target_ids JSON NULL")
 
     if "extra_json" not in table_columns["backup_policies"]:
         statements.append("ALTER TABLE backup_policies ADD COLUMN extra_json JSON NULL")

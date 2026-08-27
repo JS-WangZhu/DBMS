@@ -19,6 +19,7 @@ class DatabaseCluster(db.Model, TimestampMixin):
     ha_status_json = db.Column(db.JSON, nullable=True)
     ha_mode = db.Column(db.String(16), nullable=False, default="none")
     data_access_route_json = db.Column(db.JSON, nullable=True)
+    notify_target_ids = db.Column(db.JSON, nullable=True)
 
     instances = db.relationship("DatabaseInstance", back_populates="cluster")
 
@@ -43,6 +44,12 @@ class DatabaseCluster(db.Model, TimestampMixin):
 
     def to_dict(self) -> dict:
         business_line = self.business_line or self.namespace
+        notify_target_ids = []
+        for item in self.notify_target_ids or []:
+            try:
+                notify_target_ids.append(int(item))
+            except (TypeError, ValueError):
+                continue
         return {
             "id": self.id,
             "namespace": self.namespace,
@@ -55,6 +62,7 @@ class DatabaseCluster(db.Model, TimestampMixin):
             "ha_status_json": self.ha_status_json,
             "ha_mode": self.ha_mode if self.ha_mode in {"none", "orc", "dbms"} else "none",
             "data_access_route_json": self._data_access_route(),
+            "notify_target_ids": notify_target_ids,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }

@@ -90,10 +90,15 @@ def _send_email(subject: str, content: str, recipients=None):
 
 
 def notify_ha_switch_completion(config, cluster, switch_type: str, result: dict, operator_name: str = None):
-    if not config:
-        return {"ok": False, "message": "ha config not found", "results": {"targets": []}}
-
-    target_ids = config.get_notify_target_ids() if hasattr(config, "get_notify_target_ids") else []
+    cluster_target_ids = []
+    for item in getattr(cluster, "notify_target_ids", None) or []:
+        try:
+            cluster_target_ids.append(int(item))
+        except (TypeError, ValueError):
+            continue
+    target_ids = cluster_target_ids
+    if not target_ids and config:
+        target_ids = config.get_notify_target_ids() if hasattr(config, "get_notify_target_ids") else []
     if not target_ids:
         return {"ok": False, "message": "no notify targets configured", "results": {"targets": []}}
 
@@ -101,13 +106,12 @@ def notify_ha_switch_completion(config, cluster, switch_type: str, result: dict,
         BackupNotifyTarget.query.filter(
             BackupNotifyTarget.id.in_(target_ids),
             BackupNotifyTarget.enabled.is_(True),
-            BackupNotifyTarget.channel == "wecom",
         )
         .order_by(BackupNotifyTarget.id.asc())
         .all()
     )
     if not targets:
-        return {"ok": False, "message": "no enabled wecom targets configured", "results": {"targets": []}}
+        return {"ok": False, "message": "no enabled notify targets configured", "results": {"targets": []}}
 
     switch_label = {
         "normal": "在线切换",
@@ -144,10 +148,18 @@ def notify_ha_switch_completion(config, cluster, switch_type: str, result: dict,
 
     results = {"targets": []}
     for target in targets:
-        try:
-            send_result = _send_wecom_markdown(content=content, webhook=target.address)
-        except Exception as exc:
-            send_result = {"ok": False, "message": str(exc)}
+        if target.channel == "wecom":
+            try:
+                send_result = _send_wecom_markdown(content=content, webhook=target.address)
+            except Exception as exc:
+                send_result = {"ok": False, "message": str(exc)}
+        elif target.channel == "email":
+            try:
+                send_result = _send_email(subject="[DBMS] MySQL HA切换完成", content=content, recipients=[target.address])
+            except Exception as exc:
+                send_result = {"ok": False, "message": str(exc)}
+        else:
+            send_result = {"ok": False, "message": f"unsupported channel: {target.channel}"}
         results["targets"].append(
             {
                 "target_id": target.id,

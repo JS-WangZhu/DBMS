@@ -62,11 +62,12 @@ def run_discovery(vcenter_id=None, trigger_type="scheduled", client_factory=Read
         vcenters = [_vcenter_snapshot(row) for row in query.order_by(VCenterConfig.id.asc()).all()]
         config = PhysicalDiscoveryConfig.query.first()
         batch_size = max(1, int(config.batch_size if config else 500))
+        connect_timeout = max(1, int(config.connect_timeout_seconds if config else 10))
         db.session.rollback()
 
         last_run = None
         for vcenter in vcenters:
-            last_run = _run_for_vcenter(vcenter, trigger_type, client_factory, batch_size)
+            last_run = _run_for_vcenter(vcenter, trigger_type, client_factory, batch_size, connect_timeout)
         return last_run
     finally:
         _RUN_LOCK.release()
@@ -180,10 +181,19 @@ def _finish_run(run_id, error_message=None, failed_count=None):
     return run
 
 
-def _run_for_vcenter(vcenter, trigger_type, client_factory, batch_size):
-    targets = _target_snapshots(vcenter["cidrs"])
-    run_id = _create_run(vcenter, trigger_type, len(targets))
+def _iter_client_facts(client):
+    iterator = getattr(client, "iter_vm_host_facts", None)
+    if callable(iterator):
+        yield from iterator()
+        return
+    yield from client.query_vm_host_facts()
+
+
+def _execute_run(vcenter, client_factory, batch_size, connect_timeout, targets, run_id):
     client = None
+    pending_by_ip = {}
+    for target in targets:
+        pending_by_ip.setdefault(target["ip"], []).append(target)
     try:
         client = client_factory(
             address=vcenter["address"],
@@ -191,19 +201,81 @@ def _run_for_vcenter(vcenter, trigger_type, client_factory, batch_size):
             username=vcenter["username"],
             password=decrypt_secret(vcenter["password_encrypted"]),
             verify_ssl=vcenter["verify_ssl"],
+            timeout=connect_timeout,
         )
-        facts = client.query_vm_host_facts()
-        by_ip = {str(value): fact for fact in facts for value in fact.get("vm_ips", [])}
-        results = [_result_for_target(target, by_ip) for target in targets]
-        for batch in _chunks(results, batch_size):
+        for fact in _iter_client_facts(client):
+            matched = []
+            for value in fact.get("vm_ips", []):
+                for target in pending_by_ip.pop(str(value), []):
+                    matched.append(_result_for_target(target, {target["ip"]: fact}))
+            if matched:
+                _persist_result_batch(run_id, vcenter["name"], matched)
+
+        unmatched = [
+            _result_for_target(target, {})
+            for targets_for_ip in pending_by_ip.values()
+            for target in targets_for_ip
+        ]
+        for batch in _chunks(unmatched, batch_size):
             _persist_result_batch(run_id, vcenter["name"], batch)
         return _finish_run(run_id)
     except Exception as exc:
         db.session.rollback()
-        return _finish_run(run_id, error_message=_safe_error(exc), failed_count=len(targets))
+        run = db.session.get(PhysicalDiscoveryRun, run_id)
+        failed_count = len(targets)
+        if run is not None:
+            failed_count = max(int(run.failed_count or 0), len(targets) - int(run.success_count or 0))
+        return _finish_run(run_id, error_message=_safe_error(exc), failed_count=failed_count)
     finally:
         if client is not None:
             try:
                 client.close()
             except Exception:
                 pass
+
+
+def _run_for_vcenter(vcenter, trigger_type, client_factory, batch_size, connect_timeout):
+    targets = _target_snapshots(vcenter["cidrs"])
+    run_id = _create_run(vcenter, trigger_type, len(targets))
+    return _execute_run(vcenter, client_factory, batch_size, connect_timeout, targets, run_id)
+
+
+def _run_async_worker(app, vcenter, client_factory, batch_size, connect_timeout, targets, run_id):
+    try:
+        with app.app_context():
+            try:
+                _execute_run(vcenter, client_factory, batch_size, connect_timeout, targets, run_id)
+            finally:
+                db.session.remove()
+    finally:
+        _RUN_LOCK.release()
+
+
+def start_discovery_async(app, vcenter_id, trigger_type="manual", client_factory=ReadOnlyVCenterClient):
+    if not _RUN_LOCK.acquire(blocking=False):
+        raise RuntimeError("physical discovery is already running")
+    run_id = None
+    try:
+        row = VCenterConfig.query.filter_by(id=int(vcenter_id), enabled=True, deleted=False).first()
+        if row is None:
+            raise ValueError("enabled vCenter not found")
+        vcenter = _vcenter_snapshot(row)
+        config = PhysicalDiscoveryConfig.query.first()
+        batch_size = max(1, int(config.batch_size if config else 500))
+        connect_timeout = max(1, int(config.connect_timeout_seconds if config else 10))
+        targets = _target_snapshots(vcenter["cidrs"])
+        run_id = _create_run(vcenter, trigger_type, len(targets))
+        worker = threading.Thread(
+            target=_run_async_worker,
+            args=(app, vcenter, client_factory, batch_size, connect_timeout, targets, run_id),
+            name=f"physical-discovery-{run_id}",
+            daemon=True,
+        )
+        worker.start()
+        return run_id
+    except Exception as exc:
+        db.session.rollback()
+        if run_id is not None:
+            _finish_run(run_id, error_message=_safe_error(exc))
+        _RUN_LOCK.release()
+        raise
