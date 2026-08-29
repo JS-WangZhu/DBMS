@@ -7,6 +7,7 @@ from flask import Blueprint, request
 from app.api.routes.common import require_menu_permission
 from app.extensions import db
 from app.models.ha_config import HAConfig
+from app.models.aliyun_dns import AliyunDomainConfig
 from app.models.notify_target import BackupNotifyTarget
 from app.utils.response import error_response, ok_response
 
@@ -102,6 +103,8 @@ def create_ha_config():
     payload = request.get_json(silent=True) or {}
     name = str(payload.get("name") or "").strip()
     script_path = str(payload.get("script_path") or "").strip()
+    domain_switch_method = str(payload.get("domain_switch_method") or "aliyun").strip().lower()
+    aliyun_domain_config_id = payload.get("aliyun_domain_config_id")
     command_template = str(payload.get("command_template") or "").strip()
     description = str(payload.get("description") or "").strip()
     enabled = bool(payload.get("enabled", True))
@@ -110,12 +113,27 @@ def create_ha_config():
 
     if not name:
         return error_response("name is required", code=400)
-    err = _validate_script_path(script_path)
-    if err:
-        return error_response(err, code=400)
-    template_err = _validate_command_template(command_template)
-    if template_err:
-        return error_response(template_err, code=400)
+    if domain_switch_method not in {"aliyun", "script"}:
+        return error_response("domain_switch_method must be aliyun or script", code=400)
+    if domain_switch_method == "script":
+        err = _validate_script_path(script_path)
+        if err:
+            return error_response(err, code=400)
+        template_err = _validate_command_template(command_template)
+        if template_err:
+            return error_response(template_err, code=400)
+    else:
+        script_path = ""
+        command_template = ""
+        if aliyun_domain_config_id not in (None, ""):
+            try:
+                aliyun_domain_config_id = int(aliyun_domain_config_id)
+            except (TypeError, ValueError):
+                return error_response("invalid aliyun_domain_config_id", code=400)
+            if not AliyunDomainConfig.query.filter_by(id=aliyun_domain_config_id).first():
+                return error_response("aliyun domain config not found", code=400)
+        else:
+            aliyun_domain_config_id = None
     notify_err = _validate_notify_target_ids(notify_target_ids)
     if notify_err:
         return error_response(notify_err, code=400)
@@ -124,8 +142,10 @@ def create_ha_config():
 
     config = HAConfig(
         name=name,
-        script_path=script_path,
+        script_path=script_path or None,
         command_template=command_template or None,
+        domain_switch_method=domain_switch_method,
+        aliyun_domain_config_id=aliyun_domain_config_id,
         description=description,
         enabled=enabled,
         is_default=is_default,
@@ -143,6 +163,10 @@ def create_ha_config():
 def update_ha_config(config_id: int):
     config = HAConfig.query.get_or_404(config_id)
     payload = request.get_json(silent=True) or {}
+    domain_switch_method = str(payload.get("domain_switch_method", config.domain_switch_method or "aliyun")).strip().lower()
+    if domain_switch_method not in {"aliyun", "script"}:
+        return error_response("domain_switch_method must be aliyun or script", code=400)
+    config.domain_switch_method = domain_switch_method
 
     if "name" in payload:
         name = str(payload.get("name") or "").strip()
@@ -153,12 +177,28 @@ def update_ha_config(config_id: int):
             return error_response("name already exists", code=400)
         config.name = name
 
-    if "script_path" in payload:
+    if "script_path" in payload and domain_switch_method == "script":
         script_path = str(payload.get("script_path") or "").strip()
         err = _validate_script_path(script_path)
         if err:
             return error_response(err, code=400)
         config.script_path = script_path
+
+    if domain_switch_method == "script" and not str(config.script_path or "").strip():
+        return error_response("script_path is required", code=400)
+
+    if "aliyun_domain_config_id" in payload or domain_switch_method == "aliyun":
+        raw_config_id = payload.get("aliyun_domain_config_id", config.aliyun_domain_config_id)
+        if raw_config_id in (None, ""):
+            config.aliyun_domain_config_id = None
+        else:
+            try:
+                parsed_config_id = int(raw_config_id)
+            except (TypeError, ValueError):
+                return error_response("invalid aliyun_domain_config_id", code=400)
+            if not AliyunDomainConfig.query.filter_by(id=parsed_config_id).first():
+                return error_response("aliyun domain config not found", code=400)
+            config.aliyun_domain_config_id = parsed_config_id
 
     if "command_template" in payload:
         command_template = str(payload.get("command_template") or "").strip()

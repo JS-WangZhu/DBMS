@@ -137,6 +137,14 @@ def ensure_backup_extra_columns():
         statements.append("ALTER TABLE ha_configs ADD COLUMN notify_target_ids JSON NULL")
     if table_columns["ha_configs"] and "command_template" not in table_columns["ha_configs"]:
         statements.append("ALTER TABLE ha_configs ADD COLUMN command_template TEXT NULL")
+    if table_columns["ha_configs"] and "domain_switch_method" not in table_columns["ha_configs"]:
+        # Existing rows were script configurations. New rows explicitly default
+        # to Aliyun in the model/API, while this migration preserves old behavior.
+        statements.append("ALTER TABLE ha_configs ADD COLUMN domain_switch_method VARCHAR(16) NOT NULL DEFAULT 'script'")
+    if table_columns["ha_configs"] and "aliyun_domain_config_id" not in table_columns["ha_configs"]:
+        statements.append("ALTER TABLE ha_configs ADD COLUMN aliyun_domain_config_id INTEGER NULL")
+    if engine.dialect.name == "mysql" and table_columns["ha_configs"]:
+        statements.append("ALTER TABLE ha_configs MODIFY COLUMN script_path VARCHAR(512) NULL")
 
     # Monitor and audit models use TimestampMixin.
     if "created_at" not in table_columns["monitor_snapshots"]:

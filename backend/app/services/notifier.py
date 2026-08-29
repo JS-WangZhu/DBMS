@@ -123,6 +123,9 @@ def notify_ha_switch_completion(config, cluster, switch_type: str, result: dict,
     rebuild_ok = len(rebuild.get("rebuilt") or [])
     rebuild_failed = len(rebuild.get("failed") or [])
     switch_script = result.get("switch_script") or {}
+    domain_switch = result.get("domain_switch") or switch_script
+    domain_switch_label = "阿里云接口" if domain_switch.get("method") == "aliyun" else "脚本"
+    domain_switch_config = domain_switch.get("config_name") or domain_switch.get("script_name") or "-"
     business = cluster.business_line or cluster.namespace or "-"
     finished_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -134,7 +137,7 @@ def notify_ha_switch_completion(config, cluster, switch_type: str, result: dict,
         f"> 新主库ID: <font color=\"info\">{result.get('new_master_instance_id') or '-'}</font>",
         f"> 原主库ID: <font color=\"comment\">{result.get('old_master_instance_id') or '-'}</font>",
         f"> 其他从库重挂: <font color=\"info\">成功 {rebuild_ok} 台，失败 {rebuild_failed} 台</font>",
-        f"> 切换脚本: <font color=\"comment\">{switch_script.get('script_name') or '-'}</font>",
+        f"> 域名切换: <font color=\"comment\">{domain_switch_label} / {domain_switch_config}</font>",
         f"> 执行人: <font color=\"comment\">{operator_name or '系统'}</font>",
         f"> 完成时间: <font color=\"comment\">{finished_at}</font>",
     ]

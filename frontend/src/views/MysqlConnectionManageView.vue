@@ -18,12 +18,14 @@
             <el-option v-for="cluster in clusterOptions" :key="cluster.id" :label="clusterOptionLabel(cluster)" :value="cluster.id" />
           </el-select>
           <el-input v-model.trim="keyword" placeholder="关键字" clearable style="width: 200px" />
+          <el-button type="success" :disabled="!selectedRows.length" @click="openBatchSwitchDialog">批量切换（{{ selectedRows.length }}）</el-button>
           <el-button @click="loadData">刷新</el-button>
         </div>
       </div>
     </template>
 
-    <el-table :data="pagedRows" v-loading="loading" stripe>
+    <el-table :data="pagedRows" v-loading="loading" stripe row-key="id" @selection-change="onSelectionChange">
+      <el-table-column type="selection" width="48" :selectable="isBatchSelectable" reserve-selection />
       <el-table-column prop="business_line" label="项目" min-width="120" />
       <el-table-column prop="environment" label="环境" min-width="120" />
       <el-table-column prop="name" label="集群" min-width="140" />
@@ -33,8 +35,15 @@
           <el-tag :type="haModeTagType(scope.row.ha_mode)">{{ haModeLabel(scope.row.ha_mode) }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="解析IP" min-width="130">
-        <template #default="scope">{{ scope.row.ha_status_json?.resolved_ip || "-" }}</template>
+      <el-table-column label="实际解析地址" min-width="160" show-overflow-tooltip>
+        <template #default="scope">
+          <el-tooltip :disabled="!dnsPropagationPending(scope.row)" :content="dnsPropagationTooltip(scope.row)" placement="top">
+            <div class="dns-address-cell" :class="{ 'is-pending': dnsPropagationPending(scope.row) }">
+              <span>{{ actualAddressText(scope.row) }}</span>
+              <el-tag v-if="dnsPropagationPending(scope.row)" size="small" type="warning" effect="light">等待dns生效中</el-tag>
+            </div>
+          </el-tooltip>
+        </template>
       </el-table-column>
       <el-table-column label="连接状态" width="100">
         <template #default="scope">
@@ -55,15 +64,17 @@
       <el-table-column label="原因" min-width="220" show-overflow-tooltip>
         <template #default="scope">{{ scope.row.ha_status_json?.reason || "-" }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="320" fixed="right">
+      <el-table-column label="操作" width="350" fixed="right" class-name="operation-column" label-class-name="operation-column-header">
         <template #default="scope">
-          <el-button link type="primary" @click="openEdit(scope.row)">编辑</el-button>
-          <el-button v-if="normalizeHaMode(scope.row.ha_mode) === 'dbms'" link type="success" @click="openSwitchDialog(scope.row)">{{ '高可用切换' }}</el-button>
-          <el-tooltip v-else :content="haModeHint(scope.row.ha_mode)" placement="top">
-            <span><el-button link type="info" disabled>{{ '高可用切换' }}</el-button></span>
-          </el-tooltip>
-          <el-button link type="warning" @click="doCheck(scope.row)">校验</el-button>
-          <el-button link type="success" @click="openTopologyHistoryDialog(scope.row)">拓扑变更历史</el-button>
+          <div class="operation-actions">
+            <el-button link type="primary" @click="openEdit(scope.row)">编辑</el-button>
+            <el-button v-if="normalizeHaMode(scope.row.ha_mode) === 'dbms'" link type="success" @click="openSwitchDialog(scope.row)">{{ '高可用切换' }}</el-button>
+            <el-tooltip v-else :content="haModeHint(scope.row.ha_mode)" placement="top">
+              <span class="disabled-action-wrap"><el-button link type="info" disabled>{{ '高可用切换' }}</el-button></span>
+            </el-tooltip>
+            <el-button link type="warning" @click="doCheck(scope.row)">校验</el-button>
+            <el-button link type="success" @click="openTopologyHistoryDialog(scope.row)">拓扑变更历史</el-button>
+          </div>
         </template>
       </el-table-column>
     </el-table>
@@ -107,9 +118,9 @@
             </el-tag>
           </el-descriptions-item>
           <el-descriptions-item label="当前主库">{{ topologyData.current_master_instance_name || "-" }}</el-descriptions-item>
-          <el-descriptions-item label="脚本配置">
-            <el-tag :type="topologyData.switch_script_configured ? 'success' : 'danger'">
-              {{ topologyData.switch_script_configured ? "已配置" : "未配置" }}
+          <el-descriptions-item label="域名切换">
+            <el-tag :type="topologyData.domain_switch.ready ? 'success' : 'danger'">
+              {{ topologyData.domain_switch.method_label || "阿里云接口" }} / {{ topologyData.domain_switch.ready ? "已就绪" : "未就绪" }}
             </el-tag>
           </el-descriptions-item>
         </el-descriptions>
@@ -248,6 +259,52 @@
       </template>
     </el-dialog>
 
+    <el-dialog v-model="batchDialogVisible" title="批量高可用切换" width="1180px" top="5vh">
+      <div class="batch-toolbar">
+        <el-radio-group v-model="batchSwitchType" :disabled="batchSubmitting">
+          <el-radio-button label="normal">在线切换</el-radio-button>
+          <el-radio-button label="failure">故障切换</el-radio-button>
+        </el-radio-group>
+        <span class="batch-tip">将逐个集群执行主从切换，并把高可用域名解析到所选新主库。</span>
+      </div>
+      <el-table :data="batchRows" v-loading="batchLoading" stripe>
+        <el-table-column label="集群" min-width="180">
+          <template #default="{ row }">{{ clusterOptionLabel(row.cluster) }}</template>
+        </el-table-column>
+        <el-table-column label="高可用域名" min-width="180">
+          <template #default="{ row }">{{ row.cluster.ha_domain || "-" }}</template>
+        </el-table-column>
+        <el-table-column label="当前主库" min-width="150">
+          <template #default="{ row }">{{ row.topology?.current_master_instance_name || "-" }}</template>
+        </el-table-column>
+        <el-table-column label="域名切换" min-width="150">
+          <template #default="{ row }">
+            {{ row.topology?.domain_switch?.method_label || "-" }}
+            <el-tag size="small" :type="row.topology?.domain_switch?.ready ? 'success' : 'danger'">
+              {{ row.topology?.domain_switch?.ready ? "已就绪" : "未就绪" }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="目标新主库" min-width="300">
+          <template #default="{ row }">
+            <el-select v-model="row.target_instance_id" style="width: 100%" placeholder="选择目标实例" :disabled="!!row.error || batchSubmitting">
+              <el-option v-for="node in batchTargetNodes(row)" :key="node.instance_id" :label="targetOptionLabel(node)" :value="node.instance_id" />
+            </el-select>
+          </template>
+        </el-table-column>
+        <el-table-column label="结果" min-width="180">
+          <template #default="{ row }">
+            <el-tag v-if="row.result" :type="row.result.success ? 'success' : 'danger'">{{ row.result.success ? "成功" : "失败" }}</el-tag>
+            <span class="batch-error">{{ row.error || row.result?.error || "" }}</span>
+          </template>
+        </el-table-column>
+      </el-table>
+      <template #footer>
+        <el-button :disabled="batchSubmitting" @click="batchDialogVisible = false">关闭</el-button>
+        <el-button type="primary" :loading="batchSubmitting" :disabled="batchActionDisabled" @click="submitBatchSwitch">执行批量切换</el-button>
+      </template>
+    </el-dialog>
+
     <el-dialog v-model="historyDialogVisible" title="切换历史" width="1200px">
       <div class="history-toolbar">
         <el-input
@@ -275,7 +332,9 @@
           <template #default="scope">{{ formatHistoryTargets(scope.row) }}</template>
         </el-table-column>
         <el-table-column prop="operator_username" label="操作人" width="120" />
-        <el-table-column prop="switch_script_name" label="切换脚本" min-width="150" show-overflow-tooltip />
+        <el-table-column label="域名切换" min-width="170" show-overflow-tooltip>
+          <template #default="scope">{{ historyDomainSwitchLabel(scope.row) }}</template>
+        </el-table-column>
         <el-table-column label="执行命令" min-width="260" show-overflow-tooltip>
           <template #default="scope">{{ formatHistoryCommand(scope.row.switch_command) }}</template>
         </el-table-column>
@@ -355,6 +414,7 @@ import { ElMessage, ElMessageBox } from "element-plus";
 
 import {
   checkClusterHa,
+  executeMysqlHaBatchSwitch,
   getClusterHaTopology,
   listClusterHaSwitchHistory,
   listClusterTopologyHistory,
@@ -367,6 +427,7 @@ import { useTabActivationRefresh } from "../composables/useTabActivationRefresh"
 const loading = ref(false);
 const saving = ref(false);
 const rows = ref([]);
+const selectedRows = ref([]);
 const keyword = ref("");
 const selectedBusinessLine = ref("");
 const selectedEnvironment = ref("");
@@ -391,8 +452,14 @@ const topologyData = reactive({
   current_master_instance_name: "",
   ha_resolved_servers: [],
   switch_script_configured: false,
+  domain_switch: { method: "aliyun", method_label: "阿里云接口", ready: false },
   nodes: [],
 });
+const batchDialogVisible = ref(false);
+const batchLoading = ref(false);
+const batchSubmitting = ref(false);
+const batchSwitchType = ref("normal");
+const batchRows = ref([]);
 const switchForm = reactive({
   switch_type: "normal",
   target_instance_id: null,
@@ -478,7 +545,7 @@ const displayRows = computed(() => {
     if (!kw) {
       return true;
     }
-    const text = `${row.business_line || row.namespace || ""} ${row.environment || ""} ${row.name || ""} ${row.ha_domain || ""} ${row.ha_status_json?.resolved_ip || ""}`.toLowerCase();
+    const text = `${row.business_line || row.namespace || ""} ${row.environment || ""} ${row.name || ""} ${row.ha_domain || ""} ${actualAddressText(row)}`.toLowerCase();
     return text.includes(kw);
   });
 });
@@ -526,6 +593,11 @@ const currentTargetValue = computed({
 
 const failureSwitchBlockedReason = computed(() => getFailureSwitchBlockedReason(topologyData.nodes || [], topologyData.current_master_instance_id));
 
+const batchActionDisabled = computed(() => {
+  if (batchLoading.value || batchSubmitting.value || !batchRows.value.length) return true;
+  return batchRows.value.some((row) => row.error || !row.topology?.domain_switch?.ready || !row.target_instance_id);
+});
+
 function normalizeHaMode(value) {
   return ["none", "orc", "dbms"].includes(value) ? value : "none";
 }
@@ -543,6 +615,14 @@ function haModeHint(value) {
   if (mode === "orc") return "该集群由 Orchestrator 托管，DBMS 不进行切换干预";
   if (mode === "none") return "该集群未配置 DBMS HA 管理";
   return "";
+}
+
+function isBatchSelectable(row) {
+  return normalizeHaMode(row?.ha_mode) === "dbms" && !!row?.ha_domain;
+}
+
+function onSelectionChange(selection) {
+  selectedRows.value = selection || [];
 }
 
 const switchActionDisabled = computed(() => {
@@ -758,6 +838,7 @@ function resetTopologyData() {
   topologyData.current_master_instance_name = "";
   topologyData.ha_resolved_servers = [];
   topologyData.switch_script_configured = false;
+  topologyData.domain_switch = { method: "aliyun", method_label: "阿里云接口", ready: false };
   topologyData.nodes = [];
 }
 
@@ -795,6 +876,7 @@ async function fetchTopology(clusterId) {
     topologyData.current_master_instance_name = payload.current_master_instance_name || "";
     topologyData.ha_resolved_servers = payload.ha_resolved_servers || [];
     topologyData.switch_script_configured = !!payload.switch_script_configured;
+    topologyData.domain_switch = payload.domain_switch || { method: "aliyun", method_label: "阿里云接口", ready: false };
     topologyData.nodes = payload.nodes || [];
     syncDefaultTarget();
   } catch (error) {
@@ -802,6 +884,110 @@ async function fetchTopology(clusterId) {
     throw error;
   } finally {
     topologyLoading.value = false;
+  }
+}
+
+function actualAddresses(row) {
+  const values = row?.ha_status_json?.actual_resolved_addresses || row?.ha_status_json?.resolved_servers;
+  if (Array.isArray(values) && values.filter(Boolean).length) return values.filter(Boolean);
+  return row?.ha_status_json?.resolved_ip ? [row.ha_status_json.resolved_ip] : [];
+}
+
+function actualAddressText(row) {
+  return actualAddresses(row).join("、") || "-";
+}
+
+function dnsPropagationPending(row) {
+  return row?.ha_status_json?.dns_propagation_pending === true;
+}
+
+function dnsPropagationTooltip(row) {
+  if (!dnsPropagationPending(row)) return "";
+  return `目标解析地址：${row?.ha_status_json?.dns_propagation_target_ip || "-"}；当前实际解析地址：${actualAddressText(row)}`;
+}
+
+function historyDomainSwitchLabel(row) {
+  if (row?.domain_switch_method === "aliyun") {
+    return `阿里云接口 / ${row.domain_switch_config_name || "自动匹配"}`;
+  }
+  return row?.domain_switch_config_name ? `脚本 / ${row.domain_switch_config_name}` : "-";
+}
+
+function batchTargetNodes(row) {
+  const nodes = row.topology?.nodes || [];
+  if (batchSwitchType.value === "failure") {
+    if (getFailureSwitchBlockedReason(nodes, row.topology?.current_master_instance_id)) return [];
+    return nodes.filter((node) => !node.is_current_master && node.recommended_for_failure);
+  }
+  return nodes.filter((node) => !node.is_current_master && node.ok && node.replication_role === "slave");
+}
+
+function syncBatchTargets() {
+  for (const row of batchRows.value) {
+    const candidates = batchTargetNodes(row);
+    if (!candidates.some((node) => node.instance_id === row.target_instance_id)) {
+      row.target_instance_id = candidates[0]?.instance_id || null;
+    }
+    if (!row.error && !candidates.length) {
+      row.error = batchSwitchType.value === "failure" ? "没有符合故障切换条件的推荐节点" : "没有可切换的从库";
+    } else if (row.error?.startsWith("没有符合") || row.error === "没有可切换的从库") {
+      row.error = "";
+    }
+    row.result = null;
+  }
+}
+
+async function openBatchSwitchDialog() {
+  if (!selectedRows.value.length) {
+    ElMessage.warning("请先选择需要切换的集群");
+    return;
+  }
+  batchDialogVisible.value = true;
+  batchLoading.value = true;
+  batchSwitchType.value = "normal";
+  batchRows.value = selectedRows.value.map((cluster) => ({ cluster, topology: null, target_instance_id: null, error: "", result: null }));
+  await Promise.all(batchRows.value.map(async (row) => {
+    try {
+      const { data } = await getClusterHaTopology(row.cluster.id);
+      row.topology = data?.data || {};
+    } catch (error) {
+      row.error = error.response?.data?.message || "加载拓扑失败";
+    }
+  }));
+  syncBatchTargets();
+  batchLoading.value = false;
+}
+
+async function submitBatchSwitch() {
+  if (batchActionDisabled.value) return;
+  const modeLabel = switchTypeLabel(batchSwitchType.value);
+  try {
+    await ElMessageBox.confirm(
+      `确认对 ${batchRows.value.length} 个集群逐个执行${modeLabel}并切换高可用域名 DNS 吗？`,
+      "批量切换二次确认",
+      { type: "warning", confirmButtonText: "确认执行", cancelButtonText: "取消" },
+    );
+  } catch (error) {
+    if (error === "cancel" || error === "close") return;
+    throw error;
+  }
+  batchSubmitting.value = true;
+  try {
+    const items = batchRows.value.map((row) => ({
+      cluster_id: row.cluster.id,
+      switch_type: batchSwitchType.value,
+      target_instance_id: row.target_instance_id,
+    }));
+    const { data } = await executeMysqlHaBatchSwitch(items);
+    const payload = data?.data || {};
+    const resultMap = new Map((payload.items || []).map((item) => [item.cluster_id, item]));
+    for (const row of batchRows.value) row.result = resultMap.get(row.cluster.id) || null;
+    await loadData();
+    ElMessage[payload.failed_count ? "warning" : "success"](data?.message || "批量切换完成");
+  } catch (error) {
+    ElMessage.error(error.response?.data?.message || "批量切换失败");
+  } finally {
+    batchSubmitting.value = false;
   }
 }
 
@@ -1111,6 +1297,8 @@ watch(
     syncDefaultTarget();
   },
 );
+
+watch(batchSwitchType, syncBatchTargets);
 </script>
 
 <style scoped>
@@ -1128,6 +1316,48 @@ watch(
 
 .filter-select {
   width: 160px;
+}
+
+.operation-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: max-content;
+  white-space: nowrap;
+}
+
+.dns-address-cell {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.dns-address-cell.is-pending {
+  padding: 3px 6px;
+  border-radius: 4px;
+  color: var(--el-color-warning-dark-2);
+  background: var(--el-color-warning-light-9);
+  font-weight: 600;
+}
+
+.operation-actions :deep(.el-button + .el-button) {
+  margin-left: 0;
+}
+
+.disabled-action-wrap {
+  display: inline-flex;
+  align-items: center;
+}
+
+:deep(.operation-column),
+:deep(.operation-column-header) {
+  background-color: var(--el-bg-color) !important;
+}
+
+:deep(.el-table__row--striped .operation-column) {
+  background-color: var(--el-fill-color-lighter) !important;
 }
 
 .pagination-wrap {
@@ -1158,6 +1388,22 @@ watch(
 
 .target-select {
   width: 360px;
+}
+
+.batch-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.batch-tip {
+  color: var(--el-text-color-secondary);
+}
+
+.batch-error {
+  margin-left: 8px;
+  color: var(--el-color-danger);
 }
 
 .topology-table {

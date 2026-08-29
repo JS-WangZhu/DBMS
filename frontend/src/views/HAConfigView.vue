@@ -13,10 +13,12 @@
 
       <el-table :data="rows" v-loading="loading" stripe>
         <el-table-column prop="name" label="配置名称" min-width="180" />
-        <el-table-column prop="script_path" label="脚本路径" min-width="320" show-overflow-tooltip />
-        <el-table-column prop="command_template" label="命令参数模板" min-width="320" show-overflow-tooltip>
+        <el-table-column label="域名切换方式" width="130">
+          <template #default="{ row }">{{ switchMethodLabel(row.domain_switch_method) }}</template>
+        </el-table-column>
+        <el-table-column label="切换配置" min-width="260" show-overflow-tooltip>
           <template #default="{ row }">
-            {{ row.command_template || "-" }}
+            {{ switchConfigLabel(row) }}
           </template>
         </el-table-column>
         <el-table-column prop="description" label="描述" min-width="180" show-overflow-tooltip />
@@ -37,7 +39,7 @@
         </el-table-column>
         <el-table-column label="操作" width="240">
           <template #default="{ row }">
-            <el-button link type="primary" @click="verifyConfig(row)">验证</el-button>
+            <el-button v-if="row.domain_switch_method === 'script'" link type="primary" @click="verifyConfig(row)">验证</el-button>
             <el-button link type="primary" @click="openEditDialog(row)">编辑</el-button>
             <el-button link type="danger" @click="removeConfig(row)">删除</el-button>
           </template>
@@ -48,12 +50,24 @@
     <el-dialog v-model="dialogVisible" :title="isEditing ? '编辑配置' : '新增配置'" width="760px">
       <el-form :model="form" label-width="120px">
         <el-form-item label="配置名称" required>
-          <el-input v-model="form.name" placeholder="如: 公用DNS切换脚本" />
+          <el-input v-model="form.name" placeholder="如: 生产域名切换" />
         </el-form-item>
-        <el-form-item label="脚本路径" required>
+        <el-form-item label="域名切换方式" required>
+          <el-radio-group v-model="form.domain_switch_method">
+            <el-radio-button label="aliyun">阿里云接口</el-radio-button>
+            <el-radio-button label="script">脚本</el-radio-button>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item v-if="form.domain_switch_method === 'aliyun'" label="阿里云配置">
+          <el-select v-model="form.aliyun_domain_config_id" clearable style="width: 100%" placeholder="自动匹配可管理该域名的启用配置">
+            <el-option v-for="item in aliyunConfigOptions" :key="item.id" :label="item.name" :value="item.id" />
+          </el-select>
+          <div class="form-tip">不指定时，系统会按高可用域名自动匹配启用的阿里云域名配置。只更新解析记录，不修改记录启停状态。</div>
+        </el-form-item>
+        <el-form-item v-if="form.domain_switch_method === 'script'" label="脚本路径" required>
           <el-input v-model="form.script_path" placeholder="如: C:\\scripts\\mysql-ha-switch.bat" />
         </el-form-item>
-        <el-form-item label="命令参数模板">
+        <el-form-item v-if="form.domain_switch_method === 'script'" label="命令参数模板">
           <el-input
             v-model="form.command_template"
             type="textarea"
@@ -110,6 +124,7 @@ import { onMounted, ref } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { createHAConfig, deleteHAConfig, listHAConfigs, updateHAConfig, verifyHAConfig } from "../api/modules/ha";
 import { listNotifyTargets } from "../api/modules/backups";
+import { listAliyunDomainConfigs } from "../api/modules/aliyun_dns";
 import { useTabActivationRefresh } from "../composables/useTabActivationRefresh";
 
 const rows = ref([]);
@@ -118,12 +133,15 @@ const dialogVisible = ref(false);
 const isEditing = ref(false);
 const saving = ref(false);
 const notifyTargetOptions = ref([]);
+const aliyunConfigOptions = ref([]);
 
 const form = ref({
   id: null,
   name: "",
   script_path: "",
   command_template: "",
+  domain_switch_method: "aliyun",
+  aliyun_domain_config_id: null,
   description: "",
   notify_target_ids: [],
   enabled: true,
@@ -151,6 +169,26 @@ async function loadNotifyTargetOptions() {
   }
 }
 
+async function loadAliyunConfigOptions() {
+  try {
+    const { data } = await listAliyunDomainConfigs({ enabled: true, page_size: 200 });
+    aliyunConfigOptions.value = data?.data?.items || [];
+  } catch (error) {
+    ElMessage.error(error.response?.data?.message || "加载阿里云域名配置失败");
+  }
+}
+
+function switchMethodLabel(method) {
+  return method === "script" ? "脚本" : "阿里云接口";
+}
+
+function switchConfigLabel(row) {
+  if (row.domain_switch_method === "script") {
+    return row.script_path || "-";
+  }
+  return aliyunConfigOptions.value.find((item) => item.id === row.aliyun_domain_config_id)?.name || "自动匹配";
+}
+
 function formatNotifyTargets(targets) {
   if (!Array.isArray(targets) || !targets.length) {
     return "-";
@@ -169,6 +207,8 @@ function openCreateDialog() {
     name: "",
     script_path: "",
     command_template: "",
+    domain_switch_method: "aliyun",
+    aliyun_domain_config_id: null,
     description: "",
     notify_target_ids: [],
     enabled: true,
@@ -188,8 +228,8 @@ function openEditDialog(row) {
 }
 
 async function saveConfig() {
-  if (!form.value.name || !form.value.script_path) {
-    return ElMessage.warning("请填写配置名称和脚本路径");
+  if (!form.value.name || (form.value.domain_switch_method === "script" && !form.value.script_path)) {
+    return ElMessage.warning(form.value.domain_switch_method === "script" ? "请填写配置名称和脚本路径" : "请填写配置名称");
   }
   saving.value = true;
   try {
@@ -242,10 +282,10 @@ async function removeConfig(row) {
 }
 
 onMounted(async () => {
-  await Promise.all([loadConfigs(), loadNotifyTargetOptions()]);
+  await Promise.all([loadConfigs(), loadNotifyTargetOptions(), loadAliyunConfigOptions()]);
 });
 useTabActivationRefresh(async () => {
-  await Promise.all([loadConfigs(), loadNotifyTargetOptions()]);
+  await Promise.all([loadConfigs(), loadNotifyTargetOptions(), loadAliyunConfigOptions()]);
 });
 </script>
 

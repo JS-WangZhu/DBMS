@@ -148,8 +148,8 @@ def _ensure_dbms_ha_management(cluster: DatabaseCluster):
         raise RuntimeError("cluster is not enabled for DBMS HA management")
 
 def _get_ha_notify_config(result: dict):
-    script_result = result.get("switch_script") or {}
-    config_id = script_result.get("script_config_id")
+    domain_switch = result.get("domain_switch") or result.get("switch_script") or {}
+    config_id = domain_switch.get("script_config_id") or domain_switch.get("ha_config_id")
     if not config_id:
         return None
     return HAConfig.query.get(config_id)
@@ -217,6 +217,38 @@ def _parse_page_args():
     return page, page_size
 
 
+def _dns_propagation_fields(previous_status, actual_addresses):
+    previous = previous_status if isinstance(previous_status, dict) else {}
+    target_ip = str(previous.get("dns_propagation_target_ip") or "").strip()
+    pending = bool(target_ip and set(actual_addresses or []) != {target_ip})
+    return {
+        "dns_propagation_pending": pending,
+        "dns_propagation_target_ip": target_ip or None,
+        "dns_propagation_started_at": previous.get("dns_propagation_started_at") if pending else None,
+    }
+
+
+def _mark_dns_propagation_pending(cluster: DatabaseCluster, result: dict):
+    domain_switch = result.get("domain_switch") or result.get("switch_script") or {}
+    target_ip = str(domain_switch.get("target_ip") or "").strip()
+    if not target_ip:
+        context = domain_switch.get("command_context") or {}
+        target_ip = str(context.get("target_ip") or "").strip()
+    if not target_ip and result.get("new_master_instance_id"):
+        target = DatabaseInstance.query.get(result.get("new_master_instance_id"))
+        target_ip = str((target.resolved_ip or target.host_input) if target else "").strip()
+    if not target_ip:
+        return
+    status = dict(cluster.ha_status_json) if isinstance(cluster.ha_status_json, dict) else {}
+    status.update({
+        "dns_propagation_pending": True,
+        "dns_propagation_target_ip": target_ip,
+        "dns_propagation_started_at": datetime.now().isoformat(),
+    })
+    cluster.ha_status_json = status
+    db.session.commit()
+
+
 def _log_ha_switch_audit(
     cluster: DatabaseCluster,
     user,
@@ -254,6 +286,7 @@ def _build_ha_switch_history_item(row: AuditLog, user_name_map, instance_name_ma
     target_instance_ids = detail.get("target_instance_ids") or []
     result = detail.get("result") or {}
     switch_script = result.get("switch_script") or {}
+    domain_switch = result.get("domain_switch") or switch_script
     return {
         "id": row.id,
         "action": row.action,
@@ -271,6 +304,8 @@ def _build_ha_switch_history_item(row: AuditLog, user_name_map, instance_name_ma
         "error": detail.get("error"),
         "switch_script_name": switch_script.get("script_name"),
         "switch_command": switch_script.get("command") or [],
+        "domain_switch_method": domain_switch.get("method"),
+        "domain_switch_config_name": domain_switch.get("config_name") or domain_switch.get("script_name"),
         "created_at": row.created_at.isoformat() if row.created_at else None,
     }
 
@@ -313,6 +348,9 @@ def _execute_ha_switch(
             progress_callback=progress_callback,
         )
 
+    if switch_type in {"normal", "failure", "promote"}:
+        _mark_dns_propagation_pending(cluster, result)
+
     notify_config = _get_ha_notify_config(result)
     notify_result = notify_ha_switch_completion(
         config=notify_config,
@@ -332,6 +370,31 @@ def _execute_ha_switch(
         result=result,
     )
     return result
+
+
+def _parse_batch_switch_items(payload: dict):
+    items = payload.get("items")
+    if not isinstance(items, list) or not items:
+        raise ValueError("items is required")
+    if len(items) > 50:
+        raise ValueError("batch switch supports at most 50 clusters")
+    parsed_items = []
+    seen_cluster_ids = set()
+    for item in items:
+        if not isinstance(item, dict):
+            raise ValueError("each batch item must be an object")
+        try:
+            cluster_id = int(item.get("cluster_id"))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("invalid cluster_id") from exc
+        if cluster_id in seen_cluster_ids:
+            raise ValueError(f"duplicate cluster_id: {cluster_id}")
+        seen_cluster_ids.add(cluster_id)
+        parsed = _parse_switch_payload(item)
+        if parsed["switch_type"] not in {"normal", "failure"}:
+            raise ValueError("batch switch only supports normal or failure")
+        parsed_items.append({"cluster_id": cluster_id, **parsed})
+    return parsed_items
 
 
 @bp.get("")
@@ -577,13 +640,16 @@ def collect_cluster_health(cluster_id):
             results.append({"instance_id": instance.id, "instance_name": instance.name, "status": "error", "error": str(e)})
 
     if cluster.db_type == "mysql" and (cluster.ha_domain or "").strip():
-        resolved_ip = resolve_host(cluster.ha_domain) or cluster.ha_domain
+        actual_addresses = sorted(set(list_host_addresses(cluster.ha_domain)))
+        resolved_ip = actual_addresses[0] if actual_addresses else (resolve_host(cluster.ha_domain) or cluster.ha_domain)
+        if resolved_ip and resolved_ip not in actual_addresses:
+            actual_addresses.append(resolved_ip)
         matched_instance = None
         matched_writable = False
         downstream_source_keys = {_payload_source_key(payload_map.get(ins.id) or {}) for ins in instances}
         for instance in instances:
             host = (instance.resolved_ip or instance.host_input or "").strip()
-            if host != resolved_ip:
+            if host not in actual_addresses:
                 continue
             payload = payload_map.get(instance.id) or {}
             matched_instance = instance
@@ -591,9 +657,12 @@ def collect_cluster_health(cluster_id):
             matched_writable = _is_mysql_writable_master(payload, bool(self_key and self_key in downstream_source_keys))
             break
 
+        previous_status = cluster.ha_status_json if isinstance(cluster.ha_status_json, dict) else {}
         cluster.ha_status_json = {
             "ha_domain": cluster.ha_domain,
             "resolved_ip": resolved_ip,
+            "actual_resolved_addresses": actual_addresses,
+            **_dns_propagation_fields(previous_status, actual_addresses),
             "ok": bool(matched_instance and matched_writable),
             "matched_instance_id": matched_instance.id if matched_instance else None,
             "matched_instance_name": matched_instance.name if matched_instance else None,
@@ -649,7 +718,11 @@ def check_cluster_ha(cluster_id):
     if not cluster.ha_domain:
         return error_response("ha_domain is empty", code=400)
 
-    resolved_ip = resolve_host(cluster.ha_domain) or cluster.ha_domain
+    actual_addresses = sorted(set(list_host_addresses(cluster.ha_domain)))
+    resolved_ip = actual_addresses[0] if actual_addresses else (resolve_host(cluster.ha_domain) or cluster.ha_domain)
+    if resolved_ip and resolved_ip not in actual_addresses:
+        actual_addresses.append(resolved_ip)
+    previous_status = cluster.ha_status_json if isinstance(cluster.ha_status_json, dict) else {}
     instances = DatabaseInstance.query.filter_by(cluster_id=cluster.id, enabled=True).all()
     payload_map = {}
     for instance in instances:
@@ -662,7 +735,7 @@ def check_cluster_ha(cluster_id):
     for instance in instances:
         host = (instance.resolved_ip or instance.host_input or "").strip()
         payload = payload_map.get(instance.id) or {}
-        if host == resolved_ip:
+        if host in actual_addresses:
             matched_instance = instance
             self_key = _instance_host_key(instance)
             matched_writable = _is_mysql_writable_master(payload, bool(self_key and self_key in downstream_source_keys))
@@ -671,6 +744,8 @@ def check_cluster_ha(cluster_id):
     status = {
         "ha_domain": cluster.ha_domain,
         "resolved_ip": resolved_ip,
+        "actual_resolved_addresses": actual_addresses,
+        **_dns_propagation_fields(previous_status, actual_addresses),
         "ok": bool(matched_instance and matched_writable),
         "matched_instance_id": matched_instance.id if matched_instance else None,
         "matched_instance_name": matched_instance.name if matched_instance else None,
@@ -699,10 +774,14 @@ def cluster_ha_topology(cluster_id):
     try:
         data = build_cluster_topology(cluster.id)
         if cluster.ha_domain:
+            actual_addresses = sorted(set(list_host_addresses(cluster.ha_domain)))
+            previous_status = cluster.ha_status_json if isinstance(cluster.ha_status_json, dict) else {}
             cluster.ha_status_json = {
                 "ha_domain": cluster.ha_domain,
-                "resolved_ip": resolve_host(cluster.ha_domain) or cluster.ha_domain,
-                "resolved_servers": list_host_addresses(cluster.ha_domain),
+                "resolved_ip": actual_addresses[0] if actual_addresses else (resolve_host(cluster.ha_domain) or cluster.ha_domain),
+                "resolved_servers": actual_addresses,
+                "actual_resolved_addresses": actual_addresses,
+                **_dns_propagation_fields(previous_status, actual_addresses),
                 "matched_instance_id": data.get("current_master_instance_id"),
                 "matched_instance_name": data.get("current_master_instance_name"),
                 "matched_writable": bool(data.get("current_master_instance_id")),
@@ -817,6 +896,77 @@ def cluster_ha_switch(cluster_id):
             error_message=str(exc),
         )
         return error_response(str(exc), code=500)
+
+
+@bp.post("/mysql/ha/batch-switch")
+@active_user_required
+def mysql_ha_batch_switch():
+    payload = request.get_json(silent=True) or {}
+    try:
+        items = _parse_batch_switch_items(payload)
+    except ValueError as exc:
+        return error_response(str(exc), code=400)
+
+    clusters = {}
+    for item in items:
+        cluster = DatabaseCluster.query.get(item["cluster_id"])
+        if not cluster or cluster.db_type != "mysql":
+            return error_response(f"mysql cluster not found: {item['cluster_id']}", code=404)
+        try:
+            _ensure_dbms_ha_management(cluster)
+        except RuntimeError as exc:
+            return error_response(f"{cluster.name}: {exc}", code=400)
+        if not require_cluster_permission(cluster.id, "change"):
+            return error_response("permission denied", code=403)
+        clusters[cluster.id] = cluster.name
+
+    user = get_current_user()
+    results = []
+    for item in items:
+        cluster = DatabaseCluster.query.get(item["cluster_id"])
+        try:
+            result = _execute_ha_switch(
+                cluster_id=cluster.id,
+                user=user,
+                switch_type=item["switch_type"],
+                target_instance_id=item["target_instance_id"],
+                target_instance_ids=item["target_instance_ids"],
+                lag_timeout_seconds=item["lag_timeout_seconds"],
+            )
+            results.append({
+                "cluster_id": cluster.id,
+                "cluster_name": cluster.name,
+                "success": True,
+                "result": result,
+            })
+        except Exception as exc:
+            error_text = str(exc)
+            _log_ha_switch_audit(
+                cluster=cluster,
+                user=user,
+                switch_type=item["switch_type"],
+                target_instance_id=item["target_instance_id"],
+                target_instance_ids=item["target_instance_ids"],
+                error_message=error_text,
+            )
+            results.append({
+                "cluster_id": cluster.id,
+                "cluster_name": cluster.name,
+                "success": False,
+                "error": error_text,
+            })
+            db.session.rollback()
+
+    success_count = sum(1 for item in results if item["success"])
+    return ok_response(
+        data={
+            "items": results,
+            "total": len(results),
+            "success_count": success_count,
+            "failed_count": len(results) - success_count,
+        },
+        message=f"批量切换完成：成功 {success_count} 个，失败 {len(results) - success_count} 个",
+    )
 
 
 @bp.post("/<int:cluster_id>/ha/switch/stream")

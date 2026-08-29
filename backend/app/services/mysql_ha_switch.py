@@ -1,4 +1,5 @@
 import json
+import ipaddress
 import re
 import shlex
 import string
@@ -8,15 +9,25 @@ from datetime import datetime
 from typing import Optional
 from app.models.db_asset import DatabaseCluster, DatabaseInstance
 from app.models.ha_config import HAConfig
+from app.models.aliyun_dns import AliyunDomainConfig
+from app.services.aliyun_dns import call_alidns_api
 from app.services.dns_resolver import list_host_addresses, resolve_host
 from app.utils.crypto import decrypt_secret
 
 
-def get_ha_switch_script_config():
+def get_ha_switch_config():
     config = HAConfig.query.filter_by(enabled=True, is_default=True).order_by(HAConfig.id.desc()).first()
     if config:
         return config
     return HAConfig.query.filter_by(enabled=True).order_by(HAConfig.id.desc()).first()
+
+
+def get_ha_switch_script_config():
+    """Backward-compatible accessor used by older callers/tests."""
+    config = get_ha_switch_config()
+    if config and str(getattr(config, "domain_switch_method", "script") or "script").lower() == "script":
+        return config
+    return None
 
 
 def _instance_password(instance: DatabaseInstance):
@@ -669,6 +680,7 @@ def _run_switch_script(cluster: DatabaseCluster, source: Optional[DatabaseInstan
     if result.returncode != 0:
         raise RuntimeError(result.stderr or result.stdout or f"切换脚本执行失败，exit_code={result.returncode}")
     return {
+        "method": "script",
         "script_config_id": config.id,
         "script_name": config.name,
         "script_path": config.script_path,
@@ -678,6 +690,121 @@ def _run_switch_script(cluster: DatabaseCluster, source: Optional[DatabaseInstan
         "stderr": (result.stderr or "").strip(),
         "command": command,
     }
+
+
+def _split_managed_domain(fqdn: str, config: AliyunDomainConfig):
+    host = str(fqdn or "").strip().lower().rstrip(".")
+    candidates = sorted(config.normalized_domains(), key=len, reverse=True)
+    for zone in candidates:
+        zone = zone.rstrip(".")
+        if host == zone:
+            return zone, "@"
+        suffix = f".{zone}"
+        if host.endswith(suffix):
+            return zone, host[: -len(suffix)]
+    return None, None
+
+
+def _find_aliyun_domain_config(ha_domain: str, configured_id=None):
+    query = AliyunDomainConfig.query.filter_by(enabled=True)
+    if configured_id:
+        query = query.filter_by(id=configured_id)
+    for config in query.order_by(AliyunDomainConfig.id.desc()).all():
+        zone, rr = _split_managed_domain(ha_domain, config)
+        if zone:
+            return config, zone, rr
+    return None, None, None
+
+
+def _target_dns_ip(target: DatabaseInstance):
+    value = str(target.resolved_ip or resolve_host(target.host_input) or "").strip()
+    try:
+        address = ipaddress.ip_address(value)
+    except ValueError as exc:
+        raise RuntimeError(f"目标实例 {target.name} 未解析到有效 IP，无法切换 DNS") from exc
+    if address.version != 4:
+        raise RuntimeError("内置阿里云 DNS 切换当前仅支持 A 记录")
+    return value
+
+
+def _run_aliyun_dns_switch(cluster: DatabaseCluster, target: DatabaseInstance, configured_id=None):
+    ha_domain = str(cluster.ha_domain or "").strip().lower().rstrip(".")
+    if not ha_domain:
+        raise RuntimeError("集群未配置高可用域名，无法切换 DNS")
+    config, zone, rr = _find_aliyun_domain_config(ha_domain, configured_id=configured_id)
+    if not config:
+        raise RuntimeError(f"没有启用的阿里云域名配置可管理高可用域名 {ha_domain}")
+
+    target_ip = _target_dns_ip(target)
+    response = call_alidns_api(
+        config,
+        "DescribeDomainRecords",
+        {"DomainName": zone, "PageNumber": 1, "PageSize": 500, "RRKeyWord": rr, "TypeKeyWord": "A"},
+    )
+    records = response.get("DomainRecords", {}).get("Record", []) or []
+    matches = [
+        record for record in records
+        if str(record.get("RR") or "").strip().lower() == rr.lower()
+        and str(record.get("Type") or "").strip().upper() == "A"
+    ]
+    if not matches:
+        raise RuntimeError(f"未找到高可用域名 {ha_domain} 的 A 记录")
+
+    updated = []
+    for record in matches:
+        params = {
+            "RecordId": record.get("RecordId"),
+            "RR": record.get("RR") or rr,
+            "Type": "A",
+            "Value": target_ip,
+            "TTL": record.get("TTL") or 600,
+            "Line": record.get("Line"),
+            "Priority": record.get("Priority"),
+        }
+        # Deliberately only update record content. Do not call
+        # SetDomainRecordStatus: enabled/disabled state must remain unchanged.
+        result = call_alidns_api(config, "UpdateDomainRecord", params)
+        updated.append({"record_id": record.get("RecordId"), "result": result})
+    ha_config = get_ha_switch_config()
+    return {
+        "method": "aliyun",
+        "ha_config_id": ha_config.id if ha_config else None,
+        "config_id": config.id,
+        "config_name": config.name,
+        "domain": ha_domain,
+        "zone": zone,
+        "rr": rr,
+        "target_ip": target_ip,
+        "updated_records": updated,
+        "record_status_changed": False,
+    }
+
+
+def get_domain_switch_status(cluster: DatabaseCluster):
+    config = get_ha_switch_config()
+    method = str(getattr(config, "domain_switch_method", None) or "aliyun").strip().lower()
+    if method == "script":
+        ready = bool(config and str(config.script_path or "").strip())
+        return {"method": "script", "method_label": "脚本", "ready": ready, "config_name": config.name if config else None}
+    configured_id = getattr(config, "aliyun_domain_config_id", None) if config else None
+    aliyun_config, zone, rr = _find_aliyun_domain_config(cluster.ha_domain, configured_id=configured_id)
+    return {
+        "method": "aliyun",
+        "method_label": "阿里云接口",
+        "ready": bool(cluster.ha_domain and aliyun_config),
+        "config_name": aliyun_config.name if aliyun_config else None,
+        "zone": zone,
+        "rr": rr,
+    }
+
+
+def _switch_ha_domain(cluster: DatabaseCluster, source: Optional[DatabaseInstance], target: DatabaseInstance, mode: str, extra=None):
+    config = get_ha_switch_config()
+    method = str(getattr(config, "domain_switch_method", None) or "aliyun").strip().lower()
+    if method == "script":
+        return _run_switch_script(cluster, source=source, target=target, mode=mode, extra=extra)
+    configured_id = getattr(config, "aliyun_domain_config_id", None) if config else None
+    return _run_aliyun_dns_switch(cluster, target=target, configured_id=configured_id)
 
 
 def _repair_target_candidates(topology_nodes: list, current_master_id):
@@ -862,13 +989,15 @@ def build_cluster_topology(cluster_id: int):
     for node in nodes:
         node["failure_reason"] = _failure_reason(node)
 
+    domain_switch_status = get_domain_switch_status(cluster)
     return {
         "cluster": cluster.to_dict(),
         "ha_domain": cluster.ha_domain,
         "ha_resolved_servers": resolved_servers,
         "current_master_instance_id": current_master_id,
         "current_master_instance_name": current_master.get("instance_name") if current_master else None,
-        "switch_script_configured": bool(get_ha_switch_script_config()),
+        "domain_switch": domain_switch_status,
+        "switch_script_configured": domain_switch_status.get("ready"),
         "nodes": nodes,
     }
 
@@ -952,7 +1081,7 @@ def normal_switch(cluster_id: int, target_instance_id: int, lag_timeout_seconds:
         progress_callback=progress_callback,
     )
 
-    script_result = _run_switch_script(
+    domain_switch_result = _switch_ha_domain(
         cluster,
         source=current_master,
         target=new_master,
@@ -969,7 +1098,7 @@ def normal_switch(cluster_id: int, target_instance_id: int, lag_timeout_seconds:
         progress_callback=progress_callback,
         step="switch_dns",
         message="已完成高可用域名切换",
-        script=script_result,
+        domain_switch=domain_switch_result,
     )
     return {
         "mode": "normal",
@@ -977,7 +1106,8 @@ def normal_switch(cluster_id: int, target_instance_id: int, lag_timeout_seconds:
         "old_master_instance_id": current_master.id,
         "new_master_instance_id": new_master.id,
         "other_replica_rebuild": rebuild_result,
-        "switch_script": script_result,
+        "domain_switch": domain_switch_result,
+        "switch_script": domain_switch_result if domain_switch_result.get("method") == "script" else {},
         "steps": steps,
     }
 
@@ -1028,7 +1158,7 @@ def failure_switch(cluster_id: int, target_instance_id: Optional[int] = None, pr
         progress_callback=progress_callback,
     )
     current_master = DatabaseInstance.query.get(current_master_id) if current_master_id else None
-    script_result = _run_switch_script(
+    domain_switch_result = _switch_ha_domain(
         cluster,
         source=current_master,
         target=target,
@@ -1046,7 +1176,7 @@ def failure_switch(cluster_id: int, target_instance_id: Optional[int] = None, pr
         progress_callback=progress_callback,
         step="switch_dns",
         message="已完成高可用域名切换",
-        script=script_result,
+        domain_switch=domain_switch_result,
     )
 
     return {
@@ -1054,7 +1184,8 @@ def failure_switch(cluster_id: int, target_instance_id: Optional[int] = None, pr
         "cluster_id": cluster.id,
         "new_master_instance_id": target.id,
         "other_replica_rebuild": rebuild_result,
-        "switch_script": script_result,
+        "domain_switch": domain_switch_result,
+        "switch_script": domain_switch_result if domain_switch_result.get("method") == "script" else {},
         "steps": steps,
         "recommended_target_instance_id": recommended.get("instance_id") if recommended else target.id,
     }
@@ -1082,7 +1213,7 @@ def promote_current_master(cluster_id: int, progress_callback=None):
         message=f"准备将当前主库 {current_master.name} 推广为 DNS 解析节点",
         instance_id=current_master.id,
     )
-    script_result = _run_switch_script(
+    domain_switch_result = _switch_ha_domain(
         cluster,
         source=current_master,
         target=current_master,
@@ -1097,14 +1228,15 @@ def promote_current_master(cluster_id: int, progress_callback=None):
         progress_callback=progress_callback,
         step="switch_dns",
         message="已完成主库推广，DNS 已指向当前主库",
-        script=script_result,
+        domain_switch=domain_switch_result,
     )
     return {
         "mode": "promote",
         "cluster_id": cluster.id,
         "old_master_instance_id": current_master.id,
         "new_master_instance_id": current_master.id,
-        "switch_script": script_result,
+        "domain_switch": domain_switch_result,
+        "switch_script": domain_switch_result if domain_switch_result.get("method") == "script" else {},
         "steps": steps,
     }
 

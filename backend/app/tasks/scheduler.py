@@ -15,7 +15,7 @@ from app.models.monitor_snapshot import SNAPSHOT_MODEL_BY_DB_TYPE
 from app.services.remote_backup_service import submit_remote_backup, sync_running_remote_backups
 from app.services.backup_executor import run_backup_policy
 from app.services.collectors import collect_instance_metrics
-from app.services.dns_resolver import refresh_all_dns, resolve_host
+from app.services.dns_resolver import list_host_addresses, refresh_all_dns, resolve_host
 from app.services.inspection_service import (
     _sanitize_payload_for_secrets,
     get_or_create_inspection_config,
@@ -497,13 +497,16 @@ def _refresh_mysql_cluster_ha(instances, payload_by_instance):
         if not ha_domain:
             continue
 
-        resolved_ip = resolve_host(ha_domain) or ha_domain
+        actual_addresses = sorted(set(list_host_addresses(ha_domain)))
+        resolved_ip = actual_addresses[0] if actual_addresses else (resolve_host(ha_domain) or ha_domain)
+        if resolved_ip and resolved_ip not in actual_addresses:
+            actual_addresses.append(resolved_ip)
         matched_instance = None
         matched_writable = False
 
         for ins in cluster_instances.get(cluster.id, []):
             host = (ins.resolved_ip or ins.host_input or "").strip()
-            if host != resolved_ip:
+            if host not in actual_addresses:
                 continue
             payload = payload_by_instance.get(ins.id) or {}
             matched_instance = ins
@@ -517,9 +520,16 @@ def _refresh_mysql_cluster_ha(instances, payload_by_instance):
             )
             break
 
+        previous_status = cluster.ha_status_json if isinstance(cluster.ha_status_json, dict) else {}
+        target_ip = str(previous_status.get("dns_propagation_target_ip") or "").strip()
+        propagation_pending = bool(target_ip and set(actual_addresses) != {target_ip})
         status = {
             "ha_domain": ha_domain,
             "resolved_ip": resolved_ip,
+            "actual_resolved_addresses": actual_addresses,
+            "dns_propagation_pending": propagation_pending,
+            "dns_propagation_target_ip": target_ip or None,
+            "dns_propagation_started_at": previous_status.get("dns_propagation_started_at") if propagation_pending else None,
             "ok": bool(matched_instance and matched_writable),
             "matched_instance_id": matched_instance.id if matched_instance else None,
             "matched_instance_name": matched_instance.name if matched_instance else None,

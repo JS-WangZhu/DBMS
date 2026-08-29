@@ -7,8 +7,10 @@ class HAConfig(db.Model, TimestampMixin):
 
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(128), nullable=False, unique=True)
-    script_path = db.Column(db.String(512), nullable=False)
+    script_path = db.Column(db.String(512), nullable=True)
     command_template = db.Column(db.Text, nullable=True)
+    domain_switch_method = db.Column(db.String(16), nullable=False, default="aliyun")
+    aliyun_domain_config_id = db.Column(db.Integer, nullable=True)
     description = db.Column(db.String(255), nullable=True)
     enabled = db.Column(db.Boolean, nullable=False, default=True)
     is_default = db.Column(db.Boolean, nullable=False, default=False)
@@ -47,6 +49,8 @@ class HAConfig(db.Model, TimestampMixin):
             "name": self.name,
             "script_path": self.script_path,
             "command_template": self.command_template,
+            "domain_switch_method": self.domain_switch_method or "aliyun",
+            "aliyun_domain_config_id": self.aliyun_domain_config_id,
             "description": self.description,
             "enabled": self.enabled,
             "is_default": self.is_default,

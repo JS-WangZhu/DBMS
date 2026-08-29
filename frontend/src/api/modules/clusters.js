@@ -66,6 +66,10 @@ export function executeClusterHaSwitch(clusterId, payload) {
   return client.post(`/clusters/${clusterId}/ha/switch`, payload);
 }
 
+export function executeMysqlHaBatchSwitch(items) {
+  return client.post("/clusters/mysql/ha/batch-switch", { items }, { timeout: 0 });
+}
+
 // 集群连接性探测（MongoDB / Redis）
 export function probeClusterConnectivity(clusterId) {
   return client.post(`/clusters/${clusterId}/connectivity/probe`);
