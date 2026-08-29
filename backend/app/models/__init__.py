@@ -19,6 +19,7 @@ from app.models.physical_discovery import (
     PhysicalDiscoveryRun,
     VCenterConfig,
 )
+from app.models.query_audit import QueryAuditOutbox
 from app.models.monitor_snapshot import (
     MonitorSnapshotDoris,
     MonitorSnapshotMongoDB,
@@ -73,6 +74,7 @@ __all__ = [
     "PhysicalDiscoveryDetail",
     "PhysicalDiscoveryRun",
     "VCenterConfig",
+    "QueryAuditOutbox",
     "MonitorSnapshotMySQL",
     "MonitorSnapshotMongoDB",
     "MonitorSnapshotRedis",

@@ -93,9 +93,18 @@ export function listQueryHistory(page = 1, pageSize = 10, filters = {}) {
   if (filters.end_date) {
     params.end_date = filters.end_date;
   }
+  for (const key of ["user_id", "username", "db_type", "business_line", "environment", "cluster_id", "success"]) {
+    if (filters[key] !== undefined && filters[key] !== null && filters[key] !== "") {
+      params[key] = filters[key];
+    }
+  }
   return client.get("/data-access/history/query", {
     params,
   });
+}
+
+export function getQueryHistoryDetail(eventId) {
+  return client.get(`/data-access/history/query/${eventId}`);
 }
 
 export function listChangeHistory(page = 1, pageSize = 10, filters = {}) {

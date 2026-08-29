@@ -51,6 +51,17 @@ class Config:
     REDIS_DB = int(os.getenv("REDIS_DB", "0"))
     REDIS_PASSWORD = os.getenv("REDIS_PASSWORD", "")
 
+    CLICKHOUSE_AUDIT_HOST = os.getenv("CLICKHOUSE_AUDIT_HOST", "")
+    CLICKHOUSE_AUDIT_PORT = int(os.getenv("CLICKHOUSE_AUDIT_PORT", "8123"))
+    CLICKHOUSE_AUDIT_USER = os.getenv("CLICKHOUSE_AUDIT_USER", os.getenv("CLICKHOUSE_USER", "default"))
+    CLICKHOUSE_AUDIT_PASSWORD = os.getenv("CLICKHOUSE_AUDIT_PASSWORD", os.getenv("CLICKHOUSE_PASSWORD", ""))
+    CLICKHOUSE_AUDIT_DATABASE = os.getenv("CLICKHOUSE_AUDIT_DATABASE", os.getenv("CLICKHOUSE_DB", "dbms_audit"))
+    CLICKHOUSE_AUDIT_TABLE = os.getenv("CLICKHOUSE_AUDIT_TABLE", "query_audit_events")
+    CLICKHOUSE_AUDIT_SECURE = _as_bool(os.getenv("CLICKHOUSE_AUDIT_SECURE", "false"))
+    CLICKHOUSE_AUDIT_VERIFY = _as_bool(os.getenv("CLICKHOUSE_AUDIT_VERIFY", "true"), default=True)
+    CLICKHOUSE_AUDIT_CONNECT_TIMEOUT = int(os.getenv("CLICKHOUSE_AUDIT_CONNECT_TIMEOUT", "5"))
+    CLICKHOUSE_AUDIT_QUERY_TIMEOUT = int(os.getenv("CLICKHOUSE_AUDIT_QUERY_TIMEOUT", "15"))
+
     # Generated from SECRET_KEY when empty
     FERNET_KEY = os.getenv("FERNET_KEY", "")
 

@@ -83,6 +83,16 @@ def _resolve_app(app):
 def register_jobs(scheduler, app):
     app = _resolve_app(app) or app
     scheduler.add_job(
+        id="query_audit_outbox_flush_10s",
+        func=job_flush_query_audit_outbox,
+        trigger="interval",
+        seconds=10,
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        kwargs={"app": app},
+    )
+    scheduler.add_job(
         id="remote_backup_reconcile_30s",
         func=job_reconcile_remote_backups,
         trigger="interval",
@@ -131,6 +141,24 @@ def register_jobs(scheduler, app):
     sync_scheduled_task_jobs(scheduler=scheduler, app=app)
     sync_physical_discovery_job(scheduler=scheduler, app=app)
     sync_parameter_collection_job(scheduler=scheduler, app=app)
+
+
+def job_flush_query_audit_outbox(app):
+    from app.services.query_audit import flush_query_audit_outbox
+
+    app = _resolve_app(app) or app
+    if app is None:
+        return {"processed": 0, "synced": 0, "failed": 0}
+    with app.app_context():
+        try:
+            result = flush_query_audit_outbox()
+            if result["processed"]:
+                current_app.logger.info("query audit outbox flush: %s", result)
+            return result
+        except Exception as exc:
+            db.session.rollback()
+            current_app.logger.exception("query audit outbox flush failed: %s", exc)
+            return {"processed": 0, "synced": 0, "failed": 1}
 
 
 def sync_parameter_collection_job(scheduler, app):

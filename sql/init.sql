@@ -18,6 +18,24 @@ SET NAMES utf8mb4;
 SET FOREIGN_KEY_CHECKS = 0;
 
 -- ----------------------------
+-- Temporary encrypted retry queue for ClickHouse query audit writes
+-- ----------------------------
+DROP TABLE IF EXISTS `query_audit_outbox`;
+CREATE TABLE `query_audit_outbox` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `event_id` varchar(36) NOT NULL,
+  `payload_blob` longblob NOT NULL,
+  `attempt_count` int NOT NULL DEFAULT 0,
+  `next_retry_at` datetime NOT NULL,
+  `last_error` text NULL,
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uq_query_audit_outbox_event_id` (`event_id`),
+  KEY `ix_query_audit_outbox_next_retry_at` (`next_retry_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ----------------------------
 -- Table structure for agent_inspection_statuses
 -- ----------------------------
 DROP TABLE IF EXISTS `agent_inspection_statuses`;

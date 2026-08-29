@@ -34,6 +34,13 @@ def create_app(config_object=None):
         db.create_all()
         ensure_backup_extra_columns()
         seed_data_query_operations()
+        if app.config.get("CLICKHOUSE_AUDIT_HOST") and not app.config.get("TESTING"):
+            try:
+                from app.services.query_audit import ensure_clickhouse_schema
+
+                ensure_clickhouse_schema()
+            except Exception as exc:
+                app.logger.warning("ClickHouse query audit bootstrap failed: %s", exc)
         if app.config.get("AUTH_MODE") == "local" and app.config.get("AUTO_BOOTSTRAP_ADMIN"):
             ensure_admin_user(
                 username=app.config.get("BOOTSTRAP_ADMIN_USERNAME", "admin"),

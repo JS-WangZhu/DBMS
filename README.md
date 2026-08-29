@@ -60,6 +60,7 @@ DBMS 是一个统一数据库管理平台，支持对 MySQL、Redis、Doris、Mo
 | 后端 | Python 3.10+ / Flask RESTful API |
 | 前端 | Vue 3 + Element Plus |
 | 元数据存储 | MySQL 8.0+ |
+| 查询审计存储 | ClickHouse（外部服务） |
 | 定时任务 | APScheduler |
 | 认证 | JWT + LDAP/SSO |
 
@@ -135,6 +136,10 @@ SECRET_KEY=你的随机密钥
 JWT_SECRET_KEY=你的JWT密钥
 FERNET_KEY=生成方式: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 AUTH_MODE=local
+CLICKHOUSE_AUDIT_HOST=ClickHouse地址
+CLICKHOUSE_AUDIT_PORT=8123
+CLICKHOUSE_AUDIT_USER=审计写入账号
+CLICKHOUSE_AUDIT_PASSWORD=审计写入密码
 ```
 
 启动服务：

@@ -1,7 +1,7 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
-from flask import Blueprint, request
+from flask import Blueprint, current_app, request
 from sqlalchemy import Text, cast
 
 from app.api.routes.common import (
@@ -17,6 +17,15 @@ from app.models.audit_log import AuditLog
 from app.models.db_asset import DatabaseCluster, DatabaseInstance
 from app.models.user import User
 from app.services.audit import log_audit
+from app.services.query_audit import (
+    QueryAuditUnavailable,
+    build_query_audit_event,
+    complete_query_audit_event,
+    enrich_query_audit_target,
+    get_query_audit,
+    list_query_audits,
+    persist_query_audit_event,
+)
 from app.services.data_access import (
     cancel_execution,
     describe_mongo_collection,
@@ -108,6 +117,29 @@ def _parse_history_filter_args():
             else:
                 end_exclusive_dt = parsed_end + timedelta(seconds=1)
     return keyword, start_dt, end_exclusive_dt
+
+
+def _parse_query_history_filters():
+    keyword, start_dt, end_dt = _parse_history_filter_args()
+    china_tz = timezone(timedelta(hours=8))
+    filters = {
+        "keyword": keyword,
+        "start_dt": start_dt.replace(tzinfo=china_tz).astimezone(timezone.utc) if start_dt else None,
+        "end_dt": end_dt.replace(tzinfo=china_tz).astimezone(timezone.utc) if end_dt else None,
+        "user_id": _safe_int(request.args.get("user_id"), 0) or None,
+        "username": (request.args.get("username") or "").strip() or None,
+        "db_type": (request.args.get("db_type") or "").strip().lower() or None,
+        "business_line": (request.args.get("business_line") or "").strip() or None,
+        "environment": (request.args.get("environment") or "").strip() or None,
+        "cluster_id": _safe_int(request.args.get("cluster_id"), 0) or None,
+        "success": None,
+    }
+    success = (request.args.get("success") or "").strip().lower()
+    if success in {"1", "true", "success"}:
+        filters["success"] = True
+    elif success in {"0", "false", "failed"}:
+        filters["success"] = False
+    return filters
 
 
 def _build_history_item(row: AuditLog, user_name_map, instance_name_map, cluster_name_map):
@@ -215,6 +247,31 @@ def _build_audit_detail(payload, db_type, cluster_id, instance_id, timeout_secon
         "statement": statement,
         "operator_username": current_user.username if current_user else None,
     }
+
+
+def _query_audit_client_ip():
+    forwarded = (request.headers.get("X-Forwarded-For") or "").split(",", 1)[0].strip()
+    return forwarded or request.remote_addr or ""
+
+
+def _persist_query_audit(event):
+    try:
+        persist_query_audit_event(event)
+        return None
+    except QueryAuditUnavailable as exc:
+        return error_response(str(exc), code=503)
+
+
+def _audited_query_error(event, message, code, stage):
+    complete_query_audit_event(
+        event,
+        success=False,
+        http_status=code,
+        stage=stage,
+        error=message,
+    )
+    persistence_error = _persist_query_audit(event)
+    return persistence_error or error_response(message, code=code)
 
 
 def _resolve_cluster_instance(payload):
@@ -600,22 +657,33 @@ def list_columns_for_postgresql():
 
 
 @bp.post("/query")
-@require_menu_permission("data_query")
+@active_user_required
 def query_data():
     payload = request.get_json(silent=True) or {}
+    current_user = get_current_user()
+    audit_event = build_query_audit_event(
+        current_user,
+        payload,
+        client_ip=_query_audit_client_ip(),
+        user_agent=request.headers.get("User-Agent") or "",
+    )
+    if current_user.role != "admin" and "data_query" not in get_effective_menu_keys(current_user.id):
+        return _audited_query_error(audit_event, "permission denied", 403, "menu_permission")
+
     db_type = payload.get("db_type")
     if db_type not in {"mysql", "mongodb", "redis", "postgresql"}:
-        return error_response("db_type invalid", code=400)
+        return _audited_query_error(audit_event, "db_type invalid", 400, "validation")
     cluster, instance, err = _resolve_cluster_instance(payload)
     if err:
-        return error_response(err, code=400)
+        return _audited_query_error(audit_event, err, 400, "target_resolution")
+    enrich_query_audit_target(audit_event, cluster=cluster, instance=instance)
     if instance and instance.db_type != db_type:
-        return error_response("instance db_type mismatch", code=400)
+        return _audited_query_error(audit_event, "instance db_type mismatch", 400, "validation")
     scope_err = _validate_scope(payload, cluster)
     if scope_err:
-        return error_response(scope_err, code=400)
+        return _audited_query_error(audit_event, scope_err, 400, "scope_validation")
     if not require_cluster_permission(cluster.id, "query"):
-        return error_response("permission denied", code=403)
+        return _audited_query_error(audit_event, "permission denied", 403, "cluster_permission")
 
     timeout_seconds = _safe_int(payload.get("timeout_seconds"), 600)
     timeout_seconds = max(1, min(timeout_seconds, 600))
@@ -624,33 +692,33 @@ def query_data():
     if not chosen:
         chosen = instance
     if not chosen:
-        return error_response("no available instance", code=400)
+        return _audited_query_error(audit_event, "no available instance", 400, "target_resolution")
 
-    current_user = get_current_user()
     execution_id = str(payload.get("execution_id") or "").strip() or uuid4().hex
+    enrich_query_audit_target(
+        audit_event,
+        cluster=cluster,
+        instance=chosen,
+        database_name=_resolve_database_name(payload, db_type),
+        execution_id=execution_id,
+    )
     register_execution(execution_id, current_user.id if current_user else None, db_type)
     if db_type not in {"mysql", "postgresql"}:
         set_execution_cancel_callback(execution_id, None)
     try:
-        ok, err, result = _execute(db_type, chosen, payload, timeout_seconds, for_change=False, execution_id=execution_id)
+        try:
+            ok, err, result = _execute(db_type, chosen, payload, timeout_seconds, for_change=False, execution_id=execution_id)
+        except Exception as exc:
+            message = str(exc) or "query execute failed"
+            return _audited_query_error(audit_event, message, 500, "execution")
     finally:
         finish_execution(execution_id)
     if not ok:
-        log_audit(
-            user_id=current_user.id if current_user else None,
-            action="data_access.query",
-            target_type="cluster",
-            target_id=str(cluster.id),
-            detail=_build_audit_detail(payload, db_type, cluster.id, chosen.id, timeout_seconds, success=False, error_message=err, current_user=current_user),
-        )
-        return error_response(err, code=400)
-    log_audit(
-        user_id=current_user.id if current_user else None,
-        action="data_access.query",
-        target_type="cluster",
-        target_id=str(cluster.id),
-        detail=_build_audit_detail(payload, db_type, cluster.id, chosen.id, timeout_seconds, success=True, current_user=current_user),
-    )
+        return _audited_query_error(audit_event, err, 400, "execution_validation")
+    complete_query_audit_event(audit_event, success=True, http_status=200, result=result)
+    persistence_error = _persist_query_audit(audit_event)
+    if persistence_error:
+        return persistence_error
     return ok_response(
         data={
             "cluster_id": cluster.id,
@@ -745,7 +813,32 @@ def change_data():
 @bp.get("/history/query")
 @require_menu_permission("data_history")
 def query_history():
-    return ok_response(data=_paginate_history({"data_access.query"}))
+    page, page_size = _parse_page_args()
+    filters = _parse_query_history_filters()
+    try:
+        data = list_query_audits(get_current_user(), page, page_size, filters)
+    except Exception as exc:
+        current_app.logger.warning("query audit history unavailable: %s", exc)
+        return error_response("ClickHouse 查询审计暂不可用", code=503)
+    data.update({
+        "keyword": filters.get("keyword"),
+        "start_date": request.args.get("start_date"),
+        "end_date": request.args.get("end_date"),
+    })
+    return ok_response(data=data)
+
+
+@bp.get("/history/query/<uuid:event_id>")
+@require_menu_permission("data_history")
+def query_history_detail(event_id):
+    try:
+        item = get_query_audit(get_current_user(), event_id)
+    except Exception as exc:
+        current_app.logger.warning("query audit detail unavailable event_id=%s: %s", event_id, exc)
+        return error_response("ClickHouse 查询审计暂不可用", code=503)
+    if not item:
+        return error_response("query audit not found", code=404)
+    return ok_response(data=item)
 
 
 @bp.get("/history/change")
