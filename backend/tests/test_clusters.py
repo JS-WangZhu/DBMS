@@ -1,5 +1,6 @@
 from app.extensions import db
 from app.models.db_asset import DatabaseCluster
+from app.models.user import User
 
 
 def _admin_headers(client):
@@ -36,3 +37,37 @@ def test_create_cluster_requires_namespace(client):
     assert resp.status_code == 400
     assert resp.get_json()["ok"] is False
 
+
+def test_cluster_stats_are_global_for_regular_user_without_cluster_permissions(app, client):
+    regular_user = User(username="dashboard-reader", role="user", status="active", auth_source="local")
+    regular_user.set_password("password123")
+    db.session.add_all(
+        [
+            regular_user,
+            DatabaseCluster(name="mysql-a", db_type="mysql", business_line="支付", environment="prod"),
+            DatabaseCluster(name="mongo-a", db_type="mongodb", business_line="支付", environment="prod"),
+            DatabaseCluster(name="redis-a", db_type="redis", business_line="订单", environment="test"),
+        ]
+    )
+    db.session.commit()
+
+    login = client.post(
+        "/api/v1/auth/login",
+        json={"username": "dashboard-reader", "password": "password123"},
+    )
+    assert login.status_code == 200
+    headers = {"Authorization": f"Bearer {login.get_json()['data']['access_token']}"}
+
+    response = client.get("/api/v1/clusters/stats", headers=headers)
+
+    assert response.status_code == 200
+    payload = response.get_json()["data"]
+    assert payload["by_business"] == [
+        {"name": "支付", "value": 2},
+        {"name": "订单", "value": 1},
+    ]
+    assert {item["name"]: item["value"] for item in payload["by_db_type"]} == {
+        "mysql": 1,
+        "mongodb": 1,
+        "redis": 1,
+    }

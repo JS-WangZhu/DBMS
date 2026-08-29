@@ -1,5 +1,5 @@
 <template>
-  <div class='instance-page' :aria-busy='loading'>
+  <div ref="instancePageRef" class='instance-page' :aria-busy='loading'>
     <Transition name='page-loading-fade' appear>
       <div v-if='loading' class='page-loading-mask' role='status' aria-live='polite'>
         <div class='page-loading-indicator'>
@@ -9,10 +9,48 @@
       </div>
     </Transition>
 
-    <el-card>
-    <template #header>
-      <div class="header-row">
-        <span>{{ dbLabel }} 实例管理</span>
+    <header class="page-header">
+      <div class="page-title-wrap">
+        <div class="page-icon" aria-hidden="true">
+          <component :is="dbIcon" />
+        </div>
+        <div>
+          <h1>{{ dbLabel }} 实例管理</h1>
+          <p>集中查看实例运行状态、资源使用与集群归属</p>
+        </div>
+      </div>
+      <div class="header-actions">
+        <el-button v-if="isAdmin" type="primary" size="small" @click="openCreateDialog">新增{{ dbLabel }}实例</el-button>
+        <el-button size="small" :icon="Download" @click="exportRows">导出</el-button>
+        <el-button size="small" @click="reloadAll(true)">刷新</el-button>
+      </div>
+    </header>
+
+    <section class="overview-strip" aria-label="实例状态概览">
+      <div class="overview-item">
+        <span class="overview-dot overview-dot--primary"></span>
+        <div><strong>{{ filteredRows.length }}</strong><span>当前实例</span></div>
+      </div>
+      <div class="overview-item">
+        <span class="overview-dot overview-dot--success"></span>
+        <div><strong>{{ runningOverview.running }}</strong><span>运行正常</span></div>
+      </div>
+      <div class="overview-item">
+        <span class="overview-dot overview-dot--danger"></span>
+        <div><strong>{{ runningOverview.error }}</strong><span>运行异常</span></div>
+      </div>
+      <div class="overview-item">
+        <span class="overview-dot overview-dot--muted"></span>
+        <div><strong>{{ runningOverview.unknown }}</strong><span>状态未知</span></div>
+      </div>
+    </section>
+
+    <section class="content-panel">
+      <div class="filter-toolbar">
+        <div class="filter-heading">
+          <span class="filter-title">实例筛选</span>
+          <span class="filter-hint">可按项目、环境或集群逐级缩小范围</span>
+        </div>
         <div class="actions">
           <el-select v-model="selectedBusinessLine" clearable placeholder="选择项目" class="namespace-select" size="small" @change="onBusinessLineChange">
             <el-option v-for="line in businessLines" :key="line" :label="line" :value="line" />
@@ -27,21 +65,18 @@
             集群检活
           </el-button>
           <el-input v-model="keyword" clearable placeholder="实例名 / 集群 / IP / 域名" class="keyword-input" size="small" />
-          <el-button v-if="isAdmin" type="primary" size="small" @click="openCreateDialog">新增{{ dbLabel }}实例</el-button>
-          <el-button size="small" :icon="Download" @click="exportRows">导出</el-button>
-          <el-button size="small" @click="reloadAll(true)">刷新</el-button>
         </div>
       </div>
-    </template>
 
-    <div class="table-wrap">
+    <div ref="instanceTableWrapRef" class="table-wrap">
       <el-table
+        ref="instanceTableRef"
         class="instance-table"
         :data="displayRows"
-        stripe
         border
         size="small"
         table-layout="fixed"
+        scrollbar-always-on
         :row-class-name="tableRowClassName"
         @row-click="onRowClick"
         @row-mouse-enter="onRowMouseEnter"
@@ -407,18 +442,17 @@
       </el-table>
     </div>
 
-    <div v-if="showPagination" class="pagination-wrap">
+    <div ref="instancePaginationRef" class="pagination-wrap">
       <el-pagination
         background
-        layout="total, sizes, prev, pager, next, jumper"
+        layout="total, prev, pager, next, jumper"
         :total="pager.total"
         :current-page="pager.page"
         :page-size="pager.page_size"
-        :page-sizes="[10, 20, 50, 100, 200]"
         @current-change="onPageChange"
-        @size-change="onPageSizeChange"
       />
     </div>
+    </section>
 
     <el-dialog v-model="infoDialogVisible" :title="infoDialogTitle" width="700px">
         <el-table :data="infoRows" size="small" border stripe>
@@ -513,12 +547,11 @@
         <el-button type="primary" :loading="saving" @click="onSubmit">{{ editingInstanceId ? "更新" : "保存" }}</el-button>
       </template>
     </el-dialog>
-    </el-card>
   </div>
 </template>
 
 <script setup>
-import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, reactive, ref, watch } from "vue";
+import { computed, nextTick, onActivated, onBeforeUnmount, onDeactivated, onMounted, reactive, ref, watch } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { useRoute } from "vue-router";
 import { Coin, Files, Lightning, DataAnalysis, Download, Filter, Monitor } from "@element-plus/icons-vue";
@@ -633,6 +666,10 @@ const nowTickMs = ref(Date.now());
 const infoDialogVisible = ref(false);
 const infoDialogTitle = ref("");
 const infoRows = ref([]);
+const instancePageRef = ref(null);
+const instanceTableWrapRef = ref(null);
+const instanceTableRef = ref(null);
+const instancePaginationRef = ref(null);
 
 function beginPageLoading() {
   loadingDepth.value += 1;
@@ -757,14 +794,53 @@ const filteredRows = computed(() => {
 
 const displayRows = computed(() => {
   const result = filteredRows.value;
-  if (!showPagination.value) {
-    return result;
-  }
   const start = (pager.page - 1) * pager.page_size;
   return result.slice(start, start + pager.page_size);
 });
 
-const showPagination = computed(() => !selectedClusterId.value);
+let instanceResizeObserver = null;
+
+function refreshInstancePageSize() {
+  const tableWrap = instanceTableWrapRef.value;
+  const tableElement = instanceTableRef.value?.$el;
+  const pagination = instancePaginationRef.value;
+  if (!tableWrap || !tableElement || !pagination || !filteredRows.value.length) return;
+
+  const tableHeader = tableElement.querySelector(".el-table__header-wrapper");
+  const tableRows = [...tableElement.querySelectorAll(".el-table__body tr")];
+  const headerHeight = tableHeader?.offsetHeight || 38;
+  const rowHeight = Math.max(...tableRows.map((row) => row.offsetHeight), 38);
+  // 使用视口剩余空间而非表格自身高度，避免实例列表将整页撑出垂直滚动条。
+  const availableHeight = window.innerHeight - tableWrap.getBoundingClientRect().top - pagination.offsetHeight - 24;
+  const nextPageSize = Math.max(1, Math.floor((availableHeight - headerHeight - 4) / rowHeight));
+
+  if (nextPageSize === pager.page_size) return;
+  const firstVisibleRow = (pager.page - 1) * pager.page_size;
+  pager.page_size = nextPageSize;
+  pager.page = Math.min(
+    Math.max(1, Math.ceil(filteredRows.value.length / pager.page_size)),
+    Math.floor(firstVisibleRow / pager.page_size) + 1,
+  );
+}
+
+function scheduleInstancePageSizeRefresh() {
+  nextTick(refreshInstancePageSize);
+}
+
+const runningOverview = computed(() => {
+  const summary = { running: 0, error: 0, unknown: 0 };
+  filteredRows.value.forEach((row) => {
+    const status = rowRunningStatus(row);
+    if (status === "running") {
+      summary.running += 1;
+    } else if (status === "error") {
+      summary.error += 1;
+    } else {
+      summary.unknown += 1;
+    }
+  });
+  return summary;
+});
 
 function isEmptyValue(value) {
   return value === null || value === undefined || value === "";
@@ -2476,12 +2552,6 @@ async function onPageChange(page) {
   await runHealthCheck(true);
 }
 
-async function onPageSizeChange(size) {
-  pager.page_size = Number(size) || 10;
-  pager.page = 1;
-  await runHealthCheck(true);
-}
-
 async function executeHealthCheckBatch(force = false) {
   await loadHealthStatusFromDb(force);
 }
@@ -2995,6 +3065,12 @@ async function removeInstance(row) {
 }
 
 onMounted(async () => {
+  if (typeof ResizeObserver !== "undefined") {
+    instanceResizeObserver = new ResizeObserver(scheduleInstancePageSizeRefresh);
+    if (instancePageRef.value) instanceResizeObserver.observe(instancePageRef.value);
+    if (instancePaginationRef.value) instanceResizeObserver.observe(instancePaginationRef.value);
+  }
+  window.addEventListener("resize", scheduleInstancePageSizeRefresh);
   try {
     resetForm();
     resetPager();
@@ -3032,6 +3108,8 @@ onBeforeUnmount(() => {
   clearRelativeTimer();
   clearRefreshTimer();
   clearSearchTimer();
+  instanceResizeObserver?.disconnect();
+  window.removeEventListener("resize", scheduleInstancePageSizeRefresh);
 });
 
 watch(
@@ -3075,12 +3153,19 @@ watch(
     }
   },
 );
+
+watch(
+  () => [pager.page, pager.page_size, filteredRows.value.length],
+  scheduleInstancePageSizeRefresh,
+  { flush: "post" },
+);
 </script>
 
 <style scoped>
 .instance-page {
   position: relative;
   min-height: 240px;
+  color: #1f2937;
 }
 
 .page-loading-mask {
@@ -3135,21 +3220,168 @@ watch(
 }
 
 
-.header-row {
+.page-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 24px;
+  margin-bottom: 16px;
+  padding: 4px 2px;
 }
 
-.actions { gap: 6px;
+.page-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+
+.page-icon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 42px;
+  width: 42px;
+  height: 42px;
+  border-radius: 13px;
+  color: #fff;
+  background: linear-gradient(145deg, #409eff, #337ecc);
+  box-shadow: 0 8px 20px rgba(64, 158, 255, 0.22);
+}
+
+.page-icon :deep(svg) {
+  width: 21px;
+  height: 21px;
+}
+
+.page-title-wrap h1 {
+  margin: 0;
+  color: #172033;
+  font-size: 20px;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+.page-title-wrap p {
+  margin: 3px 0 0;
+  color: #8491a5;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.header-actions {
+  display: inline-flex;
+  align-items: center;
   flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.header-actions :deep(.el-button + .el-button) {
+  margin-left: 0;
+}
+
+.overview-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-bottom: 14px;
+  padding: 14px 4px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #f6f9ff 0%, #fbfcff 58%, #f8fafc 100%);
+}
+
+.overview-item {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 11px;
+  min-width: 0;
+  padding: 2px 18px;
+}
+
+.overview-item + .overview-item {
+  border-left: 1px solid rgba(148, 163, 184, 0.18);
+}
+
+.overview-item > div {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.overview-item strong {
+  color: #1e293b;
+  font-size: 20px;
+  font-weight: 650;
+  line-height: 1.05;
+  font-variant-numeric: tabular-nums;
+}
+
+.overview-item span:not(.overview-dot) {
+  margin-top: 4px;
+  color: #8491a5;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.overview-dot {
+  width: 9px;
+  height: 9px;
+  flex: 0 0 9px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 5px currentColor;
+}
+
+.overview-dot--primary { color: rgba(64, 158, 255, 0.13); background: #409eff; }
+.overview-dot--success { color: rgba(103, 194, 58, 0.13); background: #67c23a; }
+.overview-dot--danger { color: rgba(245, 108, 108, 0.13); background: #f56c6c; }
+.overview-dot--muted { color: rgba(144, 147, 153, 0.13); background: #909399; }
+
+.content-panel {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid #edf0f5;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 8px 24px rgba(31, 45, 61, 0.04);
+}
+
+.filter-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 14px 16px;
+  background: #fbfcfe;
+}
+
+.filter-heading {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+}
+
+.filter-title {
+  color: #334155;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.filter-hint {
+  margin-top: 3px;
+  color: #98a2b3;
+  font-size: 11px;
 }
 
 .actions {
   display: inline-flex;
+  align-items: center;
   flex-wrap: wrap;
   justify-content: flex-end;
-  gap: 6px;
+  gap: 8px;
+}
+
+.actions :deep(.el-button + .el-button) {
+  margin-left: 0;
 }
 
 .keyword-input {
@@ -3197,8 +3429,10 @@ watch(
 
 .table-wrap {
   width: 100%;
-  overflow-x: auto;
-  overflow-y: hidden;
+  min-width: 0;
+  overflow: hidden;
+  padding: 0 8px;
+  box-sizing: border-box;
 }
 
 .address-cell {
@@ -3307,8 +3541,11 @@ watch(
 }
 
 .pagination-wrap {
-  margin-top: 8px;
+  min-height: 54px;
+  padding: 10px 16px 12px;
+  box-sizing: border-box;
   display: flex;
+  align-items: center;
   justify-content: flex-end;
 }
 
@@ -3344,17 +3581,11 @@ watch(
   color: #cf1322;
 }
 
-:deep(.el-card__header) {
-  padding: 10px 14px;
-}
-
-:deep(.el-card__body) {
-  padding: 12px 14px;
-}
-
 :deep(.instance-table .el-table__cell) {
-  padding-top: 4px;
-  padding-bottom: 4px;
+  padding-top: 7px;
+  padding-bottom: 7px;
+  border-right: 0;
+  border-bottom: 0;
 }
 
 :deep(.instance-table .cell) {
@@ -3366,11 +3597,66 @@ watch(
 }
 
 :deep(.instance-table) {
+  --el-table-border-color: transparent;
+  --el-table-header-bg-color: #f5f7fa;
+  --el-table-row-hover-bg-color: #f6f9ff;
+  --el-table-current-row-bg-color: #eef6ff;
   font-size: 12px;
+  color: #475569;
 }
 
 .instance-table {
   width: 100%;
+  border-radius: 10px;
+}
+
+:deep(.instance-table::before),
+:deep(.instance-table::after),
+:deep(.instance-table .el-table__inner-wrapper::before),
+:deep(.instance-table .el-table__border-left-patch) {
+  display: none;
+}
+
+:deep(.instance-table .el-table__column-resize-proxy) {
+  width: 1px;
+  border-left: 1px dashed #409eff;
+  background: transparent;
+}
+
+:deep(.instance-table tr) {
+  background: transparent;
+}
+
+:deep(.instance-table td.el-table__cell) {
+  background: #fff;
+}
+
+:deep(.instance-table td.el-table__cell.el-table-fixed-column--right) {
+  z-index: 2;
+  background: #fff !important;
+}
+
+:deep(.instance-table th.el-table-fixed-column--right),
+:deep(.instance-table .el-table__fixed-right-patch) {
+  background: #f5f7fa !important;
+}
+
+:deep(.instance-table .el-table__body tr:hover > td.el-table-fixed-column--right) {
+  background: #f6f9ff !important;
+}
+
+:deep(.instance-table .el-scrollbar__bar.is-horizontal) {
+  height: 8px;
+  opacity: 1;
+}
+
+:deep(.instance-table .el-scrollbar__bar.is-horizontal .el-scrollbar__thumb) {
+  background: #aeb8c7;
+  opacity: 0.72;
+}
+
+:deep(.instance-table .el-table__body tr:hover > td.el-table__cell) {
+  background: #f6f9ff;
 }
 
 :deep(.instance-table .el-tag) {
@@ -3460,7 +3746,18 @@ watch(
 }
 
 :deep(.instance-table th.el-table__cell) {
-  background: #fafbfd;
+  height: 38px;
+  color: #64748b;
+  background: #f5f7fa;
+  font-weight: 600;
+}
+
+:deep(.instance-table th.el-table__cell:not(:last-child)) {
+  border-right: 1px solid #dfe5ee;
+}
+
+:deep(.instance-table th.el-table__cell:last-child) {
+  border-right: 0;
 }
 
 :deep(.instance-table th.running-header .cell) {
@@ -3493,11 +3790,11 @@ watch(
 }
 
 :deep(.el-table .cluster-selected-row > td) {
-  background-color: #ffe58e !important;
+  background-color: #eef6ff !important;
 }
 
 :deep(.el-table .cluster-selected-row:hover > td) {
-  background-color: #ffd966 !important;
+  background-color: #e3f0ff !important;
 }
 
 .namespace-select,
@@ -3506,7 +3803,14 @@ watch(
 }
 
 @media (max-width: 1360px) {
+  .filter-toolbar {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 10px;
+  }
+
   .actions {
+    width: 100%;
     justify-content: flex-start;
   }
 
@@ -3516,6 +3820,19 @@ watch(
 }
 
 @media (max-width: 1120px) {
+  .page-header {
+    align-items: flex-start;
+  }
+
+  .overview-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    row-gap: 18px;
+  }
+
+  .overview-item:nth-child(3) {
+    border-left: 0;
+  }
+
   .keyword-input {
     width: 140px;
   }
@@ -3527,6 +3844,39 @@ watch(
   :deep(.instance-table .el-table__cell) {
     padding-top: 6px;
     padding-bottom: 6px;
+  }
+}
+
+@media (max-width: 760px) {
+  .page-header {
+    flex-direction: column;
+  }
+
+  .header-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .overview-item {
+    justify-content: flex-start;
+    padding-left: 24px;
+  }
+
+  .actions > :deep(.el-select),
+  .actions > :deep(.el-input),
+  .namespace-select,
+  .cluster-select,
+  .keyword-input {
+    width: 100%;
+  }
+
+  .filter-hint {
+    display: none;
+  }
+
+  .pagination-wrap {
+    overflow-x: auto;
+    justify-content: flex-start;
   }
 }
 </style>

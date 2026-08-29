@@ -413,11 +413,13 @@
               <template #label>
                 <span
                   class="tab-label"
+                  :class="{ 'is-dragging': draggingTabId === tab.id }"
                   :title="tab.title"
                   draggable="true"
                   @dragstart="onTabDragStart($event, tab)"
-                  @dragover.prevent
-                  @drop.prevent="onTabDrop(tab)"
+                  @dragenter.prevent
+                  @dragover.prevent.stop="onTabDragOver"
+                  @drop.prevent.stop="onTabDrop(tab)"
                   @dragend="onTabDragEnd"
                   @contextmenu.prevent="onTabRightClick($event, tab)"
                 >
@@ -928,6 +930,12 @@ function onTabDragStart(event, tab) {
   draggingTabId.value = tab.id;
   event.dataTransfer.effectAllowed = "move";
   event.dataTransfer.setData("text/plain", tab.id);
+}
+
+function onTabDragOver(event) {
+  if (event.dataTransfer) {
+    event.dataTransfer.dropEffect = "move";
+  }
 }
 
 function onTabDrop(targetTab) {
@@ -1718,10 +1726,23 @@ async function logout() {
 
 :deep(.tabs-wrap .tab-label) {
   display: inline-flex;
+  width: 100%;
+  height: 100%;
+  flex: 1 1 auto;
   min-width: 0;
   max-width: 100%;
   align-items: center;
   gap: 7px;
+  cursor: grab;
+  user-select: none;
+}
+
+:deep(.tabs-wrap .tab-label:active) {
+  cursor: grabbing;
+}
+
+:deep(.tabs-wrap .tab-label.is-dragging) {
+  opacity: 0.55;
 }
 
 :deep(.tabs-wrap .tab-title) {

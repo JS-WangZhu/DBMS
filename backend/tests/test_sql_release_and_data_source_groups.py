@@ -435,6 +435,80 @@ def test_personal_execute_permission_scopes_history_and_execution(app, client, m
     }
 
 
+def test_change_permission_shares_release_history_with_cluster_teammates(app, client):
+    applicant_id, cluster_id, instance_id = _assets(app)
+    with app.app_context():
+        teammate = User(username="release-teammate", role="user", status="active", auth_source="local")
+        teammate.set_password("password123")
+        outsider = User(username="release-other-applicant", role="user", status="active", auth_source="local")
+        outsider.set_password("password123")
+        other_cluster = DatabaseCluster(
+            name="other-project-cluster",
+            db_type="mysql",
+            business_line="other-project",
+            environment="test",
+        )
+        db.session.add_all([teammate, outsider, other_cluster])
+        db.session.flush()
+        other_instance = DatabaseInstance(
+            name="other-project-primary",
+            db_type="mysql",
+            host_input="127.0.0.9",
+            port=3306,
+            username="root",
+            cluster_id=other_cluster.id,
+        )
+        db.session.add(other_instance)
+        db.session.flush()
+        db.session.add_all([
+            UserMenuPermission(user_id=teammate.id, menu_key="sql_release_history"),
+            UserClusterPermission(user_id=teammate.id, cluster_id=cluster_id, can_change=True),
+            SqlRelease(
+                title="shared project release",
+                applicant_id=applicant_id,
+                cluster_id=cluster_id,
+                instance_id=instance_id,
+                database_name="billing",
+                sql_text="UPDATE orders SET status='paid' WHERE id=1;",
+                status="pending",
+                ai_passed=True,
+                force_submitted=False,
+                review_json=[{"line": 1, "sql": "UPDATE orders", "passed": True}],
+            ),
+            SqlRelease(
+                title="other project release",
+                applicant_id=outsider.id,
+                cluster_id=other_cluster.id,
+                instance_id=other_instance.id,
+                database_name="other_db",
+                sql_text="UPDATE records SET status='done' WHERE id=1;",
+                status="pending",
+                ai_passed=True,
+                force_submitted=False,
+                review_json=[{"line": 1, "sql": "UPDATE records", "passed": True}],
+            ),
+        ])
+        db.session.commit()
+        shared_release_id = SqlRelease.query.filter_by(title="shared project release").one().id
+        other_release_id = SqlRelease.query.filter_by(title="other project release").one().id
+
+    headers = _login(client, "release-teammate", "password123")
+    history = client.get("/api/v1/sql-releases", headers=headers)
+
+    assert history.status_code == 200
+    items = history.get_json()["data"]["items"]
+    assert [item["id"] for item in items] == [shared_release_id]
+    assert items[0]["applicant_id"] == applicant_id
+    assert items[0]["can_execute"] is False
+
+    shared_detail = client.get(f"/api/v1/sql-releases/{shared_release_id}", headers=headers)
+    assert shared_detail.status_code == 200
+    assert shared_detail.get_json()["data"]["id"] == shared_release_id
+
+    other_detail = client.get(f"/api/v1/sql-releases/{other_release_id}", headers=headers)
+    assert other_detail.status_code == 403
+
+
 def test_sql_release_history_supports_filters_and_title_search(app, client):
     with app.app_context():
         applicant = User(

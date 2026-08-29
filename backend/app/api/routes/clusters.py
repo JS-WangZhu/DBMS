@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 from flask import Blueprint, Response, current_app, request, stream_with_context
-from sqlalchemy import Text, cast, func
+from sqlalchemy import Text, cast
 
 from app.api.routes.common import active_user_required, admin_required, get_current_user, list_allowed_cluster_ids, require_cluster_permission
 from app.extensions import db
@@ -366,23 +366,11 @@ def list_clusters():
 @bp.get("/stats")
 @active_user_required
 def cluster_stats():
-    """获取集群统计数据：按业务统计和按数据库类型统计"""
-    user = get_current_user()
-    query = DatabaseCluster.query
-
-    # 非管理员只能看到有权限的集群
-    if user and user.role != "admin":
-        allowed_cluster_ids = list_allowed_cluster_ids("query")
-        if not allowed_cluster_ids:
-            return ok_response(data={
-                "by_business": [],
-                "by_db_type": []
-            })
-        query = query.filter(DatabaseCluster.id.in_(allowed_cluster_ids))
+    """获取全局集群聚合统计，不暴露单个集群的明细数据。"""
 
     # 按业务(business_line/namespace)统计集群个数
     # 使用子查询方式避免 only_full_group_by 问题
-    clusters = query.all()
+    clusters = DatabaseCluster.query.all()
     business_count = {}
     for cluster in clusters:
         business = cluster.business_line or cluster.namespace or "未分类"
@@ -393,16 +381,13 @@ def cluster_stats():
     ]
 
     # 按数据库类型(db_type)统计集群个数
-    by_db_type_raw = (
-        db.session.query(
-            DatabaseCluster.db_type,
-            func.count(DatabaseCluster.id).label("count")
-        )
-        .group_by(DatabaseCluster.db_type)
-        .order_by(func.count(DatabaseCluster.id).desc())
-        .all()
-    )
-    by_db_type = [{"name": row.db_type, "value": row.count} for row in by_db_type_raw]
+    db_type_count = {}
+    for cluster in clusters:
+        db_type_count[cluster.db_type] = db_type_count.get(cluster.db_type, 0) + 1
+    by_db_type = [
+        {"name": name, "value": count}
+        for name, count in sorted(db_type_count.items(), key=lambda item: -item[1])
+    ]
 
     return ok_response(data={
         "by_business": by_business,

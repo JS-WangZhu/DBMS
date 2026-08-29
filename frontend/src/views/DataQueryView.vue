@@ -354,11 +354,11 @@
             <el-button v-if="resultVisible" size="small" text @click="clearResult">清空</el-button>
           </div>
 
-          <div class="result-body">
+          <div ref="resultBodyRef" class="result-body">
             <template v-if="activeResultTab === 'result'">
               <el-empty v-if="!resultVisible" description="点击执行按钮查看结果" :image-size="70" />
               <template v-else>
-                <el-table v-if="tableColumns.length" :data="pagedTableRows" stripe size="small" border>
+                <el-table ref="resultTableRef" v-if="tableColumns.length" :data="pagedTableRows" stripe size="small" border>
                   <el-table-column
                     v-for="(col, index) in tableColumns"
                     :key="`${col}-${index}`"
@@ -387,10 +387,8 @@
                 <div v-if="tableColumns.length" class="pagination-row">
                   <el-pagination
                     v-model:current-page="currentPage"
-                    v-model:page-size="pageSize"
-                    :page-sizes="[10, 20, 50, 100, 200]"
                     :total="tableRows.length"
-                    layout="total, sizes, prev, pager, next, jumper"
+                    layout="total, prev, pager, next, jumper"
                     background
                     small
                   />
@@ -425,7 +423,7 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onMounted, reactive, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { ElMessage } from "element-plus";
 import {
   CircleClose,
@@ -492,6 +490,8 @@ const tableRows = ref([]);
 const rawResult = ref("");
 const currentPage = ref(1);
 const pageSize = ref(10);
+const resultBodyRef = ref(null);
+const resultTableRef = ref(null);
 const mongoDatabases = ref([]);
 const mongoDatabasesLoading = ref(false);
 const mysqlDatabases = ref([]);
@@ -565,6 +565,41 @@ const pagedTableRows = computed(() => {
   const start = (currentPage.value - 1) * pageSize.value;
   return tableRows.value.slice(start, start + pageSize.value);
 });
+
+let resultResizeObserver = null;
+
+function getVerticalPadding(element) {
+  const style = window.getComputedStyle(element);
+  return (Number.parseFloat(style.paddingTop) || 0) + (Number.parseFloat(style.paddingBottom) || 0);
+}
+
+function refreshResultPageSize() {
+  const resultBody = resultBodyRef.value;
+  const tableElement = resultTableRef.value?.$el;
+  if (!resultVisible.value || !resultBody || !tableElement || !tableRows.value.length) return;
+
+  const tableHeader = tableElement.querySelector(".el-table__header-wrapper");
+  const tableRow = tableElement.querySelector(".el-table__body tr");
+  const pagination = resultBody.querySelector(".pagination-row");
+  const headerHeight = tableHeader?.offsetHeight || 40;
+  const rowHeight = tableRow?.offsetHeight || 40;
+  const paginationHeight = pagination?.offsetHeight || 28;
+  // 预留分页栏外边距和表格边框，防止刚好临界时出现垂直滚动条。
+  const availableHeight = resultBody.clientHeight - getVerticalPadding(resultBody) - headerHeight - paginationHeight - 14;
+  const nextPageSize = Math.max(1, Math.floor(availableHeight / rowHeight));
+
+  if (nextPageSize === pageSize.value) return;
+  const firstVisibleRow = (currentPage.value - 1) * pageSize.value;
+  pageSize.value = nextPageSize;
+  currentPage.value = Math.min(
+    Math.max(1, Math.ceil(tableRows.value.length / pageSize.value)),
+    Math.floor(firstVisibleRow / pageSize.value) + 1,
+  );
+}
+
+function scheduleResultPageSizeRefresh() {
+  nextTick(refreshResultPageSize);
+}
 
 const isMongoResult = computed(() => form.db_type === "mongodb");
 const schemaTreeKey = computed(() => [
@@ -1522,6 +1557,11 @@ function renderMarkdown(text) {
 }
 
 onMounted(async () => {
+  if (typeof ResizeObserver !== "undefined" && resultBodyRef.value) {
+    resultResizeObserver = new ResizeObserver(scheduleResultPageSizeRefresh);
+    resultResizeObserver.observe(resultBodyRef.value);
+  }
+  window.addEventListener("resize", scheduleResultPageSizeRefresh);
   await reloadOptions();
   if (["mysql", "postgresql"].includes(form.db_type) && form.cluster_id && form.mysql_db) {
     await loadMysqlSchema();
@@ -1529,6 +1569,11 @@ onMounted(async () => {
     await loadMongoSchema();
   }
 });
+onBeforeUnmount(() => {
+  resultResizeObserver?.disconnect();
+  window.removeEventListener("resize", scheduleResultPageSizeRefresh);
+});
+watch([resultVisible, tableRows, tableColumns], scheduleResultPageSizeRefresh, { flush: "post" });
 useTabActivationRefresh(reloadOptions);
 </script>
 

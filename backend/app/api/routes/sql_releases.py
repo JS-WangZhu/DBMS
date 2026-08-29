@@ -50,6 +50,12 @@ def _cluster_seed_nodes(db_type, cluster_id):
     return sorted({f"{item.resolved_ip or item.host_input}:{item.port}" for item in rows if item.resolved_ip or item.host_input})
 
 
+def _visible_release_cluster_ids(user):
+    if not user or user.role == "admin":
+        return None
+    return set(list_allowed_cluster_ids("change")) | set(list_allowed_cluster_ids("execute"))
+
+
 def _serialize_release(row, user=None, executable_cluster_ids=None, include_rollback_sql=False):
     data = row.to_dict()
     data["execution_mode"] = "agent" if row.instance and row.instance.access_mode == "agent" else "server"
@@ -408,9 +414,10 @@ def list_sql_releases():
     executable_cluster_ids = None
     if user.role != "admin":
         executable_cluster_ids = set(list_allowed_cluster_ids("execute"))
+        visible_cluster_ids = _visible_release_cluster_ids(user)
         scope_filters = [SqlRelease.applicant_id == user.id]
-        if executable_cluster_ids:
-            scope_filters.append(SqlRelease.cluster_id.in_(executable_cluster_ids))
+        if visible_cluster_ids:
+            scope_filters.append(SqlRelease.cluster_id.in_(visible_cluster_ids))
         query = query.filter(or_(*scope_filters))
     db_type = str(request.args.get("db_type") or "").strip().lower()
     if db_type:
@@ -468,7 +475,8 @@ def get_sql_release(release_id):
     row = SqlRelease.query.get_or_404(release_id)
     user = get_current_user()
     executable_cluster_ids = None if user.role == "admin" else set(list_allowed_cluster_ids("execute"))
-    if user.role != "admin" and row.applicant_id != user.id and row.cluster_id not in executable_cluster_ids:
+    visible_cluster_ids = _visible_release_cluster_ids(user)
+    if user.role != "admin" and row.applicant_id != user.id and row.cluster_id not in visible_cluster_ids:
         return error_response("permission denied", code=403)
     return ok_response(data=_serialize_release(row, user, executable_cluster_ids, include_rollback_sql=True))
 
