@@ -20,6 +20,10 @@ class UserClusterPermission(db.Model, TimestampMixin):
     can_change = db.Column(db.Boolean, nullable=False, default=False)
     can_execute = db.Column(db.Boolean, nullable=False, default=False)
     can_view_instance = db.Column(db.Boolean, nullable=False, default=False)
+    # A null value is a manually granted permission with no expiry.  Expiring
+    # access is deliberately stored only on the direct user grant: group and
+    # role permissions remain independent sources of access.
+    expires_at = db.Column(db.DateTime, nullable=True, index=True)
 
 
 class ApiKey(db.Model, TimestampMixin):
@@ -159,6 +163,7 @@ class DataSourcePermissionApplication(db.Model, TimestampMixin):
         nullable=True,
     )
     reviewed_at = db.Column(db.DateTime, nullable=True)
+    requested_expires_at = db.Column(db.DateTime, nullable=True)
 
 
 class DataSourcePermissionApplicationItem(db.Model, TimestampMixin):

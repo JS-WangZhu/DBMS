@@ -58,7 +58,7 @@
           <el-select v-model="selectedEnvironment" clearable placeholder="选择环境" class="cluster-select" size="small" @change="onEnvironmentChange">
             <el-option v-for="env in environments" :key="env" :label="env" :value="env" />
           </el-select>
-          <el-select v-model="selectedClusterId" clearable placeholder="选择集群" class="cluster-select" size="small" @change="onClusterSelectChange">
+          <el-select v-model="selectedClusterId" clearable filterable default-first-option placeholder="输入或选择集群" class="cluster-select" size="small" @change="onClusterSelectChange">
             <el-option v-for="c in filteredClusters" :key="c.id" :label="clusterOptionLabel(c)" :value="c.id" />
           </el-select>
           <el-button v-if="isAdmin && selectedClusterId" type="warning" size="small" :loading="healthChecking" @click="runClusterHealthCheck">
@@ -472,7 +472,7 @@
       <el-form :model="form" label-width="110px">
         <el-form-item label="实例名"><el-input v-model="form.name" /></el-form-item>
         <el-form-item label="所属集群">
-          <el-select v-model="form.cluster_id" clearable style="width: 100%" placeholder="可选：选择已录入集群">
+          <el-select v-model="form.cluster_id" clearable filterable default-first-option style="width: 100%" placeholder="可选：输入或选择已录入集群">
             <el-option v-for="item in clusters" :key="item.id" :label="clusterOptionLabel(item)" :value="item.id" />
           </el-select>
         </el-form-item>

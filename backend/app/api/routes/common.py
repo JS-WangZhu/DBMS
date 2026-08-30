@@ -1,6 +1,7 @@
 from functools import wraps
 
 from flask import g, request
+from datetime import datetime, timezone
 from flask_jwt_extended import get_jwt_identity, jwt_required
 
 from app.models.user import User
@@ -135,7 +136,10 @@ def get_effective_menu_keys(user_id: int):
 
 def get_effective_cluster_permissions(user_id: int):
     effective = {}
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
     for row in UserClusterPermission.query.filter_by(user_id=user_id).all():
+        if row.expires_at and row.expires_at <= now:
+            continue
         effective[row.cluster_id] = {
             "can_query": bool(row.can_query),
             "can_change": bool(row.can_change),

@@ -110,6 +110,16 @@ def register_jobs(scheduler, app):
         replace_existing=True,
         kwargs={"app": app},
     )
+    scheduler.add_job(
+        id="data_source_permission_expiry_5m",
+        func=job_revoke_expired_data_source_permissions,
+        trigger="interval",
+        minutes=5,
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        kwargs={"app": app},
+    )
 
     sync_monitor_collect_job(scheduler=scheduler, app=app)
     sync_cache_warm_job(scheduler=scheduler, app=app)
@@ -141,6 +151,16 @@ def register_jobs(scheduler, app):
     sync_scheduled_task_jobs(scheduler=scheduler, app=app)
     sync_physical_discovery_job(scheduler=scheduler, app=app)
     sync_parameter_collection_job(scheduler=scheduler, app=app)
+
+
+def job_revoke_expired_data_source_permissions(app):
+    app = _resolve_app(app) or app
+    if app is None:
+        return 0
+    with app.app_context():
+        from app.services.permission_expiry import revoke_expired_data_source_permissions
+
+        return revoke_expired_data_source_permissions()
 
 
 def job_flush_query_audit_outbox(app):

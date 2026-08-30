@@ -61,6 +61,11 @@
           <el-switch :model-value="row.can_view_instance" :disabled="disabled" @update:model-value="update(row.cluster_id, 'can_view_instance', $event)" />
         </template>
       </el-table-column>
+      <el-table-column v-if="showExpiration" label="持有至" min-width="190">
+        <template #default="{ row }">
+          <el-date-picker :model-value="toBeijingDateTimeValue(row.expires_at)" type="datetime" value-format="YYYY-MM-DD HH:mm:ss" clearable :disabled="disabled || !hasDirectPermission(row)" placeholder="长期持有（北京时间）" @update:model-value="update(row.cluster_id, 'expires_at', $event || null)" />
+        </template>
+      </el-table-column>
       <el-table-column label="最终有效" min-width="300">
         <template #default="{ row }">
           <template v-if="effective[row.cluster_id]">
@@ -84,6 +89,7 @@ const props = defineProps({
   clusters: { type: Array, required: true },
   effective: { type: Object, default: () => ({}) },
   disabled: Boolean,
+  showExpiration: Boolean,
 });
 const emit = defineEmits(["update:modelValue"]);
 
@@ -116,7 +122,16 @@ const filteredPermissions = computed(() => {
 });
 
 function update(id, key, value) {
-  emit("update:modelValue", props.modelValue.map((item) => item.cluster_id === id ? { ...item, [key]: value } : item));
+  emit("update:modelValue", props.modelValue.map((item) => item.cluster_id === id ? { ...item, [key]: value, ...(key.startsWith("can_") && !value && !hasDirectPermission({ ...item, [key]: value }) ? { expires_at: null } : {}) } : item));
+}
+
+function hasDirectPermission(row) { return Boolean(row.can_query || row.can_change || row.can_execute || row.can_view_instance); }
+
+function toBeijingDateTimeValue(value) {
+  if (!value) return "";
+  const text = String(value).replace(" ", "T");
+  const date = new Date(/[zZ]$|[+-]\d{2}:?\d{2}$/.test(text) ? text : `${text}Z`);
+  return new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" }).format(date);
 }
 
 function enableFilteredPermission(key) {

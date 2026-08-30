@@ -1,3 +1,6 @@
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
+
 from flask import Blueprint, request
 
 from app.api.routes.common import admin_required, get_effective_cluster_permissions
@@ -14,9 +17,18 @@ from app.services.audit import log_audit
 from app.utils.response import error_response, ok_response
 
 bp = Blueprint("data_source_permissions", __name__, url_prefix="/data-source-permissions")
+BEIJING_TZ = ZoneInfo("Asia/Shanghai")
 
 
-def _normalize_permissions(raw):
+def _utc_now():
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def _utc_iso(value):
+    return value.replace(tzinfo=timezone.utc).isoformat() if value else None
+
+
+def _normalize_permissions(raw, include_expiry=False):
     result = []
     seen = set()
     for item in raw if isinstance(raw, list) else []:
@@ -32,14 +44,38 @@ def _normalize_permissions(raw):
         can_execute = item.get("can_execute") is True
         can_view_instance = item.get("can_view_instance") is True
         if can_query or can_change or can_execute or can_view_instance:
-            result.append({
+            normalized = {
                 "cluster_id": cluster_id,
                 "can_query": can_query,
                 "can_change": can_change,
                 "can_execute": can_execute,
                 "can_view_instance": can_view_instance,
-            })
+            }
+            if include_expiry:
+                normalized["expires_at"] = _parse_expires_at(item.get("expires_at"))
+            result.append(normalized)
     return result
+
+
+def _parse_expires_at(value):
+    if value in (None, ""):
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=BEIJING_TZ)
+        return parsed.astimezone(timezone.utc).replace(tzinfo=None)
+    except (TypeError, ValueError):
+        return None
+
+
+def _has_invalid_expiry(raw):
+    for item in raw if isinstance(raw, list) else []:
+        if not isinstance(item, dict) or item.get("expires_at") in (None, ""):
+            continue
+        if _parse_expires_at(item.get("expires_at")) is None:
+            return True
+    return False
 
 
 def _group_dict(group):
@@ -81,6 +117,7 @@ def get_user_data_source_permissions(user_id):
             "can_change": bool(row.can_change),
             "can_execute": bool(row.can_execute),
             "can_view_instance": bool(row.can_view_instance),
+            "expires_at": _utc_iso(row.expires_at),
         }
         for row in UserClusterPermission.query.filter_by(user_id=user.id).all()
     ]
@@ -104,7 +141,11 @@ def update_user_data_source_permissions(user_id):
     if user.role == "admin":
         return error_response("admin permissions are managed by system", code=400)
     payload = request.get_json(silent=True) or {}
-    permissions = _normalize_permissions(payload.get("direct_permissions"))
+    if _has_invalid_expiry(payload.get("direct_permissions")):
+        return error_response("权限到期时间格式无效", code=400)
+    permissions = _normalize_permissions(payload.get("direct_permissions"), include_expiry=True)
+    if any(item["expires_at"] and item["expires_at"] <= _utc_now() for item in permissions):
+        return error_response("权限到期时间必须晚于当前时间", code=400)
     group_ids = []
     for value in payload.get("group_ids") or []:
         try:

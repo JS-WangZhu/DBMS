@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 from flask import Blueprint, request
 from sqlalchemy import or_
@@ -28,6 +29,15 @@ bp = Blueprint(
 
 PRODUCTION_ENVIRONMENTS = {"prod", "production", "生产", "生产环境"}
 VALID_STATUSES = {"pending", "approved", "rejected"}
+BEIJING_TZ = ZoneInfo("Asia/Shanghai")
+
+
+def _utc_now():
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def _utc_iso(value):
+    return value.replace(tzinfo=timezone.utc).isoformat() if value else None
 
 
 def _is_production(cluster):
@@ -38,6 +48,20 @@ def _cluster_dict(cluster):
     data = cluster.to_dict()
     data["project"] = cluster.business_line or cluster.namespace
     return data
+
+
+def _parse_requested_expires_at(value):
+    if not value:
+        return None
+    try:
+        raw = str(value).strip()
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            # The UI submits a wall-clock time selected in Beijing.
+            parsed = parsed.replace(tzinfo=BEIJING_TZ)
+        return parsed.astimezone(timezone.utc).replace(tzinfo=None)
+    except (TypeError, ValueError):
+        return None
 
 
 def _application_dict(application):
@@ -58,7 +82,8 @@ def _application_dict(application):
         "review_comment": application.review_comment,
         "applicant": applicant.to_dict() if applicant else None,
         "reviewer": reviewer.to_dict() if reviewer else None,
-        "reviewed_at": application.reviewed_at.isoformat() if application.reviewed_at else None,
+        "reviewed_at": _utc_iso(application.reviewed_at),
+        "requested_expires_at": _utc_iso(application.requested_expires_at),
         "created_at": application.created_at.isoformat() if application.created_at else None,
         "updated_at": application.updated_at.isoformat() if application.updated_at else None,
         "items": [
@@ -171,10 +196,16 @@ def create_application():
     reason = str(payload.get("reason") or "").strip()
     if not reason:
         return error_response("请填写申请原因", code=400)
+    requested_expires_at = _parse_requested_expires_at(payload.get("requested_expires_at"))
+    if not requested_expires_at:
+        return error_response("请选择权限持有至时间", code=400)
+    if requested_expires_at <= _utc_now():
+        return error_response("权限持有至时间必须晚于当前时间", code=400)
     application = DataSourcePermissionApplication(
         applicant_id=user.id,
         status="pending",
         reason=reason[:500],
+        requested_expires_at=requested_expires_at,
     )
     db.session.add(application)
     db.session.flush()
@@ -186,7 +217,7 @@ def create_application():
         action="data_source_permission.application.create",
         target_type="data_source_permission_application",
         target_id=str(application.id),
-        detail={"items": normalized},
+        detail={"items": normalized, "requested_expires_at": _utc_iso(requested_expires_at)},
     )
     return ok_response(data=_application_dict(application), message="权限申请已提交", code=201)
 
@@ -226,18 +257,19 @@ def review_application(application_id):
                 db.session.add(permission)
             permission.can_query = bool(permission.can_query or item.can_query)
             permission.can_change = bool(permission.can_change or item.can_change)
+            permission.expires_at = application.requested_expires_at
             # Execution permission is deliberately outside this application flow.
 
     application.status = decision
     application.review_comment = comment[:500] or None
     application.reviewer_id = reviewer.id
-    application.reviewed_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    application.reviewed_at = _utc_now()
     db.session.commit()
     log_audit(
         user_id=reviewer.id,
         action=f"data_source_permission.application.{decision}",
         target_type="data_source_permission_application",
         target_id=str(application.id),
-        detail={"comment": application.review_comment},
+        detail={"comment": application.review_comment, "requested_expires_at": _utc_iso(application.requested_expires_at)},
     )
     return ok_response(data=_application_dict(application), message="审核已完成")

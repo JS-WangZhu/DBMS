@@ -163,5 +163,6 @@ def test_data_source_permission_api_persists_instance_view_permission(app, clien
             "can_change": False,
             "can_execute": False,
             "can_view_instance": True,
+            "expires_at": None,
         }
     ]
