@@ -2,9 +2,12 @@ from app.extensions import db
 from app.models.db_asset import DatabaseCluster
 from app.models.user import User
 from app.models.user_permission import (
+    DataSourceGroup,
+    DataSourceGroupClusterPermission,
     RoleGroup,
     RoleGroupMenuPermission,
     UserClusterPermission,
+    UserDataSourceGroup,
     UserMenuPermission,
     UserRoleGroup,
 )
@@ -102,3 +105,30 @@ def test_instance_data_permission_alone_does_not_grant_service_menu(app, client)
 
     assert response.status_code == 200
     assert response.get_json()["data"]["menu_keys"] == []
+
+
+def test_session_probe_menu_is_inherited_from_data_source_group(app, client):
+    with app.app_context():
+        user = User(username="probe-data-source-group", role="user", status="active", auth_source="local")
+        user.set_password("password123")
+        group = DataSourceGroup(name="mongodb-probe-readers")
+        cluster = DatabaseCluster(name="mongodb-probe-group-cluster", db_type="mongodb")
+        db.session.add_all([user, group, cluster])
+        db.session.flush()
+        db.session.add_all(
+            [
+                UserDataSourceGroup(user_id=user.id, group_id=group.id),
+                DataSourceGroupClusterPermission(group_id=group.id, cluster_id=cluster.id, can_query=True),
+            ]
+        )
+        db.session.commit()
+
+    response = client.get(
+        "/api/v1/users/permissions/me",
+        headers=_login(client, "probe-data-source-group", "password123"),
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()["data"]
+    assert payload["menu_keys"] == ["mongodb_session_probe"]
+    assert payload["direct_menu_keys"] == []

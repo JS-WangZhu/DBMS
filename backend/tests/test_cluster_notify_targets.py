@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 
 from app.extensions import db
-from app.models.db_asset import DatabaseCluster
+from app.models.db_asset import DatabaseCluster, DatabaseInstance
 from app.models.notify_target import BackupNotifyTarget
 from app.services import notifier
 
@@ -97,3 +97,24 @@ def test_ha_notification_prefers_cluster_targets(app, monkeypatch):
 
     assert result["ok"] is True
     assert called == [cluster_target.address]
+
+
+def test_ha_notification_shows_master_domains_and_ips_without_ids(app, monkeypatch):
+    target = BackupNotifyTarget(name="cluster-ops", channel="wecom", address="https://cluster.example/webhook", enabled=True)
+    cluster = DatabaseCluster(name="db-test", db_type="mysql", business_line="公共", environment="test", ha_domain="db-test.u4a.cn")
+    db.session.add_all([target, cluster])
+    db.session.flush()
+    cluster.notify_target_ids = [target.id]
+    old_master = DatabaseInstance(name="old-master", db_type="mysql", host_input="old-db.u4a.cn", resolved_ip="10.0.0.1", port=3306, cluster_id=cluster.id, extra_json={"domain": "old-db.u4a.cn"})
+    new_master = DatabaseInstance(name="new-master", db_type="mysql", host_input="new-db.u4a.cn", resolved_ip="10.0.0.2", port=3306, cluster_id=cluster.id, extra_json={"domain": "new-db.u4a.cn"})
+    db.session.add_all([old_master, new_master])
+    db.session.commit()
+    contents = []
+    monkeypatch.setattr(notifier, "_send_wecom_markdown", lambda content, webhook=None: contents.append(content) or {"ok": True})
+
+    notifier.notify_ha_switch_completion(None, cluster, "normal", {"old_master_instance_id": old_master.id, "new_master_instance_id": new_master.id})
+
+    assert "原主库: " in contents[0]
+    assert "域名 old-db.u4a.cn / IP 10.0.0.1" in contents[0]
+    assert "域名 new-db.u4a.cn / IP 10.0.0.2" in contents[0]
+    assert "主库ID" not in contents[0]

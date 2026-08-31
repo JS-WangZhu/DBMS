@@ -4,6 +4,8 @@ from flask import g, request
 from datetime import datetime, timezone
 from flask_jwt_extended import get_jwt_identity, jwt_required
 
+from app.extensions import db
+from app.models.db_asset import DatabaseCluster
 from app.models.user import User
 from app.models.user_permission import (
     ApiKey,
@@ -125,13 +127,36 @@ def require_cluster_permission(cluster_id: int, action: str):
 def get_effective_menu_keys(user_id: int):
     direct_keys = {row.menu_key for row in UserMenuPermission.query.filter_by(user_id=user_id).all()}
     role_group_ids = [row.role_group_id for row in UserRoleGroup.query.filter_by(user_id=user_id).all()]
-    if not role_group_ids:
-        return direct_keys
-    group_keys = {
-        row.menu_key
-        for row in RoleGroupMenuPermission.query.filter(RoleGroupMenuPermission.role_group_id.in_(role_group_ids)).all()
+    group_keys = set()
+    if role_group_ids:
+        group_keys = {
+            row.menu_key
+            for row in RoleGroupMenuPermission.query.filter(RoleGroupMenuPermission.role_group_id.in_(role_group_ids)).all()
+        }
+    return direct_keys.union(group_keys, get_data_source_inherited_menu_keys(user_id))
+
+
+def get_data_source_inherited_menu_keys(user_id: int):
+    """Expose session-probe menus from effective query/change data-source grants."""
+    probe_cluster_ids = [
+        cluster_id
+        for cluster_id, permissions in get_effective_cluster_permissions(user_id).items()
+        if permissions.get("can_query") or permissions.get("can_change")
+    ]
+    if not probe_cluster_ids:
+        return set()
+    db_types = {
+        row[0]
+        for row in db.session.query(DatabaseCluster.db_type)
+        .filter(DatabaseCluster.id.in_(probe_cluster_ids))
+        .distinct()
+        .all()
     }
-    return direct_keys.union(group_keys)
+    menu_by_db_type = {
+        "mysql": "mysql_session_probe",
+        "mongodb": "mongodb_session_probe",
+    }
+    return {menu_by_db_type[db_type] for db_type in db_types if db_type in menu_by_db_type}
 
 
 def get_effective_cluster_permissions(user_id: int):

@@ -61,7 +61,7 @@
 
 <script setup>
 import * as echarts from "echarts";
-import { nextTick, onBeforeUnmount, onMounted, reactive, ref } from "vue";
+import { nextTick, onActivated, onBeforeUnmount, onMounted, reactive, ref } from "vue";
 import { ElMessage } from "element-plus";
 import { Refresh } from "@element-plus/icons-vue";
 
@@ -249,11 +249,21 @@ function handleResize() {
   dbTypeChartInstance?.resize();
 }
 
+function resizeAfterActivated() {
+  nextTick(() => {
+    window.requestAnimationFrame(() => {
+      handleResize();
+      window.requestAnimationFrame(handleResize);
+    });
+  });
+}
+
 onMounted(() => {
   loadStats();
   window.addEventListener("resize", handleResize);
 });
 useTabActivationRefresh(loadStats);
+onActivated(resizeAfterActivated);
 
 onBeforeUnmount(() => {
   window.removeEventListener("resize", handleResize);

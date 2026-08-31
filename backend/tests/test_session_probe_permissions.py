@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 from app.extensions import db
 from app.models.db_asset import DatabaseCluster, DatabaseInstance
 from app.models.user import User
-from app.models.user_permission import UserClusterPermission, UserMenuPermission
+from app.models.user_permission import UserClusterPermission
 from app.services.instance_service import invalidate_instance_list_cache
 
 
@@ -13,7 +13,7 @@ def _login(client, username):
     return {"Authorization": f"Bearer {response.get_json()['data']['access_token']}"}
 
 
-def _seed_probe_user(db_type, menu_key, username):
+def _seed_probe_user(db_type, username):
     user = User(username=username, role="user", status="active", auth_source="local")
     user.set_password("password123")
     allowed = DatabaseCluster(name=f"{db_type}-probe-allowed", db_type=db_type)
@@ -44,7 +44,6 @@ def _seed_probe_user(db_type, menu_key, username):
             allowed_instance,
             denied_instance,
             permission,
-            UserMenuPermission(user_id=user.id, menu_key=menu_key),
         ]
     )
     db.session.commit()
@@ -61,9 +60,14 @@ def test_mysql_session_probe_requires_query_and_change_permissions(app, client, 
 
     with app.app_context():
         user_id, cluster_id, instance_id, denied_instance_id, permission_id = _seed_probe_user(
-            "mysql", "mysql_session_probe", "mysql-probe-user"
+            "mysql", "mysql-probe-user"
         )
     headers = _login(client, "mysql-probe-user")
+
+    permissions = client.get("/api/v1/users/permissions/me", headers=headers)
+    assert "mysql_session_probe" in permissions.get_json()["data"]["menu_keys"]
+    assert "mongodb_session_probe" not in permissions.get_json()["data"]["menu_keys"]
+    assert permissions.get_json()["data"]["direct_menu_keys"] == []
 
     clusters = client.get("/api/v1/clusters?db_type=mysql&action=query", headers=headers)
     instances = client.get("/api/v1/instances?db_type=mysql&action=query", headers=headers)
@@ -105,9 +109,14 @@ def test_mongodb_session_probe_requires_query_and_change_permissions(app, client
 
     with app.app_context():
         _user_id, _cluster_id, instance_id, denied_instance_id, permission_id = _seed_probe_user(
-            "mongodb", "mongodb_session_probe", "mongodb-probe-user"
+            "mongodb", "mongodb-probe-user"
         )
     headers = _login(client, "mongodb-probe-user")
+
+    permissions = client.get("/api/v1/users/permissions/me", headers=headers)
+    assert "mongodb_session_probe" in permissions.get_json()["data"]["menu_keys"]
+    assert "mysql_session_probe" not in permissions.get_json()["data"]["menu_keys"]
+    assert permissions.get_json()["data"]["direct_menu_keys"] == []
 
     denied = client.post(
         "/api/v1/mongodb/session-probes", json={"instance_id": denied_instance_id}, headers=headers

@@ -7,6 +7,7 @@ from email.mime.text import MIMEText
 
 from flask import current_app
 
+from app.models.db_asset import DatabaseInstance
 from app.models.notify_target import BackupNotifyTarget
 
 
@@ -129,13 +130,31 @@ def notify_ha_switch_completion(config, cluster, switch_type: str, result: dict,
     business = cluster.business_line or cluster.namespace or "-"
     finished_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
+    def master_address(instance_id):
+        instance = DatabaseInstance.query.get(instance_id) if instance_id else None
+        if not instance:
+            return "域名 - / IP -"
+        extra = instance.extra_json if isinstance(instance.extra_json, dict) else {}
+        domain = str(extra.get("domain") or "").strip()
+        if not domain and instance.host_input and instance.host_input != instance.resolved_ip:
+            domain = str(instance.host_input).strip()
+        ip = str(instance.resolved_ip or "").strip()
+        if not ip and instance.host_input and instance.host_input == domain:
+            ip = "-"
+        elif not ip:
+            ip = str(instance.host_input or "-").strip()
+        return f"域名 {domain or '-'} / IP {ip or '-'}"
+
+    old_master_address = master_address(result.get("old_master_instance_id"))
+    new_master_address = master_address(result.get("new_master_instance_id"))
+
     lines = [
         "# MySQL HA切换完成",
         f"> 集群: <font color=\"comment\">{business}/{cluster.environment or '-'}/{cluster.name}</font>",
         f"> 模式: <font color=\"warning\">{switch_label}</font>",
         f"> 高可用域名: <font color=\"comment\">{cluster.ha_domain or '-'}</font>",
-        f"> 新主库ID: <font color=\"info\">{result.get('new_master_instance_id') or '-'}</font>",
-        f"> 原主库ID: <font color=\"comment\">{result.get('old_master_instance_id') or '-'}</font>",
+        f"> 原主库: <font color=\"comment\">{old_master_address}</font>",
+        f"> 新主库: <font color=\"info\">{new_master_address}</font>",
         f"> 其他从库重挂: <font color=\"info\">成功 {rebuild_ok} 台，失败 {rebuild_failed} 台</font>",
         f"> 域名切换: <font color=\"comment\">{domain_switch_label} / {domain_switch_config}</font>",
         f"> 执行人: <font color=\"comment\">{operator_name or '系统'}</font>",

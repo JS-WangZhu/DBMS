@@ -1182,6 +1182,7 @@ def failure_switch(cluster_id: int, target_instance_id: Optional[int] = None, pr
     return {
         "mode": "failure",
         "cluster_id": cluster.id,
+        "old_master_instance_id": current_master_id,
         "new_master_instance_id": target.id,
         "other_replica_rebuild": rebuild_result,
         "domain_switch": domain_switch_result,

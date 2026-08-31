@@ -4,7 +4,7 @@
       <div class="logo">
         <div class="logo-mark">D</div>
         <div class="logo-copy">
-          <strong>DBMS 数据库管理平台</strong>
+          <strong>数据库管理平台</strong>
         </div>
       </div>
       <el-menu
@@ -388,23 +388,31 @@
           </el-button>
           <div class="page-identity">
             <div class="title">{{ currentPageTitle }}</div>
-            <div class="subtitle">DBMS 数据库管理平台</div>
+            <div class="subtitle">数据库管理平台</div>
           </div>
         </div>
-        <el-popover placement="bottom-end" trigger="hover" :show-arrow="false" popper-class="user-action-popover">
-          <template #reference>
-            <div class="user-block" tabindex="0">
-              <el-avatar :size="34" :src="displayAvatarUrl || undefined" @error="onAvatarError">
-                {{ userInitial }}
-              </el-avatar>
-              <div class="user-copy">
-                <strong>{{ username }}</strong>
-                <span>{{ currentRole }}</span>
+        <div class="topbar-actions">
+          <el-badge :value="feedbackUnread" :max="99" :hidden="feedbackUnread < 1">
+            <el-button class="feedback-entry" text @click="openFeedback">
+              <el-icon><ChatDotRound /></el-icon>
+              <span>意见反馈</span>
+            </el-button>
+          </el-badge>
+          <el-popover placement="bottom-end" trigger="hover" :show-arrow="false" popper-class="user-action-popover">
+            <template #reference>
+              <div class="user-block" tabindex="0">
+                <el-avatar :size="34" :src="displayAvatarUrl || undefined" @error="onAvatarError">
+                  {{ userInitial }}
+                </el-avatar>
+                <div class="user-copy">
+                  <strong>{{ username }}</strong>
+                  <span>{{ currentRole }}</span>
+                </div>
               </div>
-            </div>
-          </template>
-          <el-button class="logout-button" text @click="logout">退出登录</el-button>
-        </el-popover>
+            </template>
+            <el-button class="logout-button" text @click="logout">退出登录</el-button>
+          </el-popover>
+        </div>
       </el-header>
       <el-main class="main-area">
         <div class="tabs-wrap">
@@ -434,6 +442,7 @@
 
           <Teleport to="body">
             <div v-if="contextMenu.visible" class="context-menu" :style="{ top: contextMenu.y + 'px', left: contextMenu.x + 'px' }" @click.stop>
+              <div class="menu-item" @click="refreshTab">刷新页面</div>
               <div class="menu-item" @click="closeLeft">关闭左侧</div>
               <div class="menu-item" @click="closeRight">关闭右侧</div>
               <div class="menu-item" @click="closeOthers">关闭其他</div>
@@ -444,18 +453,19 @@
         <div class="route-content" :class="{ 'is-entering': contentEntering }">
           <router-view v-slot="{ Component }">
             <keep-alive>
-              <component :is="Component" :key="route.path" />
+              <component :is="Component" :key="`${route.path}:${routeRefreshVersions[route.path] || 0}`" />
             </keep-alive>
           </router-view>
         </div>
       </el-main>
     </el-container>
+    <FeedbackDialog v-model="feedbackVisible" :role="currentUser?.role || 'user'" @summary-change="loadFeedbackSummary" />
     <QuickJump :items="quickJumpMenus" @select="onQuickJumpSelect" />
   </el-container>
 </template>
 
 <script setup>
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import {
   Avatar,
@@ -464,6 +474,7 @@ import {
   Box,
   Briefcase,
   Calendar,
+  ChatDotRound,
   Clock,
   CircleCheck,
   CirclePlus,
@@ -513,6 +524,8 @@ import RedisIcon from "../components/icons/RedisIcon.vue";
 import PostgreSQLIcon from "../components/icons/PostgreSQLIcon.vue";
 import DorisIcon from "../components/icons/DorisIcon.vue";
 import QuickJump from "../components/QuickJump.vue";
+import FeedbackDialog from "../components/FeedbackDialog.vue";
+import { getFeedbackSummary } from "../api/modules/feedback";
 import { listMyUserPermissions } from "../api/modules/backups";
 import { logoutCurrentSession, startSessionMonitor } from "../services/authSession";
 import { QUICK_JUMP_MENUS } from "../utils/quickJump";
@@ -525,9 +538,13 @@ const activeTabId = ref("");
 const sidebarCollapsed = ref(false);
 const avatarLoadFailed = ref(false);
 const contentEntering = ref(false);
+const feedbackVisible = ref(false);
+const feedbackUnread = ref(0);
+const routeRefreshVersions = reactive({});
 let tabSeq = 0;
 let stopSessionMonitor = null;
 let contentAnimationTimer = null;
+let feedbackSummaryTimer = null;
 
 const contextMenu = ref({
   visible: false,
@@ -580,6 +597,22 @@ const displayAvatarUrl = computed(() => (avatarLoadFailed.value ? "" : avatarUrl
 
 function onAvatarError() {
   avatarLoadFailed.value = true;
+}
+
+async function loadFeedbackSummary() {
+  try {
+    const { data } = await getFeedbackSummary();
+    feedbackUnread.value = Number(
+      currentUser.value?.role === "admin" ? data.data?.pending || 0 : data.data?.unread || 0,
+    );
+  } catch {
+    // Keep the latest badge value during a transient network failure.
+  }
+}
+
+function openFeedback() {
+  feedbackVisible.value = true;
+  loadFeedbackSummary();
 }
 
 const userId = computed(() => {
@@ -845,6 +878,17 @@ function onTabRightClick(event, tab) {
   };
 }
 
+async function refreshTab() {
+  const target = contextMenu.value.targetTab;
+  contextMenu.value.visible = false;
+  if (!target?.path) return;
+  if (route.path !== target.path || route.fullPath !== target.fullPath) {
+    activeTabId.value = target.id;
+    await router.push(target.fullPath || target.path);
+  }
+  routeRefreshVersions[target.path] = (routeRefreshVersions[target.path] || 0) + 1;
+}
+
 function closeLeft() {
   const targetIdx = tabs.value.findIndex((t) => t.id === contextMenu.value.targetTab.id);
   if (targetIdx > 0) {
@@ -986,12 +1030,15 @@ onMounted(() => {
   window.addEventListener("click", onDocumentClick);
   stopSessionMonitor = startSessionMonitor();
   loadMenuPermissions();
+  loadFeedbackSummary();
+  feedbackSummaryTimer = window.setInterval(loadFeedbackSummary, 60000);
 });
 
 onUnmounted(() => {
   window.removeEventListener("click", onDocumentClick);
   if (stopSessionMonitor) stopSessionMonitor();
   if (contentAnimationTimer) window.clearTimeout(contentAnimationTimer);
+  if (feedbackSummaryTimer) window.clearInterval(feedbackSummaryTimer);
 });
 
 async function logout() {
@@ -1105,6 +1152,28 @@ async function logout() {
   align-items: center;
   gap: 12px;
   color: #5a6b84;
+}
+
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+
+.feedback-entry {
+  height: 36px;
+  padding: 0 10px;
+  color: var(--text-regular);
+}
+
+.feedback-entry:hover {
+  color: var(--brand);
+  background: var(--brand-soft);
+}
+
+.feedback-entry .el-icon {
+  margin-right: 5px;
+  font-size: 17px;
 }
 
 .user-block :deep(.el-button) {
@@ -1885,9 +1954,12 @@ async function logout() {
 @media (max-width: 900px) {
   .subtitle,
   .user-copy,
-  .user-divider {
+  .user-divider,
+  .feedback-entry span {
     display: none;
   }
+
+  .feedback-entry .el-icon { margin-right: 0; }
 
   .topbar {
     padding-right: 12px;

@@ -44,9 +44,11 @@
           <el-option
             v-for="cluster in filteredClusters"
             :key="cluster.id"
-            :label="clusterLabel(cluster)"
+            :label="clusterDisplayLabel(cluster)"
             :value="cluster.id"
-          />
+          >
+            <div class="cluster-option"><span>{{ clusterLabel(cluster) }}</span><small>{{ cluster.description || "暂无描述" }}</small></div>
+          </el-option>
         </el-select>
         <el-segmented
           v-if="form.db_type === 'mysql'"
@@ -635,6 +637,12 @@ const mongoSchema = computed(() => {
 
 function clusterLabel(cluster) {
   return cluster.name || `集群-${cluster.id}`;
+}
+
+function clusterDisplayLabel(cluster) {
+  const name = clusterLabel(cluster);
+  const description = String(cluster?.description || "").trim();
+  return description ? `${name}（${description}）` : name;
 }
 
 async function loadClusters() {
@@ -1620,6 +1628,21 @@ useTabActivationRefresh(reloadOptions);
 .database-type-selected-icon {
   width: 16px;
   height: 16px;
+}
+
+.cluster-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.cluster-option small {
+  max-width: 150px;
+  overflow: hidden;
+  color: #94a3b8;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .topbar-right {

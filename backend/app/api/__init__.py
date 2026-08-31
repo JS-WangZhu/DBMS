@@ -37,6 +37,7 @@ from app.api.routes.users import bp as users_bp
 from app.api.routes.user_permissions import bp as user_permissions_bp
 from app.api.routes.doc import bp as doc_bp
 from app.api.routes.external import bp as external_bp
+from app.api.routes.feedback import bp as feedback_bp
 
 
 def register_blueprints(app):
@@ -78,5 +79,6 @@ def register_blueprints(app):
     api_v1.register_blueprint(aliyun_dns_bp)
     api_v1.register_blueprint(doc_bp)
     api_v1.register_blueprint(external_bp)
+    api_v1.register_blueprint(feedback_bp)
 
     app.register_blueprint(api_v1)

@@ -10,6 +10,7 @@ from app.models.data_query_op import DataQueryOperationConfig
 from app.models.db_asset import DatabaseCluster, DatabaseInstance
 from app.models.diagnosis import ParameterCollectionConfig, ParameterCollectionSnapshot
 from app.models.ha_config import HAConfig
+from app.models.feedback import Feedback, FeedbackReply
 from app.models.inspection import InspectionAlert, InspectionConfig
 from app.models.instance_status_config import InstanceStatusConfig
 from app.models.jumpserver_config import JumpServerConfig
@@ -66,6 +67,8 @@ __all__ = [
     "ParameterCollectionConfig",
     "ParameterCollectionSnapshot",
     "HAConfig",
+    "Feedback",
+    "FeedbackReply",
     "InspectionConfig",
     "InspectionAlert",
     "InstanceStatusConfig",

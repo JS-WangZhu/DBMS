@@ -26,8 +26,11 @@
         </el-form-item>
         <el-form-item label="集群">
           <el-select v-model="form.cluster_id" :disabled="!form.environment" filterable placeholder="选择具备变更权限的集群" style="width: 100%" @change="loadDatabases">
-            <el-option v-for="item in filteredClusters" :key="item.id" :value="item.id" :label="clusterLabel(item)" />
+            <el-option v-for="item in filteredClusters" :key="item.id" :value="item.id" :label="clusterLabel(item)">
+              <div class="cluster-option"><span>{{ clusterLabel(item) }}</span><small>{{ item.description || "暂无描述" }}</small></div>
+            </el-option>
           </el-select>
+          <div v-if="selectedCluster" class="cluster-description">集群描述：{{ selectedCluster.description || "暂无描述" }}</div>
         </el-form-item>
         <el-form-item label="目标库">
           <el-select v-model="form.database" :disabled="!form.cluster_id" filterable allow-create default-first-option placeholder="选择或输入目标库" style="width: 100%" :loading="databaseLoading" @change="loadTableOverview">
@@ -221,6 +224,7 @@ const filteredClusters = computed(() => clusters.value.filter((item) =>
   && item.db_type === form.db_type
   && item.environment === form.environment
 ));
+const selectedCluster = computed(() => clusters.value.find((item) => Number(item.id) === Number(form.cluster_id)) || null);
 const usedTableNames = computed(() => extractReleaseObjectNames(form.sql, form.db_type));
 const objectRows = computed(() => form.db_type === "mongodb" ? (tableObjects.value.collections || []) : (tableObjects.value.tables || []));
 const filteredTables = computed(() => {
@@ -625,6 +629,9 @@ watch(
 .release-form { margin-top: 20px; }
 .database-type-option { display: inline-flex; align-items: center; gap: 8px; }
 .database-type-option :deep(svg) { width: 16px; height: 16px; }
+.cluster-option { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+.cluster-option small { max-width: 260px; overflow: hidden; color: #94a3b8; text-overflow: ellipsis; white-space: nowrap; }
+.cluster-description { width: 100%; margin-top: 6px; padding: 7px 10px; border-radius: 6px; background: #f8fafc; color: #64748b; font-size: 12px; line-height: 1.5; }
 .database-type-selected-icon { width: 16px; height: 16px; }
 .actions { display: flex; justify-content: flex-end; margin-top: 16px; }
 .overview-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
