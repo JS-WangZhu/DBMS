@@ -46,6 +46,13 @@ class Config:
     SCHEDULER_TIMEZONE = os.getenv("SCHEDULER_TIMEZONE", "Asia/Shanghai")
     MONITOR_COLLECT_WORKERS = int(os.getenv("MONITOR_COLLECT_WORKERS", "8"))
 
+    FEEDBACK_IMAGE_DIR = os.getenv(
+        "FEEDBACK_IMAGE_DIR",
+        os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data", "feedback_images")),
+    )
+    FEEDBACK_IMAGE_MAX_COUNT = int(os.getenv("FEEDBACK_IMAGE_MAX_COUNT", "5"))
+    FEEDBACK_IMAGE_MAX_BYTES = int(os.getenv("FEEDBACK_IMAGE_MAX_BYTES", str(5 * 1024 * 1024)))
+
     REDIS_HOST = os.getenv("REDIS_HOST", "127.0.0.1")
     REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
     REDIS_DB = int(os.getenv("REDIS_DB", "0"))

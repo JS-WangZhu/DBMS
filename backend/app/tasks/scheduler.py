@@ -1,4 +1,4 @@
-from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeoutError
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 
@@ -673,11 +673,9 @@ def job_monitor_collect(app):
                     future = pool.submit(_collect_instance_snapshot, instance_id, instance_data, password)
                     future_map[future] = instance_id
 
-                completed = set()
-                try:
-                    for future in as_completed(future_map.keys(), timeout=collect_timeout_seconds):
-                        completed.add(future)
-                        instance_id, payload, running_status = future.result()
+                for future, instance_id in future_map.items():
+                    try:
+                        instance_id, payload, running_status = future.result(timeout=collect_timeout_seconds)
 
                         instance = instance_map.get(instance_id)
                         if not instance:
@@ -699,29 +697,25 @@ def job_monitor_collect(app):
                         else:
                             fail_count += 1
                         _cache_and_flush_monitor_snapshot(instance, payload, running_status)
-                except FuturesTimeoutError:
-                    current_app.logger.warning(
-                        "monitor_collect tick timeout: not all instances finished within %ss",
-                        collect_timeout_seconds,
-                    )
-
-                pending = set(future_map.keys()) - completed
-                for future in pending:
-                    instance_id = future_map[future]
-                    future.cancel()
-                    instance = instance_map.get(instance_id)
-                    if not instance:
-                        continue
-                    instance.running_status = "error"
-                    fail_count += 1
-                    current_app.logger.warning("monitor_collect timeout: instance_id=%s", instance_id)
-                    timeout_payload = {
-                        "ok": False,
-                        "error": f"collect timeout (>{collect_timeout_seconds}s)",
-                        "collected_at": datetime.now().isoformat(),
-                    }
-                    payload_by_instance[instance_id] = timeout_payload
-                    _cache_and_flush_monitor_snapshot(instance, timeout_payload, "error")
+                    except FuturesTimeoutError:
+                        future.cancel()
+                        instance = instance_map.get(instance_id)
+                        if not instance:
+                            continue
+                        instance.running_status = "error"
+                        fail_count += 1
+                        current_app.logger.warning(
+                            "monitor_collect instance timeout: instance_id=%s timeout=%ss",
+                            instance_id,
+                            collect_timeout_seconds,
+                        )
+                        timeout_payload = {
+                            "ok": False,
+                            "error": f"collect timeout (>{collect_timeout_seconds}s)",
+                            "collected_at": datetime.now().isoformat(),
+                        }
+                        payload_by_instance[instance_id] = timeout_payload
+                        _cache_and_flush_monitor_snapshot(instance, timeout_payload, "error")
 
             _refresh_mysql_cluster_ha(instances, payload_by_instance)
             _refresh_cluster_topology_history(instances, payload_by_instance)

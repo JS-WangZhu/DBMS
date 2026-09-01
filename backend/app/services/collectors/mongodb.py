@@ -164,21 +164,14 @@ def collect_mongodb_status(instance, password):
         }
 
         auth_mech = _normalize_auth_mechanism(extra.get("auth_mechanism"))
-        auth_source = (extra.get("auth_source") or extra.get("auth_db") or "").strip() or None
-        auth_sources = []
-        if auth_source:
-            auth_sources.append(auth_source)
-        if "admin" not in auth_sources:
-            auth_sources.append("admin")
-        if "local" not in auth_sources:
-            auth_sources.append("local")
+        # Monitoring credentials are always authenticated against admin.  Do
+        # not fall back to local (or an instance-level override), because that
+        # can create misleading intermittent authentication failures.
+        auth_source = "admin"
         if instance.username and password:
             last_error = None
             client = None
-            if not auth_sources:
-                auth_sources.append("admin")
-            
-            for source in auth_sources:
+            for source in (auth_source,):
                 try:
                     kwargs = dict(
                         username=instance.username,
@@ -409,7 +402,7 @@ def collect_mongodb_status(instance, password):
             except Exception:
                 pass
         extra = instance.extra_json if isinstance(instance.extra_json, dict) else {}
-        auth_source = (extra.get("auth_source") or extra.get("auth_db") or "admin").strip()
+        auth_source = "admin"
         auth_mech = _normalize_auth_mechanism(extra.get("auth_mechanism")) or "auto"
         direct_connection = True
         tls_enabled = _as_bool(extra.get("tls", extra.get("ssl")), default=False)

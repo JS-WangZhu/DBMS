@@ -7,6 +7,7 @@
     top="6vh"
     destroy-on-close
     @open="onOpen"
+    @closed="onClosed"
   >
     <div class="feedback-shell" v-loading="loading">
       <aside class="feedback-list-pane">
@@ -60,6 +61,7 @@
 
       <main class="feedback-detail-pane">
         <template v-if="creating">
+          <div class="create-feedback-form" @paste="handleImagePaste">
           <div class="detail-heading">
             <div>
               <h3>提交新反馈</h3>
@@ -67,25 +69,53 @@
             </div>
           </div>
           <el-form ref="createFormRef" :model="createForm" :rules="createRules" label-position="top">
-            <el-form-item label="反馈主题" prop="subject">
-              <el-input v-model="createForm.subject" maxlength="120" show-word-limit placeholder="请简要概括反馈内容" />
-            </el-form-item>
-            <el-form-item label="反馈内容" prop="content">
-              <el-input
-                v-model="createForm.content"
-                type="textarea"
-                :rows="9"
-                maxlength="4000"
-                show-word-limit
-                resize="none"
-                placeholder="请输入详细反馈内容"
-              />
-            </el-form-item>
+            <div class="create-form-fields">
+              <el-form-item label="反馈主题" prop="subject">
+                <el-input v-model="createForm.subject" maxlength="120" show-word-limit placeholder="请简要概括反馈内容" />
+              </el-form-item>
+              <el-form-item label="反馈内容" prop="content">
+                <el-input
+                  v-model="createForm.content"
+                  type="textarea"
+                  :rows="9"
+                  maxlength="4000"
+                  show-word-limit
+                  resize="none"
+                  placeholder="请输入详细反馈内容"
+                />
+              </el-form-item>
+              <el-form-item label="问题截图">
+                <div class="image-uploader">
+                  <input
+                    ref="imageInputRef"
+                    class="image-file-input"
+                    type="file"
+                    accept="image/png,image/jpeg,image/gif,image/webp"
+                    multiple
+                    @change="handleImageSelect"
+                  />
+                  <div class="image-upload-actions">
+                    <el-button :icon="Picture" @click="imageInputRef?.click()">上传图片</el-button>
+                    <span>支持选择或 Ctrl + V 粘贴，最多 5 张，单张不超过 5MB</span>
+                  </div>
+                  <div v-if="pendingImages.length" class="pending-image-grid">
+                    <div v-for="(image, index) in pendingImages" :key="image.id" class="pending-image-item">
+                      <el-image :src="image.previewUrl" fit="cover" :preview-src-list="pendingPreviewUrls" :initial-index="index" />
+                      <button type="button" aria-label="移除图片" @click="removePendingImage(index)">
+                        <el-icon><Close /></el-icon>
+                      </button>
+                      <span :title="image.file.name">{{ image.file.name }}</span>
+                    </div>
+                  </div>
+                </div>
+              </el-form-item>
+            </div>
             <div class="form-actions">
               <el-button @click="cancelCreate">取消</el-button>
               <el-button type="primary" :loading="submitting" @click="submitFeedback">提交反馈</el-button>
             </div>
           </el-form>
+          </div>
         </template>
 
         <template v-else-if="selected">
@@ -109,6 +139,19 @@
                 <time>{{ formatBeijingTime(selected.created_at) }}</time>
               </header>
               <p>{{ selected.content }}</p>
+              <div v-if="selected.attachments?.length" class="message-image-grid">
+                <el-image
+                  v-for="(attachment, index) in selected.attachments"
+                  :key="attachment.id"
+                  :src="attachmentUrls[attachment.id]"
+                  :alt="attachment.original_name"
+                  fit="cover"
+                  :preview-src-list="selectedPreviewUrls"
+                  :initial-index="index"
+                >
+                  <template #error><div class="image-load-error">加载失败</div></template>
+                </el-image>
+              </div>
             </section>
             <section v-for="reply in selected.replies" :key="reply.id" class="message-card admin-message">
               <header>
@@ -145,11 +188,12 @@
 </template>
 
 <script setup>
-import { computed, reactive, ref } from "vue";
+import { computed, onBeforeUnmount, reactive, ref } from "vue";
 import { ElMessage } from "element-plus";
-import { Plus } from "@element-plus/icons-vue";
+import { Close, Picture, Plus } from "@element-plus/icons-vue";
 import {
   createFeedback,
+  getFeedbackAttachment,
   listFeedback,
   markFeedbackRead,
   replyFeedback,
@@ -175,7 +219,18 @@ const pageSize = 20;
 const statusFilter = ref("all");
 const replyContent = ref("");
 const createFormRef = ref(null);
+const imageInputRef = ref(null);
 const createForm = reactive({ subject: "", content: "" });
+const pendingImages = ref([]);
+const attachmentUrls = reactive({});
+let pendingImageSequence = 0;
+const maxImageCount = 5;
+const maxImageBytes = 5 * 1024 * 1024;
+const allowedImageTypes = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
+const pendingPreviewUrls = computed(() => pendingImages.value.map((image) => image.previewUrl));
+const selectedPreviewUrls = computed(() =>
+  (selected.value?.attachments || []).map((attachment) => attachmentUrls[attachment.id]).filter(Boolean),
+);
 const createRules = {
   subject: [{ required: true, message: "请输入反馈主题", trigger: "blur" }],
   content: [{ required: true, message: "请输入反馈内容", trigger: "blur" }],
@@ -226,6 +281,7 @@ async function selectFeedback(item) {
   creating.value = false;
   selected.value = item;
   replyContent.value = "";
+  await loadSelectedImages(item);
   if (!itemUnread(item)) return;
   try {
     const { data } = await markFeedbackRead(item.id);
@@ -244,10 +300,12 @@ function showCreateForm() {
   creating.value = true;
   createForm.subject = "";
   createForm.content = "";
+  clearPendingImages();
 }
 
 function cancelCreate() {
   creating.value = false;
+  clearPendingImages();
   if (items.value.length) selectFeedback(items.value[0]);
 }
 
@@ -255,11 +313,15 @@ async function submitFeedback() {
   if (!(await createFormRef.value?.validate().catch(() => false))) return;
   submitting.value = true;
   try {
-    const { data } = await createFeedback({ ...createForm });
+    const { data } = await createFeedback(
+      { ...createForm },
+      pendingImages.value.map((image) => image.file),
+    );
     ElMessage.success(data.message || "反馈已提交");
     creating.value = false;
     page.value = 1;
     selected.value = null;
+    clearPendingImages();
     await loadFeedback();
     emit("summary-change");
   } catch (error) {
@@ -268,6 +330,92 @@ async function submitFeedback() {
     submitting.value = false;
   }
 }
+
+function appendImages(files) {
+  for (const file of files) {
+    if (pendingImages.value.length >= maxImageCount) {
+      ElMessage.warning(`最多上传 ${maxImageCount} 张图片`);
+      break;
+    }
+    if (!allowedImageTypes.has(file.type)) {
+      ElMessage.warning(`${file.name || "粘贴的文件"} 不是支持的图片格式`);
+      continue;
+    }
+    if (file.size > maxImageBytes) {
+      ElMessage.warning(`${file.name || "图片"} 超过 5MB`);
+      continue;
+    }
+    pendingImages.value.push({
+      id: ++pendingImageSequence,
+      file,
+      previewUrl: URL.createObjectURL(file),
+    });
+  }
+}
+
+function handleImageSelect(event) {
+  appendImages(Array.from(event.target.files || []));
+  event.target.value = "";
+}
+
+function handleImagePaste(event) {
+  const files = Array.from(event.clipboardData?.items || [])
+    .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
+    .map((item) => item.getAsFile())
+    .filter(Boolean);
+  if (!files.length) return;
+  event.preventDefault();
+  const namedFiles = files.map((file, index) => {
+    if (file.name && file.name !== "image.png") return file;
+    const extension = file.type === "image/jpeg" ? "jpg" : (file.type.split("/")[1] || "png");
+    return new File([file], `粘贴图片-${Date.now()}-${index + 1}.${extension}`, { type: file.type });
+  });
+  appendImages(namedFiles);
+  ElMessage.success(`已粘贴 ${namedFiles.length} 张图片`);
+}
+
+function removePendingImage(index) {
+  const [removed] = pendingImages.value.splice(index, 1);
+  if (removed) URL.revokeObjectURL(removed.previewUrl);
+}
+
+function clearPendingImages() {
+  pendingImages.value.forEach((image) => URL.revokeObjectURL(image.previewUrl));
+  pendingImages.value = [];
+  if (imageInputRef.value) imageInputRef.value.value = "";
+}
+
+async function loadSelectedImages(item) {
+  const attachments = item?.attachments || [];
+  await Promise.all(
+    attachments.map(async (attachment) => {
+      if (attachmentUrls[attachment.id]) return;
+      try {
+        const { data } = await getFeedbackAttachment(item.id, attachment.id);
+        attachmentUrls[attachment.id] = URL.createObjectURL(data);
+      } catch {
+        attachmentUrls[attachment.id] = "";
+      }
+    }),
+  );
+}
+
+function clearAttachmentUrls() {
+  Object.keys(attachmentUrls).forEach((id) => {
+    if (attachmentUrls[id]) URL.revokeObjectURL(attachmentUrls[id]);
+    delete attachmentUrls[id];
+  });
+}
+
+function onClosed() {
+  clearPendingImages();
+  clearAttachmentUrls();
+}
+
+onBeforeUnmount(() => {
+  clearPendingImages();
+  clearAttachmentUrls();
+});
 
 async function submitReply() {
   const content = replyContent.value.trim();
@@ -352,7 +500,10 @@ async function submitReply() {
 .feedback-item-meta { margin-top: 9px; }
 .feedback-item-meta time { color: #a1a5ad; font-size: 11px; }
 
-.feedback-detail-pane { display: flex; min-width: 0; flex-direction: column; padding: 20px 22px; background: #fff; }
+.feedback-detail-pane { display: flex; min-width: 0; min-height: 0; flex-direction: column; overflow: hidden; padding: 20px 22px; background: #fff; }
+.create-feedback-form { display: grid; min-height: 0; flex: 1; grid-template-rows: auto minmax(0, 1fr); overflow: hidden; }
+.create-feedback-form :deep(.el-form) { display: grid; min-height: 0; grid-template-rows: minmax(0, 1fr) auto; overflow: hidden; }
+.create-form-fields { min-height: 0; flex: 1; overflow-y: auto; padding: 16px 6px 0 0; }
 .detail-heading { align-items: flex-start; padding-bottom: 14px; border-bottom: 1px solid #ebeef5; }
 .detail-heading h3 { margin: 0; color: #1f2937; font-size: 18px; }
 .detail-heading p { margin: 6px 0 0; color: #909399; font-size: 12px; }
@@ -363,14 +514,29 @@ async function submitReply() {
 .message-card header strong { color: #303133; font-size: 13px; }
 .message-card time { color: #909399; font-size: 11px; }
 .message-card p { margin: 10px 0 0; color: #3f4754; line-height: 1.75; white-space: pre-wrap; overflow-wrap: anywhere; }
+.image-uploader { width: 100%; }
+.image-file-input { display: none; }
+.image-upload-actions { display: flex; align-items: center; gap: 12px; }
+.image-upload-actions span { color: #909399; font-size: 12px; }
+.pending-image-grid,
+.message-image-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 10px; margin-top: 12px; }
+.pending-image-item { position: relative; min-width: 0; }
+.pending-image-item :deep(.el-image),
+.message-image-grid :deep(.el-image) { width: 100%; height: 92px; overflow: hidden; border: 1px solid #dcdfe6; border-radius: 7px; background: #f5f7fa; }
+.pending-image-item button { position: absolute; top: -7px; right: -7px; display: grid; width: 22px; height: 22px; padding: 0; color: #fff; border: 2px solid #fff; border-radius: 50%; background: #606266; cursor: pointer; place-items: center; }
+.pending-image-item > span { display: block; margin-top: 3px; overflow: hidden; color: #606266; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.message-image-grid { grid-template-columns: repeat(auto-fill, minmax(120px, 160px)); }
+.message-image-grid :deep(.el-image) { height: 112px; cursor: zoom-in; }
+.image-load-error { display: grid; width: 100%; height: 100%; color: #a8abb2; font-size: 12px; place-items: center; }
 .reply-box { padding-top: 14px; border-top: 1px solid #ebeef5; }
 .reply-actions { margin-top: 10px; justify-content: flex-end; }
 .reply-actions span { color: #a1a5ad; font-size: 11px; }
-.form-actions { justify-content: flex-end; }
+.form-actions { min-height: 48px; flex: 0 0 auto; justify-content: flex-end; padding: 14px 0 2px; border-top: 1px solid #ebeef5; background: #fff; }
 
 @media (max-width: 720px) {
   .feedback-shell { grid-template-columns: 1fr; height: 78vh; overflow-y: auto; }
   .feedback-list-pane { min-height: 260px; border-right: 0; border-bottom: 1px solid #e4e7ed; }
   .feedback-detail-pane { min-height: 420px; }
+  .image-upload-actions { align-items: flex-start; flex-direction: column; gap: 6px; }
 }
 </style>

@@ -21,7 +21,7 @@
       <el-form :model="form" label-width="180px" label-position="right">
         <el-row :gutter="24">
           <el-col :xs="24" :sm="12">
-            <el-form-item label="刷新指标超时时间（秒）">
+            <el-form-item label="单个实例超时时间（秒）">
               <el-input-number
                 v-model="form.metric_refresh_timeout_seconds"
                 :min="1"
@@ -29,7 +29,7 @@
                 controls-position="right"
                 style="width: 180px"
               />
-              <span class="hint-text">单轮实例指标采集最长等待时间</span>
+              <span class="hint-text">每个实例指标采集的最长等待时间</span>
             </el-form-item>
           </el-col>
           <el-col :xs="24" :sm="12">
