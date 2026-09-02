@@ -279,6 +279,7 @@ CREATE TABLE `data_query_operation_configs`  (
   `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `id` int NOT NULL AUTO_INCREMENT,
   `db_type` varchar(16) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL,
+  `rule_type` varchar(16) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL DEFAULT 'whitelist',
   `op_key` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NOT NULL,
   `label` varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci NULL DEFAULT NULL,
   `enabled` tinyint(1) NOT NULL,
@@ -461,6 +462,18 @@ CREATE TABLE `instance_status_configs`  (
   `id` int NOT NULL AUTO_INCREMENT,
   `metric_refresh_timeout_seconds` int NOT NULL,
   `probe_poll_interval_seconds` int NOT NULL,
+  PRIMARY KEY (`id`) USING BTREE
+) ENGINE = InnoDB AUTO_INCREMENT = 2 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = DYNAMIC;
+
+-- ----------------------------
+-- Table structure for sql_release_configs
+-- ----------------------------
+DROP TABLE IF EXISTS `sql_release_configs`;
+CREATE TABLE `sql_release_configs`  (
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `id` int NOT NULL AUTO_INCREMENT,
+  `ai_review_enabled` tinyint(1) NOT NULL DEFAULT 1,
   PRIMARY KEY (`id`) USING BTREE
 ) ENGINE = InnoDB AUTO_INCREMENT = 2 CHARACTER SET = utf8mb4 COLLATE = utf8mb4_0900_ai_ci ROW_FORMAT = DYNAMIC;
 

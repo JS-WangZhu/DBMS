@@ -105,6 +105,7 @@
     <el-dialog
       v-model="reviewDialogVisible"
       width="760px"
+      top="4vh"
       class="review-progress-dialog"
       :close-on-click-modal="false"
       @closed="onReviewDialogClosed"
@@ -119,6 +120,7 @@
         </div>
       </template>
       <div v-if="reviewRelease" class="review-progress-body">
+        <SqlReleaseShareCard :release="reviewRelease" class="review-share-card" />
         <div class="review-progress-overview">
           <div><strong>{{ reviewCompleted }}</strong><span>/ {{ reviewTotal }} 条已审核</span></div>
           <span>{{ reviewRelease.ai_summary }}</span>
@@ -151,6 +153,10 @@
           <el-button @click="returnRejectedToEdit">返回重新修改</el-button>
           <el-button type="danger" :loading="forceSubmitting" @click="forceSubmitRejected">已知影响，强制提交</el-button>
         </template>
+        <template v-else-if="reviewRelease?.status === 'review_failed'">
+          <el-button @click="returnRejectedToEdit">返回修改</el-button>
+          <el-button type="warning" :loading="skipReviewSubmitting" @click="skipFailedReview">跳过审核</el-button>
+        </template>
         <el-button v-else type="primary" @click="reviewDialogVisible = false">{{ reviewFinished ? "完成" : "转至后台运行" }}</el-button>
       </template>
 
@@ -170,9 +176,11 @@ import {
   listSqlReleaseDatabases,
   listSqlReleaseObjects,
   listSqlReleaseTableColumns,
+  skipSqlReleaseReview,
   submitSqlRelease,
 } from "../api/modules/sqlReleases";
 import SqlEditor from "../components/SqlEditor.vue";
+import SqlReleaseShareCard from "../components/SqlReleaseShareCard.vue";
 import MysqlIcon from "../components/icons/MysqlIcon.vue";
 import MongoIcon from "../components/icons/MongoIcon.vue";
 import PostgreSQLIcon from "../components/icons/PostgreSQLIcon.vue";
@@ -195,6 +203,7 @@ const reviewDialogVisible = ref(false);
 const reviewRelease = ref(null);
 const submittedDraft = ref(null);
 const forceSubmitting = ref(false);
+const skipReviewSubmitting = ref(false);
 let reviewPollTimer = null;
 let reviewDialogMovedToBackground = false;
 
@@ -210,7 +219,7 @@ const reviewFinished = computed(() => reviewRelease.value && reviewRelease.value
 const reviewCompleted = computed(() => reviewRelease.value?.review_progress?.completed || 0);
 const reviewTotal = computed(() => reviewRelease.value?.review_progress?.total || reviewRelease.value?.reviews?.length || 0);
 const reviewPercent = computed(() => reviewRelease.value?.review_progress?.percent || 0);
-const reviewDialogTitle = computed(() => reviewRelease.value?.status === "pending" ? "AI 初审已通过" : reviewRelease.value?.status === "review_rejected" ? "AI 初审发现风险" : reviewRelease.value?.status === "review_failed" ? "AI 初审异常" : "AI 正在逐条审核");
+const reviewDialogTitle = computed(() => reviewRelease.value?.review_skipped ? "AI 预审已跳过" : reviewRelease.value?.status === "pending" ? "AI 初审已通过" : reviewRelease.value?.status === "review_rejected" ? "AI 初审发现风险" : reviewRelease.value?.status === "review_failed" ? "AI 初审异常" : "AI 正在逐条审核");
 const reviewProgressStatus = computed(() => reviewRelease.value?.status === "pending" ? "success" : ["review_rejected", "review_failed"].includes(reviewRelease.value?.status) ? "exception" : undefined);
 
 const REVIEW_POLL_INTERVAL = 1200;
@@ -451,13 +460,14 @@ function reviewItemLabel(item) {
   if (item.status === "reviewing") return "审核中";
   if (item.status === "pending") return "等待";
   if (item.status === "failed") return "失败";
-  if (item.status === "skipped") return "未处理";
+  if (item.status === "skipped") return "已跳过";
   return item.passed ? "通过" : "不通过";
 }
 
 function reviewItemType(item) {
   if (item.status === "reviewing" || item.status === "pending") return "info";
   if (item.status === "completed" && item.passed) return "success";
+  if (item.status === "skipped") return "warning";
   return "danger";
 }
 
@@ -519,7 +529,7 @@ async function submit() {
   try {
     const { data } = await submitSqlRelease({ ...form });
     openReviewProgress(data.data);
-    ElMessage.success("工单已提交，正在逐条进行 AI 初审");
+    ElMessage.success(data.message || "工单已提交");
     form.title = ""; form.sql = "";
   } catch (error) {
     ElMessage.error(error.response?.data?.message || "提交失败");
@@ -535,7 +545,31 @@ function returnRejectedToEdit() {
     form.sql = reviewRelease.value.sql || "";
   }
   reviewDialogVisible.value = false;
-  ElMessage.info("已恢复本次工单内容，请按初审建议修改后重新提交");
+  ElMessage.info(reviewRelease.value?.status === "review_failed" ? "已恢复本次工单内容" : "已恢复本次工单内容，请按初审建议修改后重新提交");
+}
+
+async function skipFailedReview() {
+  if (!reviewRelease.value?.id || reviewRelease.value.status !== "review_failed") return;
+  try {
+    await ElMessageBox.confirm(
+      "AI 模型预审出现异常。跳过后工单将直接进入待执行，且不会产生 AI 风险结论。确认跳过本次审核？",
+      "跳过 AI 预审确认",
+      { type: "warning", confirmButtonText: "确认跳过" },
+    );
+  } catch {
+    return;
+  }
+  skipReviewSubmitting.value = true;
+  try {
+    const { data } = await skipSqlReleaseReview(reviewRelease.value.id);
+    reviewRelease.value = data.data;
+    submittedDraft.value = null;
+    ElMessage.success(data.message || "已跳过 AI 预审");
+  } catch (error) {
+    ElMessage.error(error.response?.data?.message || "跳过审核失败");
+  } finally {
+    skipReviewSubmitting.value = false;
+  }
 }
 
 async function forceSubmitRejected() {
@@ -661,8 +695,9 @@ watch(
 .review-orbit.done::before { border-color: #20a162; animation: none; }
 .review-orbit.done span { background: #20a162; }
 .review-progress-overview { display: flex; align-items: baseline; justify-content: space-between; gap: 18px; margin-bottom: 10px; color: #7b879a; font-size: 12px; }
+.review-share-card { margin-bottom: 18px; }
 .review-progress-overview strong { margin-right: 3px; color: #172033; font-size: 28px; }
-.review-statement-list { display: grid; gap: 10px; max-height: 430px; margin-top: 18px; overflow: auto; padding-right: 4px; }
+.review-statement-list { display: grid; gap: 10px; max-height: min(300px, 32vh); margin-top: 18px; overflow: auto; padding-right: 4px; }
 .review-statement { display: grid; grid-template-columns: 34px minmax(0,1fr); gap: 11px; padding: 13px; border: 1px solid #e5eaf2; border-radius: 8px; background: #fff; transition: .25s ease; }
 .review-statement.is-reviewing { border-color: #8fc1ff; background: #f6faff; box-shadow: 0 5px 18px rgba(22,119,255,.09); transform: translateX(3px); }
 .review-state-mark { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; color: #738197; background: #eef2f7; }

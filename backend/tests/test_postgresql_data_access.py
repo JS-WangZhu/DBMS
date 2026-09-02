@@ -103,6 +103,10 @@ def test_postgresql_query_rejects_write_statements():
     ok, reason = validate_postgresql_query("WITH changed AS (DELETE FROM orders RETURNING *) SELECT * FROM changed")
     assert ok is False
     assert "WITH DML" in reason
+    ok, reason = validate_postgresql_query("WITH changed AS (UPDATE orders SET status='paid' RETURNING *) SELECT * FROM changed")
+    assert ok is False
+    assert "WITH DML" in reason
+    assert validate_postgresql_query("SELECT 'update' AS operation_name") == (True, None)
 
 
 def test_postgresql_query_uses_configured_operation_whitelist(monkeypatch):
@@ -123,7 +127,10 @@ def test_postgresql_query_uses_configured_operation_whitelist(monkeypatch):
 def test_loaded_empty_postgresql_whitelist_does_not_use_fallback(monkeypatch):
     import app.services.data_access as data_access
 
-    monkeypatch.setitem(data_access._QUERY_OPS_CACHE, "data", {"postgresql": set()})
+    monkeypatch.setitem(data_access._QUERY_OPS_CACHE, "data", {
+        "allow": {"postgresql": set()},
+        "deny": {"postgresql": {"update"}},
+    })
     monkeypatch.setitem(data_access._QUERY_OPS_CACHE, "ts", time.monotonic())
     assert data_access._get_query_ops("postgresql") == set()
 
@@ -139,9 +146,12 @@ def test_postgresql_query_operation_config_and_admin_write_control(app, client):
 
         pg_keys = {
             row.op_key.upper()
-            for row in DataQueryOperationConfig.query.filter_by(db_type="postgresql").all()
+            for row in DataQueryOperationConfig.query.filter_by(db_type="postgresql", rule_type="whitelist").all()
         }
         assert pg_keys == {"SELECT", "WITH", "EXPLAIN", "SHOW", "VALUES"}
+        assert DataQueryOperationConfig.query.filter_by(
+            db_type="postgresql", rule_type="blacklist", op_key="UPDATE",
+        ).one().enabled is True
 
     user_headers = _login(client, "query-op-user", "password123")
     listed = client.get("/api/v1/data-query-ops", headers=user_headers)

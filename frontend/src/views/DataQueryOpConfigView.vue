@@ -3,7 +3,7 @@
     <div class="page-header">
       <div class="page-header-left">
         <div class="page-title">数据查询操作配置</div>
-        <div class="page-subtitle">维护 MySQL / PostgreSQL / MongoDB / Redis 的数据查询白名单关键字，仅启用的操作允许在数据查询页执行</div>
+        <div class="page-subtitle">同步维护数据查询白名单与黑名单；必须命中白名单，且不得包含任何启用的黑名单命令</div>
       </div>
       <div class="page-header-actions">
         <el-button :icon="Refresh" @click="loadData">刷新</el-button>
@@ -12,9 +12,11 @@
 
     <el-alert type="info" :closable="false" show-icon class="tip-alert">
       <template #title>
-        预置关键字不可删除，但可临时禁用；自定义关键字可增删。修改立即生效（后台缓存将同步失效）。
+        黑名单优先级高于白名单；例如 WITH 中包含 UPDATE 时仍会被拒绝。修改立即生效，本地与 Redis 缓存将同步失效。
       </template>
     </el-alert>
+
+    <el-segmented v-model="activeRuleType" :options="ruleTypeOptions" class="rule-type-switch" />
 
     <el-card
       v-for="group in groupMeta"
@@ -25,19 +27,19 @@
       <template #header>
         <div class="section-header">
           <span :class="['group-badge', `group-badge--${group.key}`]">{{ group.label }}</span>
-          <span class="section-desc">{{ group.desc }}</span>
+          <span class="section-desc">{{ groupDescription(group) }}</span>
           <div class="section-actions">
             <el-button v-if="isAdmin" type="primary" size="small" :icon="Plus" @click="openCreate(group.key)">
-              新增关键字
+              新增{{ activeRuleType === 'blacklist' ? '黑名单命令' : '白名单关键字' }}
             </el-button>
           </div>
         </div>
       </template>
       <el-table
-        :data="groups[group.key] || []"
+        :data="displayGroups[group.key] || []"
         stripe
         size="small"
-        empty-text="暂无关键字"
+        :empty-text="activeRuleType === 'blacklist' ? '暂无黑名单命令' : '暂无白名单关键字'"
       >
         <el-table-column prop="op_key" label="关键字" min-width="160">
           <template #default="scope">
@@ -85,7 +87,7 @@
 
     <el-dialog
       v-model="dialogVisible"
-      :title="editingId ? '编辑关键字' : '新增关键字'"
+      :title="editingId ? `编辑${ruleTypeLabel}` : `新增${ruleTypeLabel}`"
       width="460px"
     >
       <el-form :model="form" label-width="90px">
@@ -148,6 +150,14 @@ const groupMeta = [
 ];
 
 const groups = reactive({ mysql: [], postgresql: [], mongodb: [], redis: [] });
+const blacklistGroups = reactive({ mysql: [], postgresql: [], mongodb: [], redis: [] });
+const activeRuleType = ref("whitelist");
+const ruleTypeOptions = [
+  { label: "白名单关键字", value: "whitelist" },
+  { label: "黑名单命令", value: "blacklist" },
+];
+const displayGroups = computed(() => activeRuleType.value === "blacklist" ? blacklistGroups : groups);
+const ruleTypeLabel = computed(() => form.rule_type === "blacklist" ? "黑名单命令" : "白名单关键字");
 
 const dialogVisible = ref(false);
 const saving = ref(false);
@@ -155,6 +165,7 @@ const editingId = ref(null);
 const editingIsBuiltin = ref(false);
 const form = reactive({
   db_type: "mysql",
+  rule_type: "whitelist",
   op_key: "",
   label: "",
   enabled: true,
@@ -163,6 +174,7 @@ const form = reactive({
 
 function resetForm(dbType = "mysql") {
   form.db_type = dbType;
+  form.rule_type = activeRuleType.value;
   form.op_key = "";
   form.label = "";
   form.enabled = true;
@@ -179,6 +191,11 @@ async function loadData() {
     groups.postgresql = payload.postgresql || [];
     groups.mongodb = payload.mongodb || [];
     groups.redis = payload.redis || [];
+    const blacklist = data?.data?.blacklist_groups || {};
+    blacklistGroups.mysql = blacklist.mysql || [];
+    blacklistGroups.postgresql = blacklist.postgresql || [];
+    blacklistGroups.mongodb = blacklist.mongodb || [];
+    blacklistGroups.redis = blacklist.redis || [];
   } catch (error) {
     ElMessage.error(error.response?.data?.message || "加载数据查询操作配置失败");
   }
@@ -193,6 +210,7 @@ function openEdit(row) {
   editingId.value = row.id;
   editingIsBuiltin.value = !!row.is_builtin;
   form.db_type = row.db_type;
+  form.rule_type = row.rule_type || "whitelist";
   form.op_key = row.op_key;
   form.label = row.label || "";
   form.enabled = !!row.enabled;
@@ -215,12 +233,14 @@ async function onSave() {
       };
       if (!editingIsBuiltin.value) {
         patch.op_key = form.op_key.trim();
+        patch.rule_type = form.rule_type;
       }
       await updateDataQueryOp(editingId.value, patch);
       ElMessage.success("已更新");
     } else {
       await createDataQueryOp({
         db_type: form.db_type,
+        rule_type: form.rule_type,
         op_key: form.op_key.trim(),
         label: form.label || "",
         enabled: !!form.enabled,
@@ -250,7 +270,7 @@ async function onToggleEnabled(row) {
 async function onDelete(row) {
   try {
     await ElMessageBox.confirm(
-      `确认删除关键字 "${row.op_key}" 吗？删除后该关键字将不再被允许。`,
+      `确认删除${row.rule_type === 'blacklist' ? '黑名单命令' : '白名单关键字'} "${row.op_key}" 吗？`,
       "删除确认",
       { type: "warning" }
     );
@@ -271,6 +291,10 @@ function dbTypeLabel(type) {
 }
 function dbTypeTagType(type) {
   return { mysql: "primary", postgresql: "warning", mongodb: "success", redis: "danger" }[type] || "info";
+}
+function groupDescription(group) {
+  if (activeRuleType.value === "blacklist") return "命中任一启用命令即拒绝在数据查询页执行";
+  return group.desc;
 }
 
 onMounted(loadData);
@@ -310,6 +334,7 @@ useTabActivationRefresh(loadData);
 .tip-alert {
   margin-bottom: 12px;
 }
+.rule-type-switch { margin-bottom: 14px; }
 
 .section-card {
   margin-bottom: 14px;

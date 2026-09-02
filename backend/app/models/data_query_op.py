@@ -3,7 +3,7 @@ from app.models.base import TimestampMixin
 
 
 class DataQueryOperationConfig(db.Model, TimestampMixin):
-    """数据查询允许操作白名单配置（MySQL/PostgreSQL/MongoDB/Redis）。"""
+    """数据查询操作白名单与黑名单配置。"""
 
     __tablename__ = "data_query_operation_configs"
     __table_args__ = (
@@ -12,6 +12,7 @@ class DataQueryOperationConfig(db.Model, TimestampMixin):
 
     id = db.Column(db.Integer, primary_key=True)
     db_type = db.Column(db.String(16), nullable=False, index=True)  # mysql / postgresql / mongodb / redis
+    rule_type = db.Column(db.String(16), nullable=False, default="whitelist")
     op_key = db.Column(db.String(64), nullable=False)               # 关键字/命令名，如 SELECT / find / GET
     label = db.Column(db.String(128), nullable=True)                # 中文描述
     enabled = db.Column(db.Boolean, nullable=False, default=True)
@@ -22,6 +23,7 @@ class DataQueryOperationConfig(db.Model, TimestampMixin):
         return {
             "id": self.id,
             "db_type": self.db_type,
+            "rule_type": self.rule_type or "whitelist",
             "op_key": self.op_key,
             "label": self.label or "",
             "enabled": bool(self.enabled),

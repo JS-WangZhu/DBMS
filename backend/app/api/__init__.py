@@ -32,6 +32,7 @@ from app.api.routes.physical_discovery_ops import bp as physical_discovery_ops_b
 from app.api.routes.s3_storage import bp as s3_storage_bp
 from app.api.routes.sso_config import bp as sso_config_bp
 from app.api.routes.sql_releases import bp as sql_releases_bp
+from app.api.routes.sql_release_config import bp as sql_release_config_bp
 from app.api.routes.task_management import bp as task_management_bp
 from app.api.routes.users import bp as users_bp
 from app.api.routes.user_permissions import bp as user_permissions_bp
@@ -74,6 +75,7 @@ def register_blueprints(app):
     api_v1.register_blueprint(s3_storage_bp)
     api_v1.register_blueprint(sso_config_bp)
     api_v1.register_blueprint(sql_releases_bp)
+    api_v1.register_blueprint(sql_release_config_bp)
     api_v1.register_blueprint(task_management_bp)
     api_v1.register_blueprint(ai_bp)
     api_v1.register_blueprint(aliyun_dns_bp)

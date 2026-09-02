@@ -41,10 +41,12 @@ def list_ops():
         .all()
     )
     groups = {"mysql": [], "postgresql": [], "mongodb": [], "redis": []}
+    blacklist_groups = {"mysql": [], "postgresql": [], "mongodb": [], "redis": []}
     for row in rows:
         data = row.to_dict()
-        groups.setdefault(row.db_type, []).append(data)
-    data = {"groups": groups, "items": [row.to_dict() for row in rows]}
+        target = blacklist_groups if row.rule_type == "blacklist" else groups
+        target.setdefault(row.db_type, []).append(data)
+    data = {"groups": groups, "blacklist_groups": blacklist_groups, "items": [row.to_dict() for row in rows]}
     set_json(LIST_CACHE_KEY, data)
     return ok_response(data=data)
 
@@ -56,11 +58,14 @@ def create_op():
     db_type = (payload.get("db_type") or "").strip().lower()
     op_key = (payload.get("op_key") or "").strip()
     label = (payload.get("label") or "").strip()
+    rule_type = (payload.get("rule_type") or "whitelist").strip().lower()
 
     if db_type not in SUPPORTED_DB_TYPES:
         return error_response("db_type must be one of mysql/postgresql/mongodb/redis", code=400)
     if not op_key:
         return error_response("op_key is required", code=400)
+    if rule_type not in {"whitelist", "blacklist"}:
+        return error_response("rule_type must be whitelist or blacklist", code=400)
 
     existing = (
         DataQueryOperationConfig.query
@@ -73,6 +78,7 @@ def create_op():
 
     row = DataQueryOperationConfig(
         db_type=db_type,
+        rule_type=rule_type,
         op_key=op_key,
         label=label,
         enabled=bool(payload.get("enabled", True)),
@@ -109,6 +115,11 @@ def update_op(op_id):
             pass
     # 内置项不允许改 op_key / db_type，非内置项允许修改关键字本身
     if not row.is_builtin:
+        if "rule_type" in payload:
+            new_rule_type = (payload.get("rule_type") or "").strip().lower()
+            if new_rule_type not in {"whitelist", "blacklist"}:
+                return error_response("rule_type must be whitelist or blacklist", code=400)
+            row.rule_type = new_rule_type
         if "op_key" in payload:
             new_key = (payload.get("op_key") or "").strip()
             if not new_key:

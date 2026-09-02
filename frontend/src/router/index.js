@@ -27,6 +27,7 @@ import DataCopyConfigView from "../views/DataCopyConfigView.vue";
 import DataCopyTaskView from "../views/DataCopyTaskView.vue";
 import SqlReleaseApplyView from "../views/SqlReleaseApplyView.vue";
 import SqlReleaseHistoryView from "../views/SqlReleaseHistoryView.vue";
+import SqlReleaseConfigView from "../views/SqlReleaseConfigView.vue";
 import DataSourcePermissionView from "../views/DataSourcePermissionView.vue";
 import DataSourcePermissionApplyView from "../views/DataSourcePermissionApplyView.vue";
 import InstanceManageView from "../views/InstanceManageView.vue";
@@ -44,6 +45,7 @@ import MysqlSessionProbeView from "../views/MysqlSessionProbeView.vue";
 import MongoSessionProbeView from "../views/MongoSessionProbeView.vue";
 import MongoConnectionManageView from "../views/MongoConnectionManageView.vue";
 import RedisConnectionManageView from "../views/RedisConnectionManageView.vue";
+import RedisInstanceDetailView from "../views/RedisInstanceDetailView.vue";
 import DatabaseApplyView from "../views/DatabaseApplyView.vue";
 import DatabaseApplicationOverviewView from "../views/DatabaseApplicationOverviewView.vue";
 import DatabaseRecycleView from "../views/DatabaseRecycleView.vue";
@@ -97,6 +99,7 @@ const routes = [
       { path: "/databases/redis", redirect: "/databases/redis/instances" },
       { path: "/databases/redis/clusters", component: ClusterManageView, meta: { title: "Redis 集群管理", dbType: "redis", dbLabel: "Redis" } },
       { path: "/databases/redis/instances", component: InstanceManageView, meta: { title: "Redis 实例管理", dbType: "redis", dbLabel: "Redis" } },
+      { path: "/databases/redis/instance-detail", component: RedisInstanceDetailView, meta: { title: "Redis 实例详情", dbType: "redis", dbLabel: "Redis" } },
       { path: "/databases/redis/connections", component: RedisConnectionManageView, meta: { title: "Redis 连接管理", dbType: "redis", dbLabel: "Redis" } },
 
       { path: "/databases/postgresql", redirect: "/databases/postgresql/instances" },
@@ -142,6 +145,7 @@ const routes = [
       { path: "/config/instance-status", component: InstanceStatusConfigView, meta: { title: "实例状态检测管理" } },
       { path: "/config/inspection", component: InspectionParamConfigView, meta: { title: "巡检参数" } },
       { path: "/config/data-query-ops", component: DataQueryOpConfigView, meta: { title: "数据查询操作配置" } },
+      { path: "/config/sql-release", component: SqlReleaseConfigView, meta: { title: "数据发布配置" } },
       { path: "/config/domain", component: DomainConfigManageView, meta: { title: "域名配置管理" } },
       { path: "/config/mcp-platform", component: McpPlatformView, meta: { title: "MCP开放平台" } },
       { path: "/config/sso", component: SsoConfigView, meta: { title: "SSO登录管理" } },

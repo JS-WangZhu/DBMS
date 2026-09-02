@@ -24,6 +24,10 @@ export function forceSubmitSqlRelease(id) {
   return client.post(`/sql-releases/${id}/force-submit`);
 }
 
+export function skipSqlReleaseReview(id) {
+  return client.post(`/sql-releases/${id}/skip-review`);
+}
+
 export function executeSqlRelease(id, payload = {}) {
   return client.post(`/sql-releases/${id}/execute`, payload);
 }

@@ -443,6 +443,13 @@
     </div>
 
     <div ref="instancePaginationRef" class="pagination-wrap">
+      <label class="page-size-control">
+        <span>每页显示</span>
+        <el-select v-model="pageSizeMode" size="small" style="width: 148px" @change="onPageSizeModeChange">
+          <el-option :label="`${adaptivePageSize} 条`" value="auto" />
+          <el-option v-for="size in manualPageSizes" :key="size" :label="`${size} 条`" :value="String(size)" />
+        </el-select>
+      </label>
       <el-pagination
         background
         layout="total, prev, pager, next, jumper"
@@ -468,8 +475,8 @@
         </el-table>
       </el-dialog>
 
-    <el-dialog v-model="dialogVisible" :title="dialogTitle" width="620px">
-      <el-form :model="form" label-width="110px">
+    <el-dialog v-model="dialogVisible" :title="dialogTitle" width="660px">
+      <el-form :model="form" label-width="128px" class="instance-edit-form">
         <el-form-item label="实例名"><el-input v-model="form.name" /></el-form-item>
         <el-form-item label="所属集群">
           <el-select v-model="form.cluster_id" clearable filterable default-first-option style="width: 100%" placeholder="可选：输入或选择已录入集群">
@@ -693,6 +700,9 @@ const pager = reactive({
   page_size: 10,
   total: 0,
 });
+const pageSizeMode = ref("auto");
+const adaptivePageSize = ref(10);
+const manualPageSizes = [10, 20, 30, 50, 100];
 const pagerSnapshotBeforeCluster = reactive({
   page: 1,
   page_size: 10,
@@ -813,7 +823,9 @@ function refreshInstancePageSize() {
   // 使用视口剩余空间而非表格自身高度，避免实例列表将整页撑出垂直滚动条。
   const availableHeight = window.innerHeight - tableWrap.getBoundingClientRect().top - pagination.offsetHeight - 24;
   const nextPageSize = Math.max(1, Math.floor((availableHeight - headerHeight - 4) / rowHeight));
+  adaptivePageSize.value = nextPageSize;
 
+  if (pageSizeMode.value !== "auto") return;
   if (nextPageSize === pager.page_size) return;
   const firstVisibleRow = (pager.page - 1) * pager.page_size;
   pager.page_size = nextPageSize;
@@ -825,6 +837,17 @@ function refreshInstancePageSize() {
 
 function scheduleInstancePageSizeRefresh() {
   nextTick(refreshInstancePageSize);
+}
+
+function onPageSizeModeChange(value) {
+  const nextPageSize = value === "auto" ? adaptivePageSize.value : Number(value);
+  if (!Number.isInteger(nextPageSize) || nextPageSize < 1 || nextPageSize === pager.page_size) return;
+  const firstVisibleRow = (pager.page - 1) * pager.page_size;
+  pager.page_size = nextPageSize;
+  pager.page = Math.min(
+    Math.max(1, Math.ceil(filteredRows.value.length / pager.page_size)),
+    Math.floor(firstVisibleRow / pager.page_size) + 1,
+  );
 }
 
 const runningOverview = computed(() => {
@@ -2545,6 +2568,8 @@ function resetPager() {
   pager.page = 1;
   pager.page_size = 10;
   pager.total = 0;
+  pageSizeMode.value = "auto";
+  adaptivePageSize.value = 10;
 }
 
 async function onPageChange(page) {
@@ -3547,7 +3572,11 @@ watch(
   display: flex;
   align-items: center;
   justify-content: flex-end;
+  gap: 14px;
 }
+
+.page-size-control { display: inline-flex; flex: none; align-items: center; gap: 8px; color: #606266; font-size: 13px; }
+.instance-edit-form :deep(.el-form-item__label) { white-space: nowrap; }
 
   .info-value {
     white-space: pre-wrap;

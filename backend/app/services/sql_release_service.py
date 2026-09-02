@@ -171,9 +171,11 @@ _SIMPLE_IDENTIFIER = r"(?:`[^`]+`|[A-Za-z_][A-Za-z0-9_$]*)"
 
 
 class PartialRollbackExecutionError(RuntimeError):
-    def __init__(self, message, rollback_path=None):
+    def __init__(self, message, rollback_path=None, line=None, backup_failed=False):
         super().__init__(message)
         self.rollback_path = rollback_path
+        self.line = line
+        self.backup_failed = bool(backup_failed)
 
 
 class ReleaseRollbackExecutionError(RuntimeError):
@@ -577,7 +579,30 @@ def _write_rollback_file(output_path, release_id, database, rollback_groups):
     temp_path.replace(output_path)
 
 
-def execute_mysql_with_partial_rollback(instance, database, statements, release_id, timeout_seconds=86400):
+def _existing_rollback_groups(release_id, before_line):
+    """继续执行时从持久化备份恢复之前语句的回滚内容。"""
+    from app.models.sql_release import SqlReleaseRollbackBackup
+
+    rows = (
+        SqlReleaseRollbackBackup.query
+        .filter(SqlReleaseRollbackBackup.release_id == release_id)
+        .filter(SqlReleaseRollbackBackup.statement_line < before_line)
+        .order_by(SqlReleaseRollbackBackup.statement_line.asc())
+        .all()
+    )
+    return [
+        [
+            f"-- rollback for statement #{row.statement_line}",
+            *str(decrypt_secret(row.rollback_sql_encrypted) or "").splitlines(),
+        ]
+        for row in rows
+    ]
+
+
+def execute_mysql_with_partial_rollback(
+    instance, database, statements, release_id, timeout_seconds=86400,
+    skip_backup_lines=None, line_offset=1,
+):
     import pymysql
 
     backup_root = Path(current_app.config.get("SQL_RELEASE_BACKUP_DIR") or "data/sql_release_backups").resolve()
@@ -598,22 +623,28 @@ def execute_mysql_with_partial_rollback(instance, database, statements, release_
         cursorclass=pymysql.cursors.DictCursor,
         autocommit=False,
     )
-    rollback_groups = []
+    skip_backup_lines = {int(item) for item in (skip_backup_lines or set())}
+    rollback_groups = _existing_rollback_groups(release_id, line_offset) if line_offset > 1 else []
     statement_results = []
     total_affected = 0
+    failed_line = None
+    backup_failed = False
+    if rollback_groups:
+        _write_rollback_file(output_path, release_id, database, rollback_groups)
     try:
         with connection.cursor() as cursor:
-            for line, statement in enumerate(statements, start=1):
+            for line, statement in enumerate(statements, start=line_offset):
                 requires_backup = _is_dml_statement(statement)
-                phase = "backing_up" if requires_backup else "backup_skipped"
+                skip_backup = requires_backup and line in skip_backup_lines
+                phase = "backup_skipped" if skip_backup or not requires_backup else "backing_up"
                 _update_release_statement_status(
                     release_id, line, statement, phase,
-                    backup_status="backing_up" if requires_backup else "skipped",
+                    backup_status="skipped_by_operator" if skip_backup else ("backing_up" if requires_backup else "skipped"),
                     backup_rows=0,
                 )
                 try:
                     backup_rows = 0
-                    if requires_backup:
+                    if requires_backup and not skip_backup:
                         parsed = _analyze_dml(statement, database)
                         if not parsed:
                             raise ValueError("暂不支持该 DML 语句生成可靠回滚 SQL，已阻止执行")
@@ -642,7 +673,7 @@ def execute_mysql_with_partial_rollback(instance, database, statements, release_
                         "status": "success",
                         "affected_rows": affected,
                         "backup_rows": backup_rows,
-                        "backup_status": "ready" if requires_backup else "skipped",
+                        "backup_status": "skipped_by_operator" if skip_backup else ("ready" if requires_backup else "skipped"),
                     }
                     statement_results.append(result_item)
                     _update_release_statement_status(release_id, line, statement, "success", **{
@@ -651,6 +682,8 @@ def execute_mysql_with_partial_rollback(instance, database, statements, release_
                 except Exception as statement_exc:
                     connection.rollback()
                     failed_status = "backup_failed" if phase in {"backing_up", "backup_ready"} else "failed"
+                    failed_line = line
+                    backup_failed = failed_status == "backup_failed"
                     _update_release_statement_status(
                         release_id, line, statement, failed_status, error=str(statement_exc)
                     )
@@ -662,6 +695,8 @@ def execute_mysql_with_partial_rollback(instance, database, statements, release_
         raise PartialRollbackExecutionError(
             str(exc) or "SQL execution failed",
             str(output_path) if rollback_groups and output_path.exists() else None,
+            line=failed_line,
+            backup_failed=backup_failed,
         ) from exc
     finally:
         connection.close()
@@ -765,6 +800,17 @@ def _analyze_postgresql_dml(statement):
     return None
 
 
+def _is_postgresql_non_transactional_statement(statement):
+    """Return whether PostgreSQL requires this statement outside a transaction."""
+    cleaned = re.sub(
+        r"^\s*(?:(?:--[^\n]*(?:\n|$))|(?:/\*.*?\*/\s*))*",
+        "",
+        str(statement or ""),
+        flags=re.S,
+    )
+    return bool(re.match(r"^CREATE\s+(?:UNIQUE\s+)?INDEX\s+CONCURRENTLY\b", cleaned, flags=re.I))
+
+
 def _pg_primary_keys(cursor, schema, table):
     cursor.execute(
         "SELECT a.attname FROM pg_index i JOIN pg_class c ON c.oid=i.indrelid "
@@ -827,7 +873,10 @@ def _write_postgresql_rollback(output_path, release_id, database, groups):
     temp_path.replace(output_path)
 
 
-def execute_postgresql_with_partial_rollback(instance, database, statements, release_id, timeout_seconds=86400):
+def execute_postgresql_with_partial_rollback(
+    instance, database, statements, release_id, timeout_seconds=86400,
+    skip_backup_lines=None, line_offset=1,
+):
     import psycopg2
     from psycopg2.extras import RealDictCursor
     from app.services.postgresql_backup import _connection_kwargs
@@ -840,25 +889,32 @@ def execute_postgresql_with_partial_rollback(instance, database, statements, rel
     kwargs = _connection_kwargs(instance, password, database=database)
     kwargs["options"] = f"-c statement_timeout={max(1, int(timeout_seconds)) * 1000}"
     connection = psycopg2.connect(**kwargs)
-    groups, results, total = [], [], 0
+    skip_backup_lines = {int(item) for item in (skip_backup_lines or set())}
+    groups = _existing_rollback_groups(release_id, line_offset) if line_offset > 1 else []
+    results, total = [], 0
+    failed_line = None
+    backup_failed = False
+    if groups:
+        _write_postgresql_rollback(output_path, release_id, database, groups)
     try:
         with connection.cursor(cursor_factory=RealDictCursor) as cursor:
-            for line, statement in enumerate(statements, start=1):
+            for line, statement in enumerate(statements, start=line_offset):
                 requires_backup = _is_dml_statement(statement)
-                phase = "backing_up" if requires_backup else "backup_skipped"
+                skip_backup = requires_backup and line in skip_backup_lines
+                phase = "backup_skipped" if skip_backup or not requires_backup else "backing_up"
                 _update_release_statement_status(
                     release_id, line, statement, phase,
-                    backup_status="backing_up" if requires_backup else "skipped",
+                    backup_status="skipped_by_operator" if skip_backup else ("backing_up" if requires_backup else "skipped"),
                     backup_rows=0,
                 )
                 try:
                     backup_rows = 0
-                    if requires_backup:
+                    if requires_backup and not skip_backup:
                         parsed = _analyze_postgresql_dml(statement)
                         if not parsed:
                             raise ValueError("暂不支持该 DML 语句生成可靠 PostgreSQL 回滚 SQL，已阻止执行")
                         keys = _pg_primary_keys(cursor, parsed["schema"], parsed["table"])
-                    if requires_backup and parsed["kind"] in {"update", "delete"}:
+                    if requires_backup and not skip_backup and parsed["kind"] in {"update", "delete"}:
                         if parsed["kind"] == "update":
                             assigned = {_pg_unquote(item.split("=", 1)[0].split(".")[-1]).lower() for item in _split_top_level(parsed["set"]) if "=" in item}
                             if assigned.intersection(item.lower() for item in keys):
@@ -893,7 +949,7 @@ def execute_postgresql_with_partial_rollback(instance, database, statements, rel
                                 rollback = [f"DELETE FROM {parsed['quoted_table']} WHERE {parsed['where']};"]
                             rollback.extend(_pg_restore_rows(cursor, parsed["quoted_table"], [], rows))
                         backup_rows = len(rows)
-                    elif requires_backup and parsed["kind"] == "insert":
+                    elif requires_backup and not skip_backup and parsed["kind"] == "insert":
                         columns = parsed["columns"] or _pg_table_columns(
                             cursor, parsed["schema"], parsed["table"]
                         )
@@ -920,7 +976,7 @@ def execute_postgresql_with_partial_rollback(instance, database, statements, rel
                         rollback.extend(_pg_restore_rows(cursor, parsed["quoted_table"], keys, previous))
                         backup_rows = len(parsed["values"])
                         rows = previous
-                    if requires_backup:
+                    if requires_backup and not skip_backup:
                         _persist_release_rollback_backup(
                             release_id, line, "postgresql", database, parsed, rows, rollback
                         )
@@ -933,9 +989,17 @@ def execute_postgresql_with_partial_rollback(instance, database, statements, rel
                         )
                     phase = "executing"
                     _update_release_statement_status(release_id, line, statement, phase)
+                    non_transactional = _is_postgresql_non_transactional_statement(statement)
+                    if non_transactional:
+                        # psycopg2 starts a transaction on the first execute even when
+                        # every ordinary statement is committed individually.
+                        connection.commit()
+                        connection.autocommit = True
                     cursor.execute(statement)
                     affected = cursor.rowcount
                     connection.commit()
+                    if non_transactional:
+                        connection.autocommit = False
                     total += affected if isinstance(affected, int) and affected > 0 else 0
                     result_item = {
                         "line": line,
@@ -943,7 +1007,7 @@ def execute_postgresql_with_partial_rollback(instance, database, statements, rel
                         "status": "success",
                         "affected_rows": affected,
                         "backup_rows": backup_rows,
-                        "backup_status": "ready" if requires_backup else "skipped",
+                        "backup_status": "skipped_by_operator" if skip_backup else ("ready" if requires_backup else "skipped"),
                     }
                     results.append(result_item)
                     _update_release_statement_status(release_id, line, statement, "success", **{
@@ -952,6 +1016,8 @@ def execute_postgresql_with_partial_rollback(instance, database, statements, rel
                 except Exception as statement_exc:
                     connection.rollback()
                     failed_status = "backup_failed" if phase in {"backing_up", "backup_ready"} else "failed"
+                    failed_line = line
+                    backup_failed = failed_status == "backup_failed"
                     _update_release_statement_status(
                         release_id, line, statement, failed_status, error=str(statement_exc)
                     )
@@ -960,7 +1026,10 @@ def execute_postgresql_with_partial_rollback(instance, database, statements, rel
         connection.rollback()
         if not groups:
             output_path.unlink(missing_ok=True)
-        raise PartialRollbackExecutionError(str(exc), str(output_path) if groups and output_path.exists() else None) from exc
+        raise PartialRollbackExecutionError(
+            str(exc), str(output_path) if groups and output_path.exists() else None,
+            line=failed_line, backup_failed=backup_failed,
+        ) from exc
     finally:
         connection.close()
     return {"columns": [], "rows": [], "affected_rows": total, "statement_count": len(results), "statements": results}, (str(output_path) if groups else None)

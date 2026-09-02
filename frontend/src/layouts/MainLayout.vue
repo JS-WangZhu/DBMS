@@ -34,7 +34,7 @@
           </el-menu-item>
         </el-sub-menu>
 
-        <el-sub-menu v-if="hasAnyMenu(['mysql_instances','mysql_instance_detail','mysql_clusters','mysql_connections','mysql_session_probe','mongodb_instances','mongodb_instance_detail','mongodb_clusters','mongodb_connections','mongodb_session_probe','redis_instances','redis_clusters','redis_connections','postgresql_instances','postgresql_clusters','doris_instances','doris_clusters'])" index="service-manage">
+        <el-sub-menu v-if="hasAnyMenu(['mysql_instances','mysql_instance_detail','mysql_clusters','mysql_connections','mysql_session_probe','mongodb_instances','mongodb_instance_detail','mongodb_clusters','mongodb_connections','mongodb_session_probe','redis_instances','redis_instance_detail','redis_clusters','redis_connections','postgresql_instances','postgresql_clusters','doris_instances','doris_clusters'])" index="service-manage">
           <template #title>
             <el-icon><Menu /></el-icon>
             <span>服务管理</span>
@@ -93,7 +93,7 @@
             </el-menu-item>
           </el-sub-menu>
 
-          <el-sub-menu v-if="hasAnyMenu(['redis_instances','redis_clusters','redis_connections'])" index="db-redis">
+          <el-sub-menu v-if="hasAnyMenu(['redis_instances','redis_instance_detail','redis_clusters','redis_connections'])" index="db-redis">
             <template #title>
               <el-icon class="db-brand-icon"><RedisIcon /></el-icon>
               <span>Redis</span>
@@ -101,6 +101,10 @@
             <el-menu-item v-if="hasMenu('redis_instances')" index="/databases/redis/instances">
               <el-icon class="db-brand-icon"><RedisIcon /></el-icon>
               <span>实例管理</span>
+            </el-menu-item>
+            <el-menu-item v-if="hasMenu('redis_instance_detail')" index="/databases/redis/instance-detail">
+              <el-icon><TrendCharts /></el-icon>
+              <span>实例详情</span>
             </el-menu-item>
             <el-menu-item v-if="hasMenu('redis_clusters')" index="/databases/redis/clusters">
               <el-icon><Coin /></el-icon>
@@ -327,7 +331,7 @@
           </el-menu-item>
         </el-sub-menu>
 
-        <el-sub-menu v-if="hasAnyMenu(['ai_model_config', 'ha_config', 'instance_status_config', 'physical_discovery_manage', 'data_query_op_config', 'backup_notify_targets', 'backup_agents', 'domain_config', 'mcp_platform', 'sso_config', 'jumpserver_config'])" index="config">
+        <el-sub-menu v-if="hasAnyMenu(['ai_model_config', 'sql_release_config', 'ha_config', 'instance_status_config', 'physical_discovery_manage', 'data_query_op_config', 'backup_notify_targets', 'backup_agents', 'domain_config', 'mcp_platform', 'sso_config', 'jumpserver_config'])" index="config">
           <template #title>
             <el-icon><Management /></el-icon>
             <span>配置管理</span>
@@ -339,6 +343,10 @@
           <el-menu-item v-if="hasMenu('ai_model_config')" index="/config/ai-models">
             <el-icon><TrendCharts /></el-icon>
             <span>AI模型管理</span>
+          </el-menu-item>
+          <el-menu-item v-if="hasMenu('sql_release_config')" index="/config/sql-release">
+            <el-icon><Tickets /></el-icon>
+            <span>数据发布配置</span>
           </el-menu-item>
           <el-menu-item v-if="hasMenu('ha_config')" index="/config/ha">
             <el-icon><Lightning /></el-icon>
@@ -639,6 +647,7 @@ const routePermissionMap = {
   "/databases/mongodb/connections": "mongodb_connections",
   "/databases/mongodb/session-probe": "mongodb_session_probe",
   "/databases/redis/instances": "redis_instances",
+  "/databases/redis/instance-detail": "redis_instance_detail",
   "/databases/redis/clusters": "redis_clusters",
   "/databases/redis/connections": "redis_connections",
   "/databases/postgresql/instances": "postgresql_instances",
@@ -679,6 +688,7 @@ const routePermissionMap = {
   "/config/physical-discovery": "physical_discovery_manage",
   "/config/inspection": "inspection_param_config",
   "/config/data-query-ops": "data_query_op_config",
+  "/config/sql-release": "sql_release_config",
   "/config/domain": "domain_config",
   "/config/mcp-platform": "mcp_platform",
   "/config/sso": "sso_config",
@@ -741,6 +751,7 @@ const tabIconMap = {
   "/databases/mongodb/connections": Link,
   "/databases/mongodb/session-probe": View,
   "/databases/redis/instances": RedisIcon,
+  "/databases/redis/instance-detail": TrendCharts,
   "/databases/redis/clusters": Coin,
   "/databases/redis/connections": Promotion,
   "/databases/postgresql/instances": PostgreSQLIcon,
@@ -780,6 +791,7 @@ const tabIconMap = {
   "/config/physical-discovery": Monitor,
   "/config/inspection": Setting,
   "/config/data-query-ops": DataAnalysis,
+  "/config/sql-release": Tickets,
   "/config/domain": Location,
   "/config/mcp-platform": SetUp,
   "/config/sso": Key,

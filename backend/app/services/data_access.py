@@ -48,17 +48,32 @@ _REDIS_QUERY_FALLBACK = {
     "get", "mget", "hget", "hgetall", "hexists",
     "exists", "scard", "smembers", "lrange", "zrange", "zrangebyscore",
 }
+_SQL_QUERY_BLACKLIST_FALLBACK = {
+    "insert", "update", "delete", "replace", "merge", "alter", "drop", "truncate",
+    "create", "rename", "grant", "revoke", "call", "do", "copy", "lock", "unlock",
+}
+_MONGO_QUERY_BLACKLIST_FALLBACK = {
+    "insert_one", "insert_many", "update_one", "update_many", "delete_one", "delete_many",
+    "replace_one", "insert", "update", "delete", "findandmodify", "drop", "create",
+    "dropdatabase", "renamecollection", "shutdown",
+}
+_REDIS_QUERY_BLACKLIST_FALLBACK = {
+    "set", "mset", "del", "unlink", "flushall", "flushdb", "hset", "hmset", "hdel",
+    "lpush", "rpush", "lpop", "rpop", "sadd", "srem", "zadd", "zrem", "expire",
+    "persist", "rename", "eval", "evalsha", "script", "config", "shutdown", "migrate", "restore", "xadd",
+}
 
 
 def _load_query_ops_from_db():
     """从数据库读取启用的允许操作，返回按 db_type 分组的小写关键字 set。"""
     cached = get_json(KEY_QUERY_OPS)
-    if isinstance(cached, dict):
+    if isinstance(cached, dict) and isinstance(cached.get("allow"), dict) and isinstance(cached.get("deny"), dict):
         return {
-            "mysql": set(cached.get("mysql") or []),
-            "postgresql": set(cached.get("postgresql") or []),
-            "mongodb": set(cached.get("mongodb") or []),
-            "redis": set(cached.get("redis") or []),
+            rule_type: {
+                db_type: set((cached.get(rule_type) or {}).get(db_type) or [])
+                for db_type in ("mysql", "postgresql", "mongodb", "redis")
+            }
+            for rule_type in ("allow", "deny")
         }
     try:
         from app.models.data_query_op import DataQueryOperationConfig
@@ -66,12 +81,19 @@ def _load_query_ops_from_db():
         rows = DataQueryOperationConfig.query.filter_by(enabled=True).all()
     except Exception:
         return None
-    groups = {"mysql": set(), "postgresql": set(), "mongodb": set(), "redis": set()}
+    groups = {
+        "allow": {"mysql": set(), "postgresql": set(), "mongodb": set(), "redis": set()},
+        "deny": {"mysql": set(), "postgresql": set(), "mongodb": set(), "redis": set()},
+    }
     for row in rows:
         if not row.op_key:
             continue
-        groups.setdefault(row.db_type, set()).add(row.op_key.strip().lower())
-    set_json(KEY_QUERY_OPS, {key: sorted(values) for key, values in groups.items()})
+        rule_type = "deny" if row.rule_type == "blacklist" else "allow"
+        groups[rule_type].setdefault(row.db_type, set()).add(row.op_key.strip().lower())
+    set_json(KEY_QUERY_OPS, {
+        rule_type: {db_type: sorted(values) for db_type, values in grouped.items()}
+        for rule_type, grouped in groups.items()
+    })
     return groups
 
 
@@ -98,7 +120,29 @@ def _get_query_ops(db_type: str):
         if db_type == "redis":
             return set(_REDIS_QUERY_FALLBACK)
         return set()
-    return set(data.get(db_type) or set())
+    return set((data.get("allow") or {}).get(db_type) or set())
+
+
+def _get_query_blacklist(db_type: str):
+    now = time.monotonic()
+    with _QUERY_OPS_LOCK:
+        data = _QUERY_OPS_CACHE.get("data")
+        ts = _QUERY_OPS_CACHE.get("ts") or 0.0
+        if data is None or (now - ts) > _QUERY_OPS_CACHE_TTL:
+            refreshed = _load_query_ops_from_db()
+            if refreshed is not None:
+                _QUERY_OPS_CACHE["data"] = refreshed
+                _QUERY_OPS_CACHE["ts"] = now
+                data = refreshed
+    if data is None:
+        if db_type in {"mysql", "postgresql"}:
+            return set(_SQL_QUERY_BLACKLIST_FALLBACK)
+        if db_type == "mongodb":
+            return set(_MONGO_QUERY_BLACKLIST_FALLBACK)
+        if db_type == "redis":
+            return set(_REDIS_QUERY_BLACKLIST_FALLBACK)
+        return set()
+    return set((data.get("deny") or {}).get(db_type) or set())
 
 
 def invalidate_query_ops_cache():
@@ -201,6 +245,38 @@ def _first_keyword(sql: str) -> str:
     return cleaned.split()[0].lower()
 
 
+def _sql_word_tokens(sql: str):
+    cleaned = _strip_sql_comments(sql or "")
+    output = []
+    quote = ""
+    i = 0
+    while i < len(cleaned):
+        ch = cleaned[i]
+        if quote:
+            if ch == quote:
+                if i + 1 < len(cleaned) and cleaned[i + 1] == quote:
+                    i += 2
+                    continue
+                quote = ""
+            elif ch == "\\":
+                i += 2
+                continue
+            i += 1
+            continue
+        if ch in {"'", '"', "`"}:
+            quote = ch
+            i += 1
+            continue
+        output.append(ch)
+        i += 1
+    return {item.lower() for item in re.findall(r"\b[A-Za-z_][A-Za-z0-9_]*\b", "".join(output))}
+
+
+def _forbidden_sql_keyword(sql: str, db_type: str):
+    forbidden = _sql_word_tokens(sql) & _get_query_blacklist(db_type)
+    return sorted(forbidden)[0] if forbidden else None
+
+
 def _split_sql_statements(sql: str):
     statements = []
     current = []
@@ -280,6 +356,11 @@ def validate_mysql_query(sql: str):
     if keyword not in allowed:
         allowed_display = ", ".join(sorted(k.upper() for k in allowed)) or "SELECT"
         return False, f"only allowed operations: {allowed_display}"
+    if keyword == "with" and "update" in _sql_word_tokens(sql):
+        return False, "MySQL 查询不允许 WITH UPDATE"
+    forbidden = _forbidden_sql_keyword(sql, "mysql")
+    if forbidden:
+        return False, f"MySQL 查询严禁黑名单命令: {forbidden.upper()}"
     if ";" in sql.strip().rstrip(";"):
         return False, "multiple statements are not allowed"
     return True, None
@@ -304,8 +385,11 @@ def validate_postgresql_query(sql: str):
         if keyword not in allowed:
             allowed_display = ", ".join(sorted(item.upper() for item in allowed)) or "无"
             return False, f"PostgreSQL 查询仅允许已启用操作: {allowed_display}"
-        if keyword == "with" and re.search(r"\b(insert|update|delete|merge)\b", cleaned, flags=re.I):
+        if keyword == "with" and _sql_word_tokens(cleaned) & {"insert", "update", "delete", "merge"}:
             return False, "PostgreSQL 查询不允许 WITH DML"
+        forbidden = _forbidden_sql_keyword(cleaned, "postgresql")
+        if forbidden:
+            return False, f"PostgreSQL 查询严禁黑名单命令: {forbidden.upper()}"
     return True, None
 
 
@@ -859,6 +943,9 @@ def validate_mongo_query(payload):
     if not op and isinstance(payload.get("command"), dict):
         op = "run_command"
     allowed = _get_query_ops("mongodb")
+    blacklist = _get_query_blacklist("mongodb")
+    if op in blacklist:
+        return False, f"mongodb query forbids blacklisted command: {op}"
     # 基本 op 必须在启用列表中（find/find_one/aggregate/count_documents/run_command 等）
     if op not in allowed:
         allowed_display = ", ".join(sorted(allowed)) or "find"
@@ -868,6 +955,8 @@ def validate_mongo_query(payload):
         if not isinstance(command, dict) or not command:
             return False, "mongodb run_command requires non-empty command object"
         command_name = str(next(iter(command.keys()))).lower()
+        if command_name in blacklist:
+            return False, f"mongodb run_command forbids blacklisted command: {command_name}"
         if command_name not in allowed:
             allowed_display = ", ".join(sorted(allowed)) or "find"
             return False, f"mongodb run_command only allows: {allowed_display}"
@@ -1177,6 +1266,8 @@ def validate_redis_query(payload):
     if not cmd:
         return False, "redis command is required"
     allowed = _get_query_ops("redis")
+    if cmd.lower() in _get_query_blacklist("redis"):
+        return False, f"redis query forbids blacklisted command: {cmd.upper()}"
     if cmd.lower() not in allowed:
         allowed_display = ", ".join(sorted(k.upper() for k in allowed)) or "GET"
         return False, f"only allowed redis commands: {allowed_display}"

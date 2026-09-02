@@ -4,7 +4,7 @@ const MENU_PERMISSION_STRUCTURE = [
   { key: "service_manage", label: "服务管理", children: [
     { key: "mysql", label: "MySQL", children: ["mysql_instances", "mysql_instance_detail", "mysql_clusters", "mysql_connections", "mysql_session_probe"] },
     { key: "mongodb", label: "MongoDB", children: ["mongodb_instances", "mongodb_instance_detail", "mongodb_clusters", "mongodb_connections", "mongodb_session_probe"] },
-    { key: "redis", label: "Redis", children: ["redis_instances", "redis_clusters", "redis_connections"] },
+    { key: "redis", label: "Redis", children: ["redis_instances", "redis_instance_detail", "redis_clusters", "redis_connections"] },
     { key: "postgresql", label: "PostgreSQL", children: ["postgresql_instances", "postgresql_clusters"] },
     { key: "doris", label: "Doris", children: ["doris_instances", "doris_clusters"] },
   ] },
@@ -24,6 +24,7 @@ const MENU_PERMISSION_STRUCTURE = [
   { key: "config", label: "配置管理", children: [
     "backup_agents",
     "ai_model_config",
+    "sql_release_config",
     "ha_config",
     "instance_status_config",
     "physical_discovery_manage",

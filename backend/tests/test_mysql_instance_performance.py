@@ -1,8 +1,11 @@
 from datetime import datetime, timedelta
 
 from app.extensions import db
-from app.models.db_asset import DatabaseInstance
-from app.models.monitor_snapshot import MonitorSnapshotMongoDB, MonitorSnapshotMySQL
+from app.api.routes.user_permissions import MENU_KEY_SET
+from app.models.db_asset import DatabaseCluster, DatabaseInstance
+from app.models.monitor_snapshot import MonitorSnapshotMongoDB, MonitorSnapshotMySQL, MonitorSnapshotRedis
+from app.models.user import User
+from app.models.user_permission import UserClusterPermission, UserMenuPermission
 
 
 def _admin_headers(client):
@@ -145,3 +148,92 @@ def test_mongodb_performance_returns_resources_cache_and_connections(client):
     assert point["wiredtiger_cache_used_pct"] == 43.25
     assert point["connections_current"] == 27
     assert point["sessions"] is None
+
+
+def test_redis_performance_returns_resources_connections_and_memory_usage(client):
+    headers = _admin_headers(client)
+    instance = DatabaseInstance(
+        name="redis-performance",
+        db_type="redis",
+        host_input="redis.local",
+        resolved_ip="10.0.0.28",
+        port=6379,
+        username="monitor",
+    )
+    db.session.add(instance)
+    db.session.flush()
+    now = datetime.now()
+    db.session.add(
+        MonitorSnapshotRedis(
+            instance_id=instance.id,
+            metric_type="status",
+            collected_at=now,
+            payload_json={
+                "host_cpu_usage_pct": 12.5,
+                "host_memory_usage_pct": 48.0,
+                "host_data_disk_usage_pct": 57.0,
+                "host_net_rates": [{"device": "eth0", "rx_bps": 420, "tx_bps": 210}],
+                "connected_clients": 36,
+                "memory_usage_pct": 64.25,
+            },
+        )
+    )
+    db.session.commit()
+
+    response = client.get(
+        f"/api/v1/monitoring/instance/{instance.id}/performance?hours=6",
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    data = response.get_json()["data"]
+    assert data["instance"]["name"] == "redis-performance"
+    assert len(data["points"]) == 1
+    point = data["points"][0]
+    assert point["cpu_usage_pct"] == 12.5
+    assert point["memory_usage_pct"] == 48.0
+    assert point["disk_usage_pct"] == 57.0
+    assert point["network_rx_bps"] == 420.0
+    assert point["network_tx_bps"] == 210.0
+    assert point["connections_current"] == 36
+    assert point["redis_memory_usage_pct"] == 64.25
+    assert point["wiredtiger_cache_used_pct"] is None
+
+
+def test_redis_performance_requires_detail_menu_and_cluster_view_permission(app, client):
+    assert "redis_instance_detail" in MENU_KEY_SET
+    with app.app_context():
+        user = User(username="redis-detail-reader", role="user", status="active", auth_source="local")
+        user.set_password("password123")
+        cluster = DatabaseCluster(name="redis-detail-cluster", db_type="redis")
+        db.session.add_all([user, cluster])
+        db.session.flush()
+        instance = DatabaseInstance(
+            name="redis-detail-instance",
+            db_type="redis",
+            host_input="10.0.0.38",
+            port=6379,
+            cluster_id=cluster.id,
+        )
+        db.session.add_all([
+            instance,
+            UserMenuPermission(user_id=user.id, menu_key="redis_instance_detail"),
+            UserClusterPermission(user_id=user.id, cluster_id=cluster.id, can_view_instance=True),
+        ])
+        db.session.commit()
+        instance_id = instance.id
+
+    login = client.post(
+        "/api/v1/auth/login",
+        json={"username": "redis-detail-reader", "password": "password123"},
+    )
+    assert login.status_code == 200
+    headers = {"Authorization": f"Bearer {login.get_json()['data']['access_token']}"}
+    allowed = client.get(f"/api/v1/monitoring/instance/{instance_id}/performance", headers=headers)
+    assert allowed.status_code == 200
+
+    with app.app_context():
+        UserMenuPermission.query.filter_by(menu_key="redis_instance_detail").delete()
+        db.session.commit()
+    denied = client.get(f"/api/v1/monitoring/instance/{instance_id}/performance", headers=headers)
+    assert denied.status_code == 403

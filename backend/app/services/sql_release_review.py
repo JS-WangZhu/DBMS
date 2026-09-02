@@ -5,6 +5,7 @@ from app.models.db_asset import DatabaseInstance
 from app.models.sql_release import SqlRelease
 from app.services.audit import log_audit
 from app.services.sql_release_service import review_release, split_sql_statements
+from app.services.sql_release_config import is_sql_release_ai_review_enabled
 
 
 def run_sql_release_review(app, release_id: int):
@@ -15,6 +16,28 @@ def run_sql_release_review(app, release_id: int):
 
         statements = split_sql_statements(release.sql_text)
         instance = DatabaseInstance.query.get(release.instance_id)
+
+        if not is_sql_release_ai_review_enabled():
+            reason = "全局 AI 预审已关闭，工单未执行 AI 审核"
+            release.review_json = [{
+                **dict(item),
+                "passed": None,
+                "status": "skipped",
+                "reason": reason,
+                "suggestion": "",
+            } for item in (release.review_json or [])]
+            release.ai_passed = False
+            release.ai_summary = reason
+            release.status = "pending"
+            db.session.commit()
+            log_audit(
+                user_id=release.applicant_id,
+                action="sql_release.review.skip",
+                target_type="sql_release",
+                target_id=str(release.id),
+                detail={"status": release.status, "reason": "global_config_disabled"},
+            )
+            return
 
         def persist_review_item(review, total):
             current = list(release.review_json or [])

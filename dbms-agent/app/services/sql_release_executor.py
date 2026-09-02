@@ -147,9 +147,25 @@ def _execute_postgresql(instance, database, statements, timeout_seconds):
         with connection.cursor() as cursor:
             for line, statement in enumerate(statements, start=1):
                 try:
+                    cleaned = re.sub(
+                        r"^\s*(?:(?:--[^\n]*(?:\n|$))|(?:/\*.*?\*/\s*))*",
+                        "",
+                        str(statement or ""),
+                        flags=re.S,
+                    )
+                    non_transactional = bool(re.match(
+                        r"^CREATE\s+(?:UNIQUE\s+)?INDEX\s+CONCURRENTLY\b",
+                        cleaned,
+                        flags=re.I,
+                    ))
+                    if non_transactional:
+                        connection.commit()
+                        connection.autocommit = True
                     cursor.execute(statement)
                     affected = int(cursor.rowcount or 0)
                     connection.commit()
+                    if non_transactional:
+                        connection.autocommit = False
                     total += max(affected, 0)
                     results.append({"line": line, "sql": statement, "status": "success", "affected_rows": affected, "backup_rows": 0})
                 except Exception as exc:

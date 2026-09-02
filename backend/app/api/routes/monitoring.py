@@ -108,8 +108,8 @@ def get_instance_performance(instance_id):
     instance = DatabaseInstance.query.get_or_404(instance_id)
     if not require_cluster_permission(instance.cluster_id, "view_instance"):
         return error_response("cluster permission denied", code=403)
-    if instance.db_type not in {"mysql", "mongodb"}:
-        return error_response("performance detail supports mysql and mongodb only", code=400)
+    if instance.db_type not in {"mysql", "mongodb", "redis"}:
+        return error_response("performance detail supports mysql, mongodb and redis only", code=400)
     permission_key = f"{instance.db_type}_instance_detail"
     if g.current_user.role != "admin" and permission_key not in get_effective_menu_keys(g.current_user.id):
         return error_response("permission denied", code=403)
@@ -162,9 +162,14 @@ def get_instance_performance(instance_id):
             "sessions": payload.get("threads_connected"),
             "running_sessions": payload.get("threads_running"),
             "connections_current": (
-                payload.get("threads_connected") if instance.db_type == "mysql" else payload.get("connections_current")
+                payload.get("threads_connected")
+                if instance.db_type == "mysql"
+                else payload.get("connected_clients")
+                if instance.db_type == "redis"
+                else payload.get("connections_current")
             ),
             "wiredtiger_cache_used_pct": payload.get("cache_used_pct") if instance.db_type == "mongodb" else None,
+            "redis_memory_usage_pct": payload.get("memory_usage_pct") if instance.db_type == "redis" else None,
             "lock_waits": payload.get("lock_waits"),
         })
     return ok_response(data={

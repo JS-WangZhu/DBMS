@@ -601,6 +601,75 @@ def test_partial_rollback_generation_failure_prevents_execution(app, client, mon
         assert SqlRelease.query.get(release_id).status == "failed"
 
 
+def test_backup_failure_can_be_confirmed_and_continues_without_repeating(app, client, monkeypatch):
+    user_id, cluster_id, instance_id = _assets(app)
+    with app.app_context():
+        release = SqlRelease(
+            title="update without backup", applicant_id=user_id, cluster_id=cluster_id, instance_id=instance_id,
+            database_name="billing",
+            sql_text="ALTER TABLE orders ADD COLUMN note varchar(20); UPDATE orders SET status='paid';",
+            status="pending", ai_passed=True, force_submitted=False, review_json=[],
+        )
+        db.session.add(release)
+        db.session.commit()
+        release_id = release.id
+
+    import app.api.routes.sql_releases as routes
+    calls = []
+
+    def execute_with_optional_skip(_instance, _database, statements, _release_id, **kwargs):
+        calls.append({"statements": list(statements), **kwargs})
+        if not kwargs.get("skip_backup_lines"):
+            release = db.session.get(SqlRelease, _release_id)
+            release.execution_result_json = {"statements": [
+                {
+                    "line": 1, "sql": statements[0], "status": "success",
+                    "affected_rows": 0, "backup_rows": 0, "backup_status": "skipped",
+                },
+                {
+                    "line": 2, "sql": statements[1], "status": "backup_failed",
+                    "backup_rows": 0, "backup_status": "backing_up",
+                    "error": "UPDATE 缺少 WHERE 条件，无法进行部分备份",
+                },
+            ]}
+            db.session.commit()
+            raise PartialRollbackExecutionError(
+                "UPDATE 缺少 WHERE 条件，无法进行部分备份",
+                line=2,
+                backup_failed=True,
+            )
+        return {
+            "columns": [], "rows": [], "affected_rows": 3, "statement_count": 1,
+            "statements": [{
+                "line": 2, "sql": statements[0], "status": "success", "affected_rows": 3,
+                "backup_rows": 0, "backup_status": "skipped_by_operator",
+            }],
+        }, None
+
+    monkeypatch.setattr(routes, "execute_mysql_with_partial_rollback", execute_with_optional_skip)
+    headers = _login(client, "admin", "admin123")
+    paused = client.post(f"/api/v1/sql-releases/{release_id}/execute", headers=headers)
+    assert paused.status_code == 409
+    paused_data = paused.get_json()["data"]
+    assert paused_data["status"] == "backup_failed"
+    assert paused_data["backup_confirmation_required"] is True
+    assert paused_data["backup_failed_line"] == 2
+
+    continued = client.post(
+        f"/api/v1/sql-releases/{release_id}/execute",
+        headers=headers,
+        json={"confirm_skip_backup": True, "skip_backup_line": 2},
+    )
+    assert continued.status_code == 200, continued.get_json()
+    result = continued.get_json()["data"]
+    assert result["status"] == "success"
+    assert [item["line"] for item in result["statement_executions"]] == [1, 2]
+    assert result["statement_executions"][1]["backup_status"] == "skipped_by_operator"
+    assert calls[1]["statements"] == ["UPDATE orders SET status='paid'"]
+    assert calls[1]["skip_backup_lines"] == {2}
+    assert calls[1]["line_offset"] == 2
+
+
 def test_new_mysql_foreign_keys_match_production_bigint_ids():
     release_ddl = str(CreateTable(SqlRelease.__table__).compile(dialect=mysql.dialect()))
     rollback_backup_ddl = str(CreateTable(SqlReleaseRollbackBackup.__table__).compile(dialect=mysql.dialect()))
@@ -711,6 +780,59 @@ def test_partial_rollback_sql_is_written_before_each_dml(app, monkeypatch, tmp_p
     content = open(rollback_path, encoding="utf-8").read()
     assert expected_sql in content
     assert "START TRANSACTION;" in content
+
+
+def test_mysql_operator_confirmed_line_executes_without_backup(app, monkeypatch, tmp_path):
+    import pymysql
+
+    class Cursor:
+        rowcount = 0
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, sql):
+            connection.executed.append(sql)
+            self.rowcount = 3
+
+    class Connection:
+        def __init__(self):
+            self.executed = []
+            self.committed = False
+
+        def cursor(self):
+            return Cursor()
+
+        def commit(self):
+            self.committed = True
+
+        def rollback(self):
+            pass
+
+        def close(self):
+            pass
+
+    connection = Connection()
+    monkeypatch.setattr(pymysql, "connect", lambda **_kwargs: connection)
+    instance = SimpleNamespace(
+        resolved_ip=None, host_input="127.0.0.1", port=3306,
+        username="root", password_encrypted=None,
+    )
+    with app.app_context():
+        app.config["SQL_RELEASE_BACKUP_DIR"] = str(tmp_path)
+        result, rollback_path = execute_mysql_with_partial_rollback(
+            instance, database="billing",
+            statements=["UPDATE orders SET status='paid'"], release_id=999,
+            skip_backup_lines={1},
+        )
+
+    assert connection.executed == ["UPDATE orders SET status='paid'"]
+    assert connection.committed is True
+    assert result["statements"][0]["backup_status"] == "skipped_by_operator"
+    assert rollback_path is None
 
 
 class _FakeImmediateMysqlCursor(_FakeRollbackCursor):

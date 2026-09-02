@@ -41,6 +41,7 @@ def ensure_backup_extra_columns():
         "sql_releases",
         "ai_model_configs",
         "data_source_permission_applications",
+        "data_query_operation_configs",
     ]:
         try:
             table_columns[table] = {col["name"] for col in inspector.get_columns(table)}
@@ -77,6 +78,8 @@ def ensure_backup_extra_columns():
         statements.append("ALTER TABLE sql_releases ADD COLUMN db_type VARCHAR(32) NOT NULL DEFAULT 'mysql'")
     if table_columns["ai_model_configs"] and "thinking_enabled" not in table_columns["ai_model_configs"]:
         statements.append("ALTER TABLE ai_model_configs ADD COLUMN thinking_enabled BOOLEAN NOT NULL DEFAULT FALSE")
+    if table_columns["data_query_operation_configs"] and "rule_type" not in table_columns["data_query_operation_configs"]:
+        statements.append("ALTER TABLE data_query_operation_configs ADD COLUMN rule_type VARCHAR(16) NOT NULL DEFAULT 'whitelist'")
     if table_columns["user_cluster_permissions"] and "expires_at" not in table_columns["user_cluster_permissions"]:
         statements.append("ALTER TABLE user_cluster_permissions ADD COLUMN expires_at DATETIME NULL")
     if table_columns.get("data_source_permission_applications") and "requested_expires_at" not in table_columns["data_source_permission_applications"]:
@@ -247,12 +250,33 @@ DATA_QUERY_OPERATIONS_SEED = [
     {"db_type": "redis", "op_key": "ZRANGEBYSCORE", "label": "有序集按分值范围", "sort_order": 11},
 ]
 
+DATA_QUERY_BLACKLIST_SEED = (
+    [{"db_type": db_type, "op_key": op_key, "label": "禁止写入或结构变更", "rule_type": "blacklist", "sort_order": index}
+     for db_type in ("mysql", "postgresql")
+     for index, op_key in enumerate((
+         "INSERT", "UPDATE", "DELETE", "REPLACE", "MERGE", "ALTER", "DROP", "TRUNCATE",
+         "CREATE", "RENAME", "GRANT", "REVOKE", "CALL", "DO", "COPY", "LOCK", "UNLOCK",
+     ), start=1)]
+    + [{"db_type": "mongodb", "op_key": op_key, "label": "禁止写入或管理命令", "rule_type": "blacklist", "sort_order": index}
+       for index, op_key in enumerate((
+           "insert_one", "insert_many", "update_one", "update_many", "delete_one", "delete_many",
+           "replace_one", "insert", "update", "delete", "findandmodify", "drop", "create",
+           "dropdatabase", "renamecollection", "shutdown",
+       ), start=1)]
+    + [{"db_type": "redis", "op_key": op_key, "label": "禁止写入或管理命令", "rule_type": "blacklist", "sort_order": index}
+       for index, op_key in enumerate((
+           "SET", "MSET", "DEL", "UNLINK", "FLUSHALL", "FLUSHDB", "HSET", "HMSET", "HDEL",
+           "LPUSH", "RPUSH", "LPOP", "RPOP", "SADD", "SREM", "ZADD", "ZREM", "EXPIRE",
+           "PERSIST", "RENAME", "EVAL", "EVALSHA", "SCRIPT", "CONFIG", "SHUTDOWN", "MIGRATE", "RESTORE", "XADD",
+       ), start=1)]
+)
+
 
 def seed_data_query_operations():
-    """首次启动写入预置的数据查询允许操作；已存在的不覆盖。"""
+    """写入预置的数据查询白名单和黑名单；已有自定义配置不覆盖。"""
     try:
-        existing_keys = {
-            (row.db_type, row.op_key.lower())
+        existing_by_key = {
+            (row.db_type, row.op_key.lower()): row
             for row in DataQueryOperationConfig.query.all()
         }
     except Exception:
@@ -260,12 +284,21 @@ def seed_data_query_operations():
         return
 
     added = 0
-    for item in DATA_QUERY_OPERATIONS_SEED:
+    for item in DATA_QUERY_OPERATIONS_SEED + DATA_QUERY_BLACKLIST_SEED:
         key = (item["db_type"], item["op_key"].lower())
-        if key in existing_keys:
+        existing = existing_by_key.get(key)
+        if existing:
+            if item.get("rule_type") == "blacklist" and existing.rule_type != "blacklist":
+                existing.rule_type = "blacklist"
+                existing.label = item.get("label") or existing.label
+                existing.enabled = True
+                existing.is_builtin = True
+                existing.sort_order = int(item.get("sort_order") or 0)
+                added += 1
             continue
         row = DataQueryOperationConfig(
             db_type=item["db_type"],
+            rule_type=item.get("rule_type") or "whitelist",
             op_key=item["op_key"],
             label=item.get("label") or "",
             enabled=True,
@@ -273,6 +306,7 @@ def seed_data_query_operations():
             sort_order=int(item.get("sort_order") or 0),
         )
         db.session.add(row)
+        existing_by_key[key] = row
         added += 1
     try:
         if added:

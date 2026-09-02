@@ -34,6 +34,7 @@ from app.services.sql_release_service import (
     validate_mongo_release_statement,
 )
 from app.services.sql_release_review import dispatch_sql_release_review
+from app.services.sql_release_config import is_sql_release_ai_review_enabled
 from app.services.sql_release_agent import execute_sql_release_on_agent
 from app.services.postgresql_backup import list_databases as list_postgresql_databases
 from app.services.postgresql_backup import list_objects as list_postgresql_objects
@@ -58,6 +59,8 @@ def _visible_release_cluster_ids(user):
 
 def _serialize_release(row, user=None, executable_cluster_ids=None, include_rollback_sql=False):
     data = row.to_dict()
+    review_items = data.get("reviews") or []
+    data["review_skipped"] = bool(review_items) and all(item.get("status") == "skipped" for item in review_items)
     data["execution_mode"] = "agent" if row.instance and row.instance.access_mode == "agent" else "server"
     data["execution_agent_name"] = row.instance.probe_agent.name if row.instance and row.instance.probe_agent else None
     can_execute = False
@@ -68,6 +71,10 @@ def _serialize_release(row, user=None, executable_cluster_ids=None, include_roll
             else require_cluster_permission(row.cluster_id, "execute")
         )
         data["can_execute"] = can_execute
+        data["can_skip_review"] = row.status == "review_failed" and (
+            user.role == "admin"
+            or (row.applicant_id == user.id and require_cluster_permission(row.cluster_id, "change"))
+        )
     backups = SqlReleaseRollbackBackup.query.filter_by(release_id=row.id).order_by(
         SqlReleaseRollbackBackup.statement_line
     ).all()
@@ -105,7 +112,12 @@ def _serialize_release(row, user=None, executable_cluster_ids=None, include_roll
         "row_count": item.row_count,
         "created_at": item.created_at.isoformat() if item.created_at else None,
     } for item in backups]
-    data["can_retry_execute"] = False
+    backup_confirmation = (row.execution_result_json or {}).get("backup_confirmation") or {}
+    data["backup_confirmation_required"] = bool(
+        row.status == "backup_failed" and backup_confirmation.get("required")
+    )
+    data["backup_failed_line"] = backup_confirmation.get("line")
+    data["can_retry_execute"] = bool(can_execute and data["backup_confirmation_required"])
     data["can_rollback"] = bool(
         can_execute
         and row.db_type in {"mysql", "postgresql"}
@@ -340,6 +352,8 @@ def submit_sql_release():
         code = 403 if error == "permission denied" else 400
         return error_response(error, code=code)
     user = get_current_user()
+    ai_review_enabled = is_sql_release_ai_review_enabled()
+    skipped_reason = "全局 AI 预审已关闭，工单未执行 AI 审核"
     release = SqlRelease(
         title=str(payload.get("title") or "").strip() or f"{database} SQL 上线",
         applicant_id=user.id,
@@ -348,14 +362,14 @@ def submit_sql_release():
         db_type=cluster.db_type,
         database_name=database,
         sql_text=";\n".join(statements) + ";",
-        status="reviewing",
+        status="reviewing" if ai_review_enabled else "pending",
         ai_passed=False,
         force_submitted=False,
-        ai_summary="AI 初审进行中",
+        ai_summary="AI 初审进行中" if ai_review_enabled else skipped_reason,
         review_json=[{
             "line": index, "sql": statement, "passed": None,
-            "risk_level": None, "reason": "等待 AI 初审",
-            "suggestion": "", "status": "pending",
+            "risk_level": None, "reason": "等待 AI 初审" if ai_review_enabled else skipped_reason,
+            "suggestion": "", "status": "pending" if ai_review_enabled else "skipped",
         } for index, statement in enumerate(statements, start=1)],
     )
     db.session.add(release)
@@ -365,10 +379,12 @@ def submit_sql_release():
         action="sql_release.submit",
         target_type="sql_release",
         target_id=str(release.id),
-        detail={"status": release.status},
+        detail={"status": release.status, "ai_review_enabled": ai_review_enabled},
     )
-    dispatch_sql_release_review(current_app._get_current_object(), release.id)
-    return ok_response(data=_serialize_release(release, user, set()), message="工单已提交，AI 初审正在异步进行", code=201)
+    if ai_review_enabled:
+        dispatch_sql_release_review(current_app._get_current_object(), release.id)
+    message = "工单已提交，AI 初审正在异步进行" if ai_review_enabled else "工单已提交，AI 预审已关闭，已进入待执行"
+    return ok_response(data=_serialize_release(release, user, set()), message=message, code=201)
 
 
 @bp.get("/<int:release_id>/review-progress")
@@ -403,6 +419,40 @@ def force_submit_sql_release(release_id):
         detail={"status": release.status, "ai_passed": False},
     )
     return ok_response(data=_serialize_release(release, user), message="已确认影响，工单已强制提交")
+
+
+@bp.post("/<int:release_id>/skip-review")
+@require_menu_permission("sql_release_apply")
+def skip_failed_sql_release_review(release_id):
+    release = SqlRelease.query.get_or_404(release_id)
+    user = get_current_user()
+    if user.role != "admin" and release.applicant_id != user.id:
+        return error_response("permission denied", code=403)
+    if not require_cluster_permission(release.cluster_id, "change"):
+        return error_response("permission denied", code=403)
+    if release.status != "review_failed":
+        return error_response("仅 AI 预审异常的工单可以跳过审核", code=409)
+
+    reason = "AI 预审异常，申请人已确认跳过审核"
+    release.review_json = [{
+        **dict(item),
+        "passed": None,
+        "status": "skipped",
+        "reason": reason,
+        "suggestion": "",
+    } for item in (release.review_json or [])]
+    release.ai_passed = False
+    release.ai_summary = reason
+    release.status = "pending"
+    db.session.commit()
+    log_audit(
+        user_id=user.id,
+        action="sql_release.review.skip",
+        target_type="sql_release",
+        target_id=str(release.id),
+        detail={"status": release.status, "previous_status": "review_failed", "reason": reason},
+    )
+    return ok_response(data=_serialize_release(release, user), message="已跳过 AI 预审，工单进入待执行")
 
 
 
@@ -488,8 +538,32 @@ def execute_sql_release(release_id):
     user = get_current_user()
     if user.role != "admin" and not require_cluster_permission(release.cluster_id, "execute"):
         return error_response("permission denied", code=403)
-    confirm_risk = (request.get_json(silent=True) or {}).get("confirm_risk") is True
-    if release.status == "review_rejected":
+    payload = request.get_json(silent=True) or {}
+    confirm_risk = payload.get("confirm_risk") is True
+    confirm_skip_backup = payload.get("confirm_skip_backup") is True
+    resume_line = None
+    previous_results = []
+    if release.status == "backup_failed":
+        confirmation = (release.execution_result_json or {}).get("backup_confirmation") or {}
+        expected_line = int(confirmation.get("line") or 0)
+        try:
+            requested_line = int(payload.get("skip_backup_line") or 0)
+        except (TypeError, ValueError):
+            requested_line = 0
+        if not confirmation.get("required") or expected_line <= 0:
+            return error_response("工单没有可继续的备份失败语句", code=409)
+        if not confirm_skip_backup or requested_line != expected_line:
+            return error_response(
+                f"第 {expected_line} 条语句备份失败，需确认跳过备份后继续执行",
+                code=409,
+                data=_serialize_release(release, user, include_rollback_sql=True),
+            )
+        resume_line = expected_line
+        previous_results = [
+            dict(item) for item in ((release.execution_result_json or {}).get("statements") or [])
+            if int(item.get("line") or 0) < resume_line and item.get("status") == "success"
+        ]
+    elif release.status == "review_rejected":
         if not confirm_risk:
             return error_response("AI 初审未通过，执行前必须明确确认风险", code=409)
         release.force_submitted = True
@@ -502,6 +576,7 @@ def execute_sql_release(release_id):
     if instance.db_type != db_type:
         return error_response("release instance database type mismatch", code=400)
     statements = split_sql_statements(release.sql_text)
+    execution_statements = statements[resume_line - 1:] if resume_line else statements
     release.status = "executing"
     db.session.commit()
     backup_path = None
@@ -520,28 +595,57 @@ def execute_sql_release(release_id):
             )
             backup_path = None
         elif db_type == "mysql":
-            result, backup_path = execute_mysql_with_partial_rollback(instance, release.database_name, statements, release.id)
+            result, backup_path = execute_mysql_with_partial_rollback(
+                instance, release.database_name, execution_statements, release.id,
+                skip_backup_lines={resume_line} if resume_line else None,
+                line_offset=resume_line or 1,
+            )
         elif db_type == "mongodb":
             result, backup_path = execute_mongodb_with_partial_rollback(
                 instance, release.database_name, statements, release.id,
                 seed_nodes=_cluster_seed_nodes(db_type, release.cluster_id),
             )
         elif db_type == "postgresql":
-            result, backup_path = execute_postgresql_with_partial_rollback(instance, release.database_name, statements, release.id)
+            result, backup_path = execute_postgresql_with_partial_rollback(
+                instance, release.database_name, execution_statements, release.id,
+                skip_backup_lines={resume_line} if resume_line else None,
+                line_offset=resume_line or 1,
+            )
         else:
             raise ValueError("unsupported database type")
-        release.rollback_backup_path = backup_path
+        if previous_results:
+            merged_statements = sorted(
+                [*previous_results, *(result.get("statements") or [])],
+                key=lambda item: int(item.get("line") or 0),
+            )
+            result["statements"] = merged_statements
+            result["statement_count"] = len(merged_statements)
+            result["affected_rows"] = sum(
+                max(0, int(item.get("affected_rows") or 0)) for item in merged_statements
+            )
+        release.rollback_backup_path = backup_path or release.rollback_backup_path
         release.status = "success"
         release.execution_result_json = {**result, "execution_source": execution_source}
     except Exception as exc:
         generated_rollback_path = getattr(exc, "rollback_path", None)
         if generated_rollback_path:
             backup_path = generated_rollback_path
+        db.session.refresh(release)
+        if generated_rollback_path:
             release.rollback_backup_path = generated_rollback_path
-        release.status = "failed"
+        is_backup_failure = bool(getattr(exc, "backup_failed", False) and getattr(exc, "line", None))
+        release.status = "backup_failed" if is_backup_failure else "failed"
         execution_result = dict(getattr(exc, "result", None) or release.execution_result_json or {})
         execution_result["error"] = str(exc)
         execution_result["execution_source"] = execution_source
+        if is_backup_failure:
+            execution_result["backup_confirmation"] = {
+                "required": True,
+                "line": int(exc.line),
+                "message": str(exc),
+            }
+        else:
+            execution_result.pop("backup_confirmation", None)
         release.execution_result_json = execution_result
     release.executed_by = user.id
     release.executed_at = datetime.utcnow()
@@ -552,7 +656,16 @@ def execute_sql_release(release_id):
         "execution_source": execution_source,
         "agent_id": instance.probe_agent_id if execution_source == "agent" else None,
         "database_user": instance.username,
+        "skipped_backup_line": resume_line,
     })
+    if release.status == "backup_failed":
+        error_detail = str((release.execution_result_json or {}).get("error") or "备份失败").strip()
+        line = int(((release.execution_result_json or {}).get("backup_confirmation") or {}).get("line") or 0)
+        return error_response(
+            f"第 {line} 条语句备份失败，是否允许该语句跳过备份并继续执行：{error_detail}",
+            code=409,
+            data=_serialize_release(release, user, include_rollback_sql=True),
+        )
     if release.status == "failed":
         error_detail = str((release.execution_result_json or {}).get("error") or "").strip()
         if db_type == "mongodb":

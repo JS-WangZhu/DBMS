@@ -410,6 +410,9 @@ function clearAttachmentUrls() {
 function onClosed() {
   clearPendingImages();
   clearAttachmentUrls();
+  // Blob URLs are revoked above. Drop the selection as well so reopening the
+  // dialog selects the first row again and downloads fresh attachment blobs.
+  selected.value = null;
 }
 
 onBeforeUnmount(() => {

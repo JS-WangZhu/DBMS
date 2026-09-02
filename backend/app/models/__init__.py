@@ -32,6 +32,7 @@ from app.models.notify_target import BackupNotifyTarget
 from app.models.s3_storage_config import S3StorageConfig
 from app.models.sso_config import SsoConfig
 from app.models.sql_release import SqlRelease, SqlReleaseRollbackBackup
+from app.models.sql_release_config import SqlReleaseConfig
 from app.models.task_management import ScheduledTask, ScheduledTaskRun
 from app.models.user import User
 from app.models.user_permission import (
@@ -88,6 +89,7 @@ __all__ = [
     "SsoConfig",
     "SqlRelease",
     "SqlReleaseRollbackBackup",
+    "SqlReleaseConfig",
     "ScheduledTask",
     "ScheduledTaskRun",
     "User",
