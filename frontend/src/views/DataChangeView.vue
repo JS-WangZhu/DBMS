@@ -215,7 +215,6 @@
             <el-button type="danger" :loading="running" @click="runChange">
               <el-icon><VideoPlay /></el-icon>
               <span>执行变更</span>
-              <span class="shortcut-hint">Ctrl+Enter</span>
             </el-button>
             <el-button v-if="running" type="warning" plain @click="cancelRunningChange">
               <el-icon><CircleClose /></el-icon>
@@ -1054,15 +1053,6 @@ useTabActivationRefresh(reloadOptions);
 .change-tag { font-weight: 600; }
 .current-db { display: inline-flex; align-items: center; gap: 6px; color: #334155; font-size: 13px; font-weight: 500; }
 .toolbar-right { display: flex; align-items: center; gap: 8px; }
-.shortcut-hint {
-  margin-left: 6px;
-  padding: 1px 6px;
-  border-radius: 4px;
-  background: rgba(255, 255, 255, 0.22);
-  font-size: 11px;
-  font-weight: 400;
-}
-
 .editor-area { padding: 10px 14px 6px; }
 .editor-hint { margin-top: 6px; color: #94a3b8; font-size: 12px; }
 .editor-hint.danger-hint { color: #dc2626; }

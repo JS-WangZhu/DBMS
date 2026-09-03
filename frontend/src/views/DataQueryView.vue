@@ -216,7 +216,6 @@
             <el-button type="primary" :loading="running" @click="runQuery">
               <el-icon><VideoPlay /></el-icon>
               <span>执行</span>
-              <span class="shortcut-hint">Ctrl+Enter</span>
             </el-button>
             <el-button
               v-if="form.db_type !== 'redis'"
@@ -1772,15 +1771,6 @@ useTabActivationRefresh(reloadOptions);
   display: flex;
   align-items: center;
   gap: 8px;
-}
-
-.shortcut-hint {
-  margin-left: 6px;
-  padding: 1px 6px;
-  border-radius: 4px;
-  background: rgba(255, 255, 255, 0.22);
-  font-size: 11px;
-  font-weight: 400;
 }
 
 /* ============ AI 分析按钮 ============ */
