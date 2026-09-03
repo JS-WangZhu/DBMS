@@ -1763,25 +1763,25 @@ def _build_mongo_runcommand(mongo_command: str):
 
     if method == "aggregate":
         pipeline = _convert_mongo_arg(args[0]) if args else []
-        return {"aggregate": collection_name, "pipeline": pipeline, "cursor": {}}
+        return {"aggregate": collection_name, "pipeline": _mongo_to_bson(pipeline), "cursor": {}}
 
     if method == "find":
         query = _convert_mongo_arg(args[0]) if args else {}
-        return {"find": collection_name, "filter": query, "limit": QUERY_ROW_LIMIT}
+        return {"find": collection_name, "filter": _mongo_to_bson(query), "limit": QUERY_ROW_LIMIT}
 
     if method == "findone":
         query = _convert_mongo_arg(args[0]) if args else {}
-        return {"find": collection_name, "filter": query, "limit": 1}
+        return {"find": collection_name, "filter": _mongo_to_bson(query), "limit": 1}
 
     if method == "count":
         query = _convert_mongo_arg(args[0]) if args else {}
-        return {"count": collection_name, "query": query}
+        return {"count": collection_name, "query": _mongo_to_bson(query)}
 
     if method == "distinct":
         if not args:
             return None
         field = _convert_mongo_arg(args[0])
         query = _convert_mongo_arg(args[1]) if len(args) > 1 else {}
-        return {"distinct": collection_name, "key": field, "query": query}
+        return {"distinct": collection_name, "key": field, "query": _mongo_to_bson(query)}
 
     return None
