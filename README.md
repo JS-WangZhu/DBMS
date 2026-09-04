@@ -2,6 +2,8 @@
 
 DBMS 是一个统一数据库管理平台，支持对 MySQL、Redis、Doris、MongoDB 等主流数据库进行集中化管理。通过本平台，运维人员可以高效完成数据库实例录入、状态监控、备份管理、权限控制等日常运维工作。
 
+在线演示：[https://dbms.iwangzhu.cn/](https://dbms.iwangzhu.cn/)
+
 ## 主要功能
 
 ### 数据库管理
