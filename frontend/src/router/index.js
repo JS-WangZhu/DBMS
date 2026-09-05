@@ -43,6 +43,7 @@ import MysqlInstanceDetailView from "../views/MysqlInstanceDetailView.vue";
 import MongoInstanceDetailView from "../views/MongoInstanceDetailView.vue";
 import MysqlSessionProbeView from "../views/MysqlSessionProbeView.vue";
 import MongoSessionProbeView from "../views/MongoSessionProbeView.vue";
+import PostgreSQLSessionProbeView from "../views/PostgreSQLSessionProbeView.vue";
 import MongoConnectionManageView from "../views/MongoConnectionManageView.vue";
 import RedisConnectionManageView from "../views/RedisConnectionManageView.vue";
 import RedisInstanceDetailView from "../views/RedisInstanceDetailView.vue";
@@ -105,6 +106,7 @@ const routes = [
       { path: "/databases/postgresql", redirect: "/databases/postgresql/instances" },
       { path: "/databases/postgresql/clusters", component: ClusterManageView, meta: { title: "PostgreSQL \u96c6\u7fa4\u7ba1\u7406", dbType: "postgresql", dbLabel: "PostgreSQL" } },
       { path: "/databases/postgresql/instances", component: InstanceManageView, meta: { title: "PostgreSQL \u5b9e\u4f8b\u7ba1\u7406", dbType: "postgresql", dbLabel: "PostgreSQL" } },
+      { path: "/databases/postgresql/session-probe", component: PostgreSQLSessionProbeView, meta: { title: "PostgreSQL 会话探测", dbType: "postgresql", dbLabel: "PostgreSQL" } },
 
       { path: "/databases/doris", redirect: "/databases/doris/instances" },
       { path: "/databases/doris/clusters", component: ClusterManageView, meta: { title: "Doris 集群管理", dbType: "doris", dbLabel: "Doris" } },

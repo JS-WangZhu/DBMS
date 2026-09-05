@@ -34,7 +34,7 @@
           </el-menu-item>
         </el-sub-menu>
 
-        <el-sub-menu v-if="hasAnyMenu(['mysql_instances','mysql_instance_detail','mysql_clusters','mysql_connections','mysql_session_probe','mongodb_instances','mongodb_instance_detail','mongodb_clusters','mongodb_connections','mongodb_session_probe','redis_instances','redis_instance_detail','redis_clusters','redis_connections','postgresql_instances','postgresql_clusters','doris_instances','doris_clusters'])" index="service-manage">
+        <el-sub-menu v-if="hasAnyMenu(['mysql_instances','mysql_instance_detail','mysql_clusters','mysql_connections','mysql_session_probe','mongodb_instances','mongodb_instance_detail','mongodb_clusters','mongodb_connections','mongodb_session_probe','redis_instances','redis_instance_detail','redis_clusters','redis_connections','postgresql_instances','postgresql_clusters','postgresql_session_probe','doris_instances','doris_clusters'])" index="service-manage">
           <template #title>
             <el-icon><Menu /></el-icon>
             <span>服务管理</span>
@@ -116,7 +116,7 @@
             </el-menu-item>
           </el-sub-menu>
 
-          <el-sub-menu v-if="hasAnyMenu(['postgresql_instances','postgresql_clusters'])" index="db-postgresql">
+          <el-sub-menu v-if="hasAnyMenu(['postgresql_instances','postgresql_clusters','postgresql_session_probe'])" index="db-postgresql">
             <template #title>
               <el-icon class="db-brand-icon"><PostgreSQLIcon /></el-icon>
               <span>PostgreSQL</span>
@@ -128,6 +128,10 @@
             <el-menu-item v-if="hasMenu('postgresql_clusters')" index="/databases/postgresql/clusters">
               <el-icon><Coin /></el-icon>
               <span>&#38598;&#32676;&#31649;&#29702;</span>
+            </el-menu-item>
+            <el-menu-item v-if="hasMenu('postgresql_session_probe')" index="/databases/postgresql/session-probe">
+              <el-icon><View /></el-icon>
+              <span>会话探测</span>
             </el-menu-item>
           </el-sub-menu>
 
@@ -652,6 +656,7 @@ const routePermissionMap = {
   "/databases/redis/connections": "redis_connections",
   "/databases/postgresql/instances": "postgresql_instances",
   "/databases/postgresql/clusters": "postgresql_clusters",
+  "/databases/postgresql/session-probe": "postgresql_session_probe",
   "/databases/doris/instances": "doris_instances",
   "/databases/doris/clusters": "doris_clusters",
   "/diagnosis/parameter-check": "diagnosis_parameter_check",
@@ -756,6 +761,7 @@ const tabIconMap = {
   "/databases/redis/connections": Promotion,
   "/databases/postgresql/instances": PostgreSQLIcon,
   "/databases/postgresql/clusters": Coin,
+  "/databases/postgresql/session-probe": View,
   "/databases/doris/instances": DorisIcon,
   "/databases/doris/clusters": Histogram,
   "/service/inspection": CircleCheck,

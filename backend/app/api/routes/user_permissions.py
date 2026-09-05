@@ -49,6 +49,7 @@ MENU_CATALOG = [
     {"key": "redis_connections", "label": "Redis 连接管理"},
     {"key": "postgresql_instances", "label": "PostgreSQL \u5b9e\u4f8b\u7ba1\u7406"},
     {"key": "postgresql_clusters", "label": "PostgreSQL \u96c6\u7fa4\u7ba1\u7406"},
+    {"key": "postgresql_session_probe", "label": "PostgreSQL 会话探测"},
     {"key": "doris_instances", "label": "Doris 实例管理"},
     {"key": "doris_clusters", "label": "Doris 集群管理"},
     {"key": "diagnosis_parameter_check", "label": "参数检查"},

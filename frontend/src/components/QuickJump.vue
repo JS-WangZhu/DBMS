@@ -65,7 +65,7 @@ const iconMap = {
   mongodb_instances: MongoIcon, mongodb_instance_detail: TrendCharts, mongodb_clusters: FolderOpened, mongodb_connections: Link,
   mongodb_session_probe: View,
   redis_instances: RedisIcon, redis_instance_detail: TrendCharts, redis_clusters: Coin, redis_connections: Promotion,
-  postgresql_instances: PostgreSQLIcon, postgresql_clusters: Coin,
+  postgresql_instances: PostgreSQLIcon, postgresql_clusters: Coin, postgresql_session_probe: View,
   doris_instances: DorisIcon, doris_clusters: Histogram,
   diagnosis_parameter_check: SetUp, diagnosis_slow_query: TrendCharts,
   inspection_manage: CircleCheck, inspection_param_config: Setting,

@@ -202,16 +202,18 @@ function clearTimers() {
   countdownTimer = null;
 }
 
-function clearProbeState() {
+function clearProbeState(keepOutput = false) {
   clearTimers();
   probeToken.value = "";
   expiresAt.value = null;
   remainingSeconds.value = 0;
-  sessions.value = [];
-  hiddenKilledIds.value = new Set();
   refreshQueued = false;
-  collectedAt.value = null;
   canKill.value = false;
+  if (!keepOutput) {
+    sessions.value = [];
+    hiddenKilledIds.value = new Set();
+    collectedAt.value = null;
+  }
 }
 
 function updateCountdown() {
@@ -226,6 +228,7 @@ function updateCountdown() {
 async function startProbe() {
   if (!instanceId.value || starting.value) return;
   starting.value = true;
+  clearProbeState();
   try {
     const response = await startMysqlSessionProbe(instanceId.value);
     const data = response.data?.data || {};
@@ -256,6 +259,7 @@ async function fetchSessions(force = false) {
   try {
     const response = await getMysqlProcesslist(token);
     const data = response.data?.data || {};
+    if (token !== probeToken.value) return;
     const nextSessions = data.sessions || [];
     const returnedIds = new Set(nextSessions.map((item) => item.id));
     hiddenKilledIds.value = new Set(
@@ -265,6 +269,7 @@ async function fetchSessions(force = false) {
     collectedAt.value = data.collected_at || null;
     expiresAt.value = data.expires_at || expiresAt.value;
   } catch (error) {
+    if (token !== probeToken.value) return;
     if ([403, 410, 502].includes(error.response?.status)) clearProbeState();
     ElMessage.error(error.response?.data?.message || "抓取 Processlist 失败");
   } finally {
@@ -280,10 +285,10 @@ async function stopProbe(showMessage = false) {
   const token = probeToken.value;
   if (!token || stopping.value) return;
   stopping.value = true;
-  clearProbeState();
+  clearProbeState(true);
   try {
     await stopMysqlSessionProbe(token);
-    if (showMessage) ElMessage.success("会话探测连接已关闭");
+    if (showMessage) ElMessage.success("会话探测连接已关闭，已保留当前输出");
   } catch (error) {
     if (showMessage && error.response?.status !== 410) {
       ElMessage.warning(error.response?.data?.message || "连接已在服务端关闭");

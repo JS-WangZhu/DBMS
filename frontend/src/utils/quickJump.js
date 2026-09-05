@@ -23,6 +23,7 @@ export const QUICK_JUMP_MENUS = [
   menu("redis_connections", "/databases/redis/connections", "Redis 连接管理", "服务管理 / Redis", "redis lian jie guan li"),
   menu("postgresql_instances", "/databases/postgresql/instances", "PostgreSQL 实例管理", "服务管理 / PostgreSQL", "postgresql shi li guan li", ["pgsql", "pg"]),
   menu("postgresql_clusters", "/databases/postgresql/clusters", "PostgreSQL 集群管理", "服务管理 / PostgreSQL", "postgresql ji qun guan li", ["pgsql", "pg"]),
+  menu("postgresql_session_probe", "/databases/postgresql/session-probe", "PostgreSQL 会话探测", "服务管理 / PostgreSQL", "postgresql hui hua tan ce", ["pgsql", "pg"]),
   menu("doris_instances", "/databases/doris/instances", "Doris 实例管理", "服务管理 / Doris", "doris shi li guan li"),
   menu("doris_clusters", "/databases/doris/clusters", "Doris 集群管理", "服务管理 / Doris", "doris ji qun guan li"),
   menu("diagnosis_parameter_check", "/diagnosis/parameter-check", "参数检查", "诊断调优", "can shu jian cha", ["参数采集", "parameter"]),

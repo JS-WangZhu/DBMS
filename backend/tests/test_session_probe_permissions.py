@@ -144,3 +144,42 @@ def test_mongodb_session_probe_requires_query_and_change_permissions(app, client
     assert client.post(
         "/api/v1/mongodb/session-probes/mongo-token/kill", json={"operation_id": "op-1"}, headers=headers
     ).status_code == 200
+
+
+def test_postgresql_session_probe_requires_query_and_change_permissions(app, client, monkeypatch):
+    from app.api.routes import postgresql as postgresql_routes
+
+    with app.app_context():
+        _user_id, _cluster_id, instance_id, denied_instance_id, permission_id = _seed_probe_user(
+            "postgresql", "postgresql-probe-user"
+        )
+    headers = _login(client, "postgresql-probe-user")
+
+    permissions = client.get("/api/v1/users/permissions/me", headers=headers)
+    assert "postgresql_session_probe" in permissions.get_json()["data"]["menu_keys"]
+    denied = client.post(
+        "/api/v1/postgresql/session-probes", json={"instance_id": denied_instance_id}, headers=headers
+    )
+    assert denied.status_code == 403
+
+    monkeypatch.setattr(postgresql_routes, "start_probe_session", lambda **_kwargs: _started_payload("postgresql-token"))
+    monkeypatch.setattr(postgresql_routes, "get_probe_instance_id", lambda **_kwargs: instance_id)
+    monkeypatch.setattr(postgresql_routes, "fetch_sessions", lambda **_kwargs: {"sessions": []})
+    monkeypatch.setattr(postgresql_routes, "terminate_backend", lambda **_kwargs: {"terminated": True})
+
+    started = client.post("/api/v1/postgresql/session-probes", json={"instance_id": instance_id}, headers=headers)
+    assert started.status_code == 201
+    assert started.get_json()["data"]["can_kill"] is False
+    assert client.get("/api/v1/postgresql/session-probes/postgresql-token/sessions", headers=headers).status_code == 200
+    assert client.post(
+        "/api/v1/postgresql/session-probes/postgresql-token/kill", json={"process_id": 12}, headers=headers
+    ).status_code == 403
+
+    with app.app_context():
+        permission = db.session.get(UserClusterPermission, permission_id)
+        permission.can_change = True
+        db.session.commit()
+
+    assert client.post(
+        "/api/v1/postgresql/session-probes/postgresql-token/kill", json={"process_id": 12}, headers=headers
+    ).status_code == 200

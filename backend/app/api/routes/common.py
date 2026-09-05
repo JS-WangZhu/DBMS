@@ -155,6 +155,7 @@ def get_data_source_inherited_menu_keys(user_id: int):
     menu_by_db_type = {
         "mysql": "mysql_session_probe",
         "mongodb": "mongodb_session_probe",
+        "postgresql": "postgresql_session_probe",
     }
     return {menu_by_db_type[db_type] for db_type in db_types if db_type in menu_by_db_type}
 

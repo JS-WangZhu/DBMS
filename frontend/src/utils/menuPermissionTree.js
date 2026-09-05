@@ -5,7 +5,7 @@ const MENU_PERMISSION_STRUCTURE = [
     { key: "mysql", label: "MySQL", children: ["mysql_instances", "mysql_instance_detail", "mysql_clusters", "mysql_connections", "mysql_session_probe"] },
     { key: "mongodb", label: "MongoDB", children: ["mongodb_instances", "mongodb_instance_detail", "mongodb_clusters", "mongodb_connections", "mongodb_session_probe"] },
     { key: "redis", label: "Redis", children: ["redis_instances", "redis_instance_detail", "redis_clusters", "redis_connections"] },
-    { key: "postgresql", label: "PostgreSQL", children: ["postgresql_instances", "postgresql_clusters"] },
+    { key: "postgresql", label: "PostgreSQL", children: ["postgresql_instances", "postgresql_clusters", "postgresql_session_probe"] },
     { key: "doris", label: "Doris", children: ["doris_instances", "doris_clusters"] },
   ] },
   { key: "diagnosis_tuning", label: "诊断调优", children: ["diagnosis_parameter_check", "diagnosis_slow_query"] },
